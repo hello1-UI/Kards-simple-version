@@ -1,0 +1,305 @@
+
+### 步兵班 -> 87. GRENADIER | 第 87 掷弹兵团
+  Germany / infantry / 2费 2/2 稀有=Standard
+  旗标: 无
+  官方文本(中): 你的反制指令被触发时，获得 +2+2。
+
+### 装甲掷弹兵 -> 5. PANZERGRENADIER | 第 5 装甲掷弹兵团
+  Germany / infantry / 2费 2/2 稀有=Standard
+  旗标: pincer
+  官方文本(中): 钳击：奋战
+
+### 山地猎兵 -> 136. GEBIRGSJÄGER | 第 136 山地猎兵团
+  Germany / infantry / 3费 4/3 稀有=Standard
+  旗标: alpine
+  官方文本(中): (空)
+
+### Bf-109战斗机 -> ME BF 109 E | Bf 109E 埃米尔
+  Germany / fighter / 3费 3/4 稀有=Standard
+  旗标: 无
+  官方文本(中): (空)
+
+### 四号坦克 -> PANZER IV F2 | 四号坦克 F2 型
+  Germany / tank / 6费 5/5 稀有=Limited
+  旗标: 无
+  官方文本(中): 部署：使一个单位撤退。
+
+### 88毫米炮 -> 88 mm FLAK | 88毫米高射炮
+  Germany / artillery / 6费 3/4 稀有=Limited
+  旗标: ambush
+  官方文本(中): 对战空军和坦克时，造成双倍伤害。
+
+### 三号突击炮 -> STUG III-F | 三号突击炮 F 型
+  Germany / tank / 2费 2/3 稀有=Standard
+  旗标: smokescreen
+  官方文本(中): 对战坦克时，造成双倍伤害。
+
+### 斯图卡俯冲轰炸机 -> JU 87 B STUKA | 斯图卡 B
+  Germany / bomber / 4费 3/2 稀有=Standard
+  旗标: 无
+  官方文本(中): 此单位对敌方总部造成伤害时，弃掉对手一张手牌。
+
+### 虎式坦克 -> TIGER I-H | 虎式坦克 H 型
+  Germany / tank / 8费 8/8 稀有=Special
+  旗标: heavyArmor2
+  官方文本(中): 无法被压制。
+
+### 闪电战 -> BLITZKRIEG | 闪电战
+  Germany / order / 3费 -/- 稀有=Limited
+  旗标: 无
+  官方文本(中): 在本回合中，前线的友方所有单位 +3 攻击力，-1 行动花费。
+
+### 动员兵 -> CONSCRIPTS | 征召兵
+  Soviet / order / 2费 -/- 稀有=Standard
+  旗标: 无
+  官方文本(中): (空)
+
+### 近卫步兵 -> 173rd GUARD RIFLES | 近卫步兵第 173 团
+  Soviet / infantry / 1费 1/1 稀有=Standard
+  旗标: blitz
+  官方文本(中): 你的总部受到伤害时，获得  +1 攻击力。
+
+### 拉-7战斗机 -> LA-5 | 拉-5
+  Soviet / fighter / 4费 4/4 稀有=Limited
+  旗标: 无
+  官方文本(中): (空)
+
+### T-34坦克 -> T-34 1942 | T-34 1942
+  Soviet / tank / 5费 5/5 稀有=Standard
+  旗标: blitz
+  官方文本(中): (空)
+
+### SU-85坦克歼击车 -> SU-85 | SU-85
+  Soviet / tank / 4费 5/3 稀有=Standard
+  旗标: 无
+  官方文本(中): 对战坦克时，造成双倍伤害。
+
+### 伊尔-2攻击机 -> SHTURMOVIK Il-2M | 伊尔-2M
+  Soviet / bomber / 4费 4/3 稀有=Standard
+  旗标: heavyArmor1
+  官方文本(中): 此单位攻击并消灭一个单位后，溢出的伤害会转移到敌方总部。
+
+### 喀秋莎 -> KATYUSHA | 喀秋莎
+  Soviet / artillery / 2费 1/2 稀有=Limited
+  旗标: blitz
+  官方文本(中): 此单位攻击时，造成 0-1 点的额外伤害。
+
+### IS-2重型坦克 -> IOSEF STALIN II | IS-2
+  Soviet / tank / 10费 8/8 稀有=Elite
+  旗标: heavyArmor2
+  官方文本(中): 如果此单位被返回你的手中，将一张复制增加至支援阵线。
+
+### 为了祖国 -> URA! | 呜啦！
+  Soviet / order / 3费 -/- 稀有=Special
+  旗标: 无
+  官方文本(中): 在本回合中，你的所有苏联单位 +3 攻击力，溢出的伤害会转移到敌方总部。
+
+### 游骑兵 -> 75th RANGERS | 第 75 游骑兵团
+  USA / infantry / 5费 4/6 稀有=Standard
+  旗标: 无
+  官方文本(中): 部署：使一个单位的行动花费减为 0。
+
+### 伞兵连 -> 506th AIRBORNE | 第 506 空降步兵团
+  USA / infantry / 1费 2/2 稀有=Standard
+  旗标: 无
+  官方文本(中): (空)
+
+### 海军陆战队 -> 1st MARINES | 第 1 陆战团
+  USA / infantry / 3费 3/4 稀有=Limited
+  旗标: blitz
+  官方文本(中): 此单位进入前线后，你的总部具有烟幕，直到你的下回合开始。
+
+### 谢尔曼坦克 -> M4 SHERMAN | M4 谢尔曼
+  USA / tank / 4费 4/4 稀有=Standard
+  旗标: 无
+  官方文本(中): 部署：如果你在前线有美军单位，抽两张牌。
+
+### P-51野马 -> P-51 MUSTANG | P-51 野马
+  USA / fighter / 6费 6/4 稀有=Limited
+  旗标: 无
+  官方文本(中): 部署：随机对一个敌方空军造成 4 点伤害。
+
+### M10狼獾 -> M10 WOLVERINE | M10 狼獾
+  USA / tank / 2费 3/2 稀有=Special
+  旗标: 无
+  官方文本(中): 消灭任何受到其伤害的敌方坦克。
+
+### 远程榴弹炮 -> LONG TOM | 长腿汤姆
+  USA / artillery / 5费 2/4 稀有=Elite
+  旗标: 无
+  官方文本(中): 此单位攻击时，造成 3 点伤害，随机分配至敌方所有目标。
+
+### B-17空中堡垒 -> B-17F | B-17F 飞行堡垒
+  USA / bomber / 10费 6/6 稀有=Elite
+  旗标: blitz, heavyArmor1
+  官方文本(中): 无法成为敌方指令的目标。
+
+### 步兵增援 -> FRESH RECRUITS | 新兵入伍
+  USA / countermeasure / 2费 -/- 稀有=Standard
+  旗标: 无
+  官方文本(中): 一个友方单位被消灭时，随机使一个友方单位获得 +2+3。
+
+### 本土防卫军 -> ATS | 女子辅助军
+  Britain / order / 4费 -/- 稀有=Elite
+  旗标: 无
+  官方文本(中): 敌方总部获得：“在本回合中，如果此总部受到 3 点或以上的伤害，你抽一张牌。”
+
+### 特种空勤团 -> No. 3 COMMANDO | 第 3 突击队
+  Britain / infantry / 3费 3/3 稀有=Special
+  旗标: 无
+  官方文本(中): 双方攻击力高于或等于 5 的单位都无法攻击。
+
+### 廓尔喀步枪团 -> 1st GURKHA RIFLES | 廓尔喀第 1 团
+  Britain / infantry / 2费 1/4 稀有=Special
+  旗标: fury
+  官方文本(中): 部署：在本回合中，你每使用过一个指令，则获得一次 +1 攻击力。
+
+### 喷火战斗机 -> SPITFIRE Mk Ia | 喷火 Mk IA
+  Britain / fighter / 5费 5/5 稀有=Standard
+  旗标: 无
+  官方文本(中): (空)
+
+### 克伦威尔坦克 -> CROMWELL Mk IV | 克伦威尔 Mk IV
+  Britain / tank / 4费 3/6 稀有=Special
+  旗标: heavyArmor1
+  官方文本(中): 一个被压制的敌方单位被消灭时，此单位获得 +2 攻击力。
+
+### 德哈维兰蚊式 -> MOSQUITO FB Mk VI | 蚊式 Mk VI
+  Britain / fighter / 6费 4/4 稀有=Elite
+  旗标: 无
+  官方文本(中): 部署：对一个敌方单位造成 3 点伤害。
+
+### 丘吉尔坦克 -> CHURCHILL Mk IV | 丘吉尔 Mk IV
+  Britain / tank / 5费 2/6 稀有=Standard
+  旗标: guard, heavyArmor1
+  官方文本(中): (空)
+
+### 兰开斯特轰炸机 -> LANCASTER Mk I | 兰开斯特 Mk I
+  Britain / bomber / 9费 7/4 稀有=Limited
+  旗标: blitz
+  官方文本(中): (空)
+
+### 战地医疗 -> CUP OF TEA | 一杯茶
+  Britain / order / 1费 -/- 稀有=Standard
+  旗标: 无
+  官方文本(中): 你的所有英军单位获得 +2 防御力。
+
+### 皇家海军炮击 -> NAVAL SUPPORT | 海军支援
+  Britain / order / 2费 -/- 稀有=Standard
+  旗标: 无
+  官方文本(中): 将一个单位的攻击力等同于其防御力。
+
+### 总动员 -> DOUBLE STRENGTH | 双倍力量
+  Britain / order / 1费 -/- 稀有=Special
+  旗标: 无
+  官方文本(中): 随机复制一张手中的指令牌，并将其洗入卡组。
+
+### 步兵联队 -> 6th INFANTRY REGIMENT | 名古屋联队
+  Japan / infantry / 2费 2/2 稀有=Standard
+  旗标: fury
+  官方文本(中): (空)
+
+### 九五式轻战车 -> TYPE 95 Ha-Go | 九五式轻战车
+  Japan / tank / 2费 2/2 稀有=Standard
+  旗标: 无
+  官方文本(中): 双方玩家每次使用指令时，其总部受到 1 点伤害。
+
+### 丛林渗透队 -> 2nd RAIDING BRIGADE | 第 2 挺进旅团
+  Japan / infantry / 3费 2/2 稀有=Elite
+  旗标: blitz
+  官方文本(中): 部署：消灭一个攻击力低于或等于 2 的敌方单位。
+
+### 零式战斗机 -> A6M2 ZERO | A6M2 零战二二型
+  Japan / fighter / 5费 4/4 稀有=Standard
+  旗标: ambush
+  官方文本(中): 部署：造成 1 点伤害。
+
+### 海军特别陆战队 -> 1st YOKOSUKA | 横须贺第 1 陆战队
+  Japan / infantry / 2费 1/3 稀有=Elite
+  旗标: blitz, fury
+  官方文本(中): 部署：你每控制一个行动花费为 0 的单位，便获得一次 +1 攻击力。
+
+### 隼式战斗机 -> Ki-43 HAYABUSA | Ki-43 一式战 隼
+  Japan / fighter / 4费 3/3 稀有=Standard
+  旗标: 无
+  官方文本(中): 亡计：对敌方总部造成 2 点伤害。
+
+### 九七式坦克 -> TYPE 97 Chi-Ha | 九七式中战车
+  Japan / tank / 3费 3/3 稀有=Standard
+  旗标: 无
+  官方文本(中): 友方所有步兵 +1 攻击力。
+
+### 大和号战列舰 -> YAMATO | 大和号
+  Japan / order / 4费 -/- 稀有=Elite
+  旗标: 无
+  官方文本(中): 你的所有日军单位获得：“亡计：对敌方总部造成 2 点伤害。”
+
+### 万岁冲锋 -> BANZAI | 万岁冲锋
+  Japan / order / 7费 -/- 稀有=Elite
+  旗标: 无
+  官方文本(中): 消灭所有攻击力等于或低于 4 的陆军，结束你的回合。
+
+### 舰炮支援 -> BOMBING RAID | 轰炸突袭
+  Japan / order / 4费 -/- 稀有=Elite
+  旗标: 无
+  官方文本(中): 对一个敌方目标造成 3 点伤害，并对相邻目标造成 2 点伤害。
+
+### M13/40坦克 -> M13/40 | M13/40
+  Italy / tank / 3费 3/4 稀有=Limited
+  旗标: 无
+  官方文本(中): 部署：如果你控制的单位比对手多，获得闪击和奋战。否则，获得守护。
+
+### 意大利炮兵团 -> OBICE DA 75/13 | 75/13式山炮
+  Italy / artillery / 3费 1/2 稀有=Special
+  旗标: alpine
+  官方文本(中): 你的其他山地单位可以在同一回合中移动和攻击。
+
+### 殖民步兵 -> 1er RÉGIMENT ÉTRANGER | 外籍第 1 步兵团
+  France / infantry / 5费 1/1 稀有=Limited
+  旗标: blitz, mobilize
+  官方文本(中): 部署：对手每有一张手牌，便获得一次 +1+1。
+
+### 抵抗网络 -> ARMING THE RESISTANCE | 武装抵抗
+  France / order / 4费 -/- 稀有=Special
+  旗标: 无
+  官方文本(中): 将一张“抵抗”置入对手的手牌，然后将此类卡牌的数量和费用翻倍。
+
+### 地下抵抗 -> SABOTAGE | 毁坏
+  France / order / 2费 -/- 稀有=Limited
+  旗标: 无
+  官方文本(中): 对一个目标造成 (1+X) 点伤害，X 为对手手牌中“抵抗”牌的数量。
+
+### 华沙守军 -> 16th TARNOW REGIMENT | 塔尔努夫第 16 步兵团
+  Poland / infantry / 5费 4/7 稀有=Special
+  旗标: 无
+  官方文本(中): 你使用情报牌时，将一张“军团”增加至支援阵线，抽一张牌。
+
+### 翼骑兵冲锋 -> FIRST TO FIGHT | 冲锋在前
+  Poland / order / 2费 -/- 稀有=Limited
+  旗标: 无
+  官方文本(中): 使一个友方单位获得：“此单位若在交战之后存活，将一张“军团”增加至支援阵线。”
+
+### 华沙战士 -> UNDERGROUND STATE | 地下国
+  Poland / order / 4费 -/- 稀有=Limited
+  旗标: 无
+  官方文本(中): 将一个敌方单位返回其所有者手中，将一张“军团”增加至支援阵线。
+
+### 长程沙漠群 -> LONG RANGE DESERT GROUP | 长距离沙漠群
+  Britain / order / 5费 -/- 稀有=Elite
+  旗标: 无
+  官方文本(中): 你的单位获得: \"消灭任何受到其伤害的单位。\"
+
+### 第25澳新营 -> 5th BRIGADE | 第 5 步兵旅
+  Britain / infantry / 2费 1/5 稀有=Standard
+  旗标: guard
+  官方文本(中): (空)
+
+### RAAF飓风 -> HURRICANE Mk I | 飓风 Mk I
+  Britain / fighter / 3费 3/2 稀有=Standard
+  旗标: blitz
+  官方文本(中): (空)
+
+### M4A3E8 -> M4A1 | M4A1
+  USA / tank / 4费 4/5 稀有=Special
+  旗标: 无
+  官方文本(中): 无法成为敌方指令的目标。对手使你弃掉卡牌时，你从卡组中抽取此单位牌。

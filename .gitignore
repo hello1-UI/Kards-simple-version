@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# 构建产物（dist 用 PyInstaller 生成后自行打包分发）
+build/
+dist/
+
+# 运行时状态与日志
+logs/
+*.log
+settings.json
+debug/*_out*.txt
+
+# 工作区元数据
+.workbuddy/

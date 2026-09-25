@@ -1,0 +1,303 @@
+
+### 步兵班
+  !! 未匹配 候选=['Infantry Squad']
+
+### 装甲掷弹兵
+  !! 未匹配 候选=['Panzergrenadiers']
+
+### 山地猎兵
+  !! 未匹配 候选=['Gebirgsjager', 'Gebirgsjäger', 'Mountain Infantry']
+
+### Bf-109战斗机
+  !! 未匹配 候选=['Bf-109', 'Messerschmitt Bf 109']
+
+### 四号坦克
+  !! 未匹配 候选=['Panzer IV']
+
+### 88毫米炮  ->  88 mm FLAK (88毫米高射炮)
+  国家=Germany 类型=artillery 费用=6 攻=3 防=4 稀有=Limited
+  关键词旗标: ambush
+  原文(中): 对战空军和坦克时，造成双倍伤害。
+  原文(英): Deals double damage against air and tank units.
+
+### 三号突击炮
+  !! 未匹配 候选=['StuG III', 'Sturmgeschutz III', 'Sturmgeschütz III']
+
+### 追猎者坦克歼击车
+  !! 未匹配 候选=['Hetzer']
+
+### 斯图卡俯冲轰炸机
+  !! 未匹配 候选=['Stuka', 'Ju 87 Stuka']
+
+### 虎式坦克
+  !! 未匹配 候选=['Tiger', 'Tiger I']
+
+### 闪电战  ->  BLITZKRIEG (闪电战)
+  国家=Germany 类型=order 费用=3 攻= 防= 稀有=Limited
+  关键词旗标: 无
+  原文(中): 在本回合中，前线的友方所有单位 +3 攻击力，-1 行动花费。
+  原文(英): Friendly units in the frontline have +3 attack and operate for one less until end of turn.
+
+### 反坦克炮  ->  PAK 36 (Pak36反坦克炮)
+  国家=Germany 类型=artillery 费用=1 攻=1 防=1 稀有=Standard
+  关键词旗标: 无
+  原文(中): 对手部署坦克时，对其造成 1 点伤害。
+  原文(英): When your enemy deploys a tank unit, deal 1 damage to it.
+
+### 动员兵
+  !! 未匹配 候选=['Conscript']
+
+### 波波沙冲锋队
+  !! 未匹配 候选=['PPSh', 'PPSh-41', 'PPSh Squad']
+
+### 近卫步兵
+  !! 未匹配 候选=['Guards Infantry']
+
+### 拉-7战斗机
+  !! 未匹配 候选=['La-7', 'Lavochkin La-7']
+
+### T-34坦克
+  !! 未匹配 候选=['T-34']
+
+### 惩戒营
+  !! 未匹配 候选=['Penal Battalion', 'Penal Battalion ', 'Shtrafbat']
+
+### SU-85坦克歼击车  ->  SU-85 (SU-85)
+  国家=Soviet 类型=tank 费用=4 攻=5 防=3 稀有=Standard
+  关键词旗标: 无
+  原文(中): 对战坦克时，造成双倍伤害。
+  原文(英): Deals double damage against tanks.
+
+### 伊尔-2攻击机
+  !! 未匹配 候选=['Il-2', 'IL-2', 'Ilyushin Il-2']
+
+### 喀秋莎  ->  KATYUSHA (喀秋莎)
+  国家=Soviet 类型=artillery 费用=2 攻=1 防=2 稀有=Limited
+  关键词旗标: blitz
+  原文(中): 此单位攻击时，造成 0-1 点的额外伤害。
+  原文(英): When KATYUSHA attacks, it deals 0-1 additional damage.
+
+### IS-2重型坦克
+  !! 未匹配 候选=['IS-2', 'IS-2 Stalin', 'Iosif Stalin']
+
+### 为了祖国
+  !! 未匹配 候选=['For the Motherland']
+
+### 游骑兵
+  !! 未匹配 候选=['Rangers']
+
+### 伞兵连
+  !! 未匹配 候选=['Paratroopers']
+
+### 海军陆战队
+  !! 未匹配 候选=['Marines', 'US Marines']
+
+### 谢尔曼坦克  ->  M4 SHERMAN (M4 谢尔曼)
+  国家=USA 类型=tank 费用=4 攻=4 防=4 稀有=Standard
+  关键词旗标: 无
+  原文(中): 部署：如果你在前线有美军单位，抽两张牌。
+  原文(英): Deployment: If you have a US unit in the frontline, draw 2 cards.
+
+### P-51野马  ->  P-51 MUSTANG (P-51 野马)
+  国家=USA 类型=fighter 费用=6 攻=6 防=4 稀有=Limited
+  关键词旗标: 无
+  原文(中): 部署：随机对一个敌方空军造成 4 点伤害。
+  原文(英): Deployment: Deal 4 damage to a random enemy air unit.
+
+### M10狼獾  ->  M10 WOLVERINE (M10 狼獾)
+  国家=USA 类型=tank 费用=2 攻=3 防=2 稀有=Special
+  关键词旗标: 无
+  原文(中): 消灭任何受到其伤害的敌方坦克。
+  原文(英): Enemy tanks damaged by this unit are destroyed.
+
+### 远程榴弹炮  ->  LONG TOM (长腿汤姆)
+  国家=USA 类型=artillery 费用=5 攻=2 防=4 稀有=Elite
+  关键词旗标: 无
+  原文(中): 此单位攻击时，造成 3 点伤害，随机分配至敌方所有目标。
+  原文(英): When LONG TOM attacks, distribute 3 damage between random enemies.
+
+### M4A3E8
+  !! 未匹配 候选=['M4A3E8', 'M4A3E8 Easy Eight', 'Easy Eight']
+
+### B-17空中堡垒  ->  B-17 FLYING FORTRESS (B-17 飞行堡垒)
+  国家=USA 类型=bomber 费用=9 攻=5 防=5 稀有=Special
+  关键词旗标: heavyArmor1
+  原文(中): 部署：随机消灭一个敌方单位。
+  原文(英): Deployment: Destroy random enemy unit.
+
+### 步兵增援  ->  REINFORCEMENTS (增援)
+  国家=Germany 类型=order 费用=3 攻= 防= 稀有=Limited
+  关键词旗标: 无
+  原文(中): 完全修复友方所有单位，抽一张牌。
+  原文(英): Fully repair all friendly units and draw a card.
+
+### 防空火力
+  !! 未匹配 候选=['AA Gun', 'Anti-Aircraft Gun', 'Flak Gun']
+
+### 本土防卫军
+  !! 未匹配 候选=['Home Guard']
+
+### 特种空勤团
+  !! 未匹配 候选=['SAS']
+
+### 廓尔喀步枪团
+  !! 未匹配 候选=['Gurkha Rifles', 'Gurkha']
+
+### 喷火战斗机
+  !! 未匹配 候选=['Spitfire', 'Supermarine Spitfire']
+
+### 克伦威尔坦克
+  !! 未匹配 候选=['Cromwell']
+
+### 德哈维兰蚊式
+  !! 未匹配 候选=['Mosquito', 'De Havilland Mosquito', 'de Havilland Mosquito']
+
+### 丘吉尔坦克
+  !! 未匹配 候选=['Churchill']
+
+### 兰开斯特轰炸机
+  !! 未匹配 候选=['Lancaster', 'Avro Lancaster']
+
+### 战地医疗
+  !! 未匹配 候选=['Field Medic', 'Medical Aid', 'First Aid', 'Field Hospital']
+
+### 皇家海军炮击  ->  NAVAL SUPPORT (海军支援)
+  国家=Britain 类型=order 费用=2 攻= 防= 稀有=Standard
+  关键词旗标: 无
+  原文(中): 将一个单位的攻击力等同于其防御力。
+  原文(英): Change the attack on target unit to be equal to its defense.
+
+### 总动员  ->  MOBILIZATION (动员)
+  国家=USA 类型=order 费用=5 攻= 防= 稀有=Special
+  关键词旗标: 无
+  原文(中): 抽三张牌。
+  原文(英): Draw 3 cards.
+
+### 战术欺骗
+  !! 未匹配 候选=['Tactical Deception', 'Deception', 'Counter Intelligence']
+
+### 步兵联队
+  !! 未匹配 候选=['Infantry Regiment']
+
+### 九五式轻战车  ->  TYPE 95 Ha-Go (九五式轻战车)
+  国家=Japan 类型=tank 费用=2 攻=2 防=2 稀有=Standard
+  关键词旗标: 无
+  原文(中): 双方玩家每次使用指令时，其总部受到 1 点伤害。
+  原文(英): When an order is given, deal 1 damage to the HQ of the player giving the order.
+
+### 丛林渗透队
+  !! 未匹配 候选=['Jungle Patrol', 'Jungle Warfare', 'Jungle Raider']
+
+### 零式战斗机
+  !! 未匹配 候选=['Zero', 'A6M Zero', 'Mitsubishi Zero']
+
+### 海军特别陆战队
+  !! 未匹配 候选=['Special Naval Landing Force', 'SNLF']
+
+### 隼式战斗机
+  !! 未匹配 候选=['Hayabusa', 'Ki-43', 'Nakajima Ki-43']
+
+### 九七式坦克  ->  TYPE 97 Chi-Ha (九七式中战车)
+  国家=Japan 类型=tank 费用=3 攻=3 防=3 稀有=Standard
+  关键词旗标: 无
+  原文(中): 友方所有步兵 +1 攻击力。
+  原文(英): Friendly infantry has +1 attack.
+
+### 神风特攻队
+  !! 未匹配 候选=['Kamikaze']
+
+### 大和号战列舰  ->  YAMATO (大和号)
+  国家=Japan 类型=order 费用=4 攻= 防= 稀有=Elite
+  关键词旗标: 无
+  原文(中): 你的所有日军单位获得：“亡计：对敌方总部造成 2 点伤害。”
+  原文(英): Your Japanese units get: \"Destruction: Deal 2 damage to the enemy HQ.\"
+
+### 万岁冲锋  ->  BANZAI (万岁冲锋)
+  国家=Japan 类型=order 费用=7 攻= 防= 稀有=Elite
+  关键词旗标: 无
+  原文(中): 消灭所有攻击力等于或低于 4 的陆军，结束你的回合。
+  原文(英): Destroy all ground units with 4 attack or less. End your turn.
+
+### 舰炮支援
+  !! 未匹配 候选=['Naval Gun Support', 'Gun Support', 'Artillery Support']
+
+### 黑衫军
+  !! 未匹配 候选=['Blackshirts', 'Black Shirts']
+
+### M13/40坦克  ->  M13/40 (M13/40)
+  国家=Italy 类型=tank 费用=3 攻=3 防=4 稀有=Limited
+  关键词旗标: 无
+  原文(中): 部署：如果你控制的单位比对手多，获得闪击和奋战。否则，获得守护。
+  原文(英): Deployment: Gains Blitz and Fury if you have more units than the enemy. Otherwise it gains Guard.
+
+### 意大利炮兵团
+  !! 未匹配 候选=['Artillery Regiment', 'Italian Artillery']
+
+### 炮火准备  ->  BARRAGE (弹幕)
+  国家=Soviet 类型=order 费用=4 攻= 防= 稀有=Standard
+  关键词旗标: 无
+  原文(中): 抉择：在本回合中，敌方所有单位 -3 攻击力；或者对一个陆军造成 5 点伤害。
+  原文(英): Choose one - enemy units have -3 attack this turn OR deal 5 damage to a ground unit.
+
+### 山地伏击
+  !! 未匹配 候选=['Mountain Ambush', 'Ambush']
+
+### 殖民步兵
+  !! 未匹配 候选=['Colonial Infantry', 'Colonials']
+
+### 索玛S35
+  !! 未匹配 候选=['Somua S35', 'S35']
+
+### 抵抗网络
+  !! 未匹配 候选=['Resistance Network', 'The Resistance']
+
+### 地下抵抗  ->  PARTISANS (游击队)
+  国家=Soviet 类型=order 费用=6 攻= 防= 稀有=Special
+  关键词旗标: 无
+  原文(中): 获得一个敌方单位的控制权，在你的回合结束时，将其返回所有者手中。
+  原文(英): Take control of an enemy unit. At the end of turn, send it to owner's hand.
+
+### 芬兰猎兵
+  !! 未匹配 候选=['Sissi', 'Jaakari', 'Jaeger', 'Finnish Jaeger']
+
+### 芬兰狙击手
+  !! 未匹配 候选=['Finnish Sniper', 'Sniper', 'Marksman']
+
+### 冬季战争
+  !! 未匹配 候选=['Winter War']
+
+### 雪地伏击
+  !! 未匹配 候选=['Winter Ambush', 'Snow Ambush']
+
+### 波兰枪骑兵
+  !! 未匹配 候选=['Polish Lancers', 'Lancers', 'Uhlans']
+
+### 华沙守军
+  !! 未匹配 候选=['Warsaw Defender', 'Defenders of Warsaw', 'Warsaw Garrison']
+
+### 翼骑兵冲锋
+  !! 未匹配 候选=['Winged Hussars', 'Cavalry Charge', 'Hussar Charge']
+
+### 华沙战士
+  !! 未匹配 候选=['Warsaw Fighter', 'Warsaw Uprising']
+
+### 长程沙漠群  ->  LONG RANGE DESERT GROUP (长距离沙漠群)
+  国家=Britain 类型=order 费用=5 攻= 防= 稀有=Elite
+  关键词旗标: 无
+  原文(中): 你的单位获得: \"消灭任何受到其伤害的单位。\"
+  原文(英): Your units get: \"When this unit deals damage to a unit, destroy it.\"
+
+### 第25澳新营
+  !! 未匹配 候选=['25th ANZAC Battalion', '25th Anzac Battalion']
+
+### RAAF飓风
+  !! 未匹配 候选=['RAAF Hurricane', 'Hurricane']
+
+### 澳新风暴
+  !! 未匹配 候选=['ANZAC Storm', 'Anzac Storm']
+
+### 澳新军团精神
+  !! 未匹配 候选=['Spirit of ANZAC', 'Spirit of the ANZAC', 'ANZAC Spirit']
+
+### 滩头阵地
+  !! 未匹配 候选=['Beachhead', 'Beach Head']
