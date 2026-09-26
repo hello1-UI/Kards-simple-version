@@ -51,7 +51,7 @@ def parse_commit(sha):
         return {"name": name.strip(), "email": mail.rstrip(">"),
                 "date": datetime.fromtimestamp(int(ts), tz).isoformat()}
 
-    return {"tree": f["tree"], "parents": f["parents"].split(),
+    return {"tree": f["tree"], "parents": f.get("parent", "").split(),
             "author": ident(f["author"]), "committer": ident(f["committer"]),
             "message": msg}
 
