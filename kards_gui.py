@@ -50,6 +50,12 @@ NATION_COLOR = {
 
 APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 
+# ---------------- 版本号 a.b.c.d ----------------
+# a: 重要修复(1位数)  b: 卡牌更新(2位数)  c: 赛季更新(2位数)  d: 补丁修复(3位数)
+# 升位规则: 某位 +1 后, 其右侧所有位清零（如卡牌更新 1.01.00.000）
+# 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
+VERSION = (1, 0, 0, 0)
+
 FONT = ("Microsoft YaHei UI", 12)
 FONT_S = ("Microsoft YaHei UI", 10)
 FONT_B = ("Microsoft YaHei UI", 13, "bold")
@@ -278,6 +284,9 @@ class App(tk.Tk):
                    cost=None, color="#3a5a80", big=True,
                    on_click=lambda: self._build_nation_select()).pack(
             side="left", padx=14, ipady=8)
+        # 主页下端：版本号
+        tk.Label(self.start_frame, text="v" + ".".join(map(str, VERSION)),
+                 bg=BG, fg=DIM, font=FONT_S).pack(side="bottom", pady=(0, 14))
 
     def open_start_settings(self):
         """主界面右上角设置：语言 / 操作说明 / 退出游戏"""
