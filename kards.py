@@ -853,8 +853,17 @@ ALIAS = {
 }
 
 
-# ---- 日志 -------------------------------------------------------------------
-LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+# ---- 用户数据目录 -------------------------------------------------------------
+# 打包运行时: 用户数据(日志/卡组)统一存到 %USERPROFILE%\AppData\Kards-Simple-Version
+if getattr(sys, "frozen", False):
+    DATA_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Kards-Simple-Version")
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+    except OSError:
+        DATA_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+LOGS_DIR = os.path.join(DATA_DIR, "logs")
 _log_fh = None
 
 
@@ -921,7 +930,7 @@ def setup_error_log():
 
 
 # ---- 卡组保存 / 载入 --------------------------------------------------------
-DECKS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decks")
+DECKS_DIR = os.path.join(DATA_DIR, "decks")
 
 
 def save_deck_text(name, counts, nation):

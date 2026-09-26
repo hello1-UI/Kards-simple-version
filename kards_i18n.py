@@ -12,12 +12,18 @@ import json
 import os
 import sys
 
-# 打包(PyInstaller)运行时 __file__ 指向 _internal 临时目录，需改用 exe 所在目录
+# 打包(PyInstaller)运行时: 用户数据统一存到 %USERPROFILE%\AppData\Kards-Simple-Version
 if getattr(sys, "frozen", False):
-    _APP_DIR = os.path.dirname(os.path.abspath(sys.executable))
+    _DATA_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Kards-Simple-Version")
+    try:
+        os.makedirs(_DATA_DIR, exist_ok=True)
+    except OSError:
+        _DATA_DIR = os.path.dirname(os.path.abspath(sys.executable))
+    _SETTINGS_PATH = os.path.join(_DATA_DIR, "settings.json")
 else:
-    _APP_DIR = os.path.dirname(os.path.abspath(__file__))
-_SETTINGS_PATH = os.path.join(_APP_DIR, "settings.json")
+    # 源码运行: 设置保存在项目根目录
+    _SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "settings.json")
 
 # 语言显示名（固定，不随语言切换）
 LANG_NAMES = {
