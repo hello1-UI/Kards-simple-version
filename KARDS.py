@@ -26,7 +26,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog
 
 
-import kards as core
+import kards_engine as core
 import kards_i18n as i18n
 import kards_net as net
 

@@ -9,14 +9,14 @@
 
 规则: 版本 a.b.c.d —— a:重要修复(1位) b:卡牌更新(2位) c:赛季更新(2位) d:补丁修复(3位)
      某位 +1 后, 其右侧所有位清零。
-自动完成: 修改 kards_gui.py 的 VERSION 元组 + git 提交。
+自动完成: 修改 KARDS.py 的 VERSION 元组 + git 提交。
 （推送到 GitHub 用: GITHUB_TOKEN=xxx python debug/push_via_api.py）
 """
 import re
 import subprocess
 import sys
 
-TARGET = "kards_gui.py"
+TARGET = "KARDS.py"
 SEG_NAMES = {"a": "重要修复", "b": "卡牌更新", "c": "赛季更新", "d": "补丁修复"}
 SEG_IDX = {"a": 0, "b": 1, "c": 2, "d": 3}
 PATTERN = re.compile(r"^VERSION = \((\d+), (\d+), (\d+), (\d+)\)", re.M)
@@ -35,7 +35,7 @@ def main():
     src = open(TARGET, encoding="utf-8").read()
     m = PATTERN.search(src)
     if not m:
-        sys.exit("错误: 未在 kards_gui.py 中找到 VERSION 元组")
+        sys.exit("错误: 未在 KARDS.py 中找到 VERSION 元组")
     old = [int(x) for x in m.groups()]
     idx = SEG_IDX[seg]
     new = old[:idx] + [old[idx] + 1] + [0] * (3 - idx)

@@ -14,8 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ROLE = sys.argv[1] if len(sys.argv) > 1 else "host"
 sys.argv = ["kards_gui.py"]
 
-import kards as core
-import kards_gui
+import kards_engine as core
+import KARDS
 
 # 屏蔽所有弹窗（测试环境无人点击）
 kards_gui.messagebox.showinfo = lambda *a, **k: None

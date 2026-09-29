@@ -83,7 +83,7 @@ def main():
 
     rows = list(csv.DictReader(io.open(CSV_PATH, encoding="utf-8"), delimiter=";"))
     existing = set()
-    import kards
+    import kards_engine as K
     existing |= set(kards.card_database().keys())
 
     # ---- 单位卡筛选 ----

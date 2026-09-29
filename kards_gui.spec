@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['kards_gui.py'],
+    ['KARDS.py'],
     pathex=[],
     binaries=[],
     datas=[],
@@ -21,7 +21,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='kards_gui',
+    name='KARDS',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -40,5 +40,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='kards_gui',
+    name='KARDS',
 )

@@ -8,7 +8,7 @@ import os
 PY = r"C:/Users/freet/AppData/Local/Programs/Python/Python313/python.exe"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-proc = subprocess.Popen([PY, "-u", os.path.join(ROOT, "kards_gui.py"), "--debug-on-net"],
+proc = subprocess.Popen([PY, "-u", os.path.join(ROOT, "KARDS.py"), "--debug-on-net"],
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                         text=True, encoding="utf-8", errors="replace")
 ready = False
