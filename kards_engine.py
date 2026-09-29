@@ -41,6 +41,8 @@ HQ_HP = 25
 BOARD_SIZE = 9         # 一方场上总上限（前线5 + 支援线4；总部不算单位）
 REAR_SLOTS = 4         # 支援阵线（后方）最多 4 个单位
 FRONTLINE_SLOTS = 5    # 前线最多 5 个单位（占领方）
+RANGED_TYPES = ("炮兵", "战斗机", "轰炸机")   # 无需上前线即可攻击的兵种
+NO_COUNTER_DEAL = ("轰炸机",)                 # 不进行反击的兵种（打它不吃反击）
 HAND_LIMIT = 10
 START_HP = 3        # 起始手牌数
 COUNTER_SLOTS = 3    # 反制区上限
@@ -52,17 +54,30 @@ MAIN_NATIONS = ["德国", "苏联", "美国", "英国", "日本"]
 ALLY_NATIONS = ["意大利", "法国", "芬兰", "波兰", "澳新军团"]
 
 KEYWORD_DESC = {
-    "闪击": "部署当回合即可攻击",
+    "闪击": "部署当回合即可移动和攻击",
     "装甲": "战斗伤害减少 1（指令等效果伤害不减）",
     "装甲2": "战斗伤害减少 2（指令等效果伤害不减）",
     "装甲3": "战斗伤害减少 3（指令等效果伤害不减）",
-    "警卫": "保护相邻位置的单位；位于#0位（紧邻总部）时还保护总部",
+    "警卫": "保护相邻位置的单位；#0位警卫保护总部（炮兵/轰炸机无视警卫）",
     "冲击": "攻击单位免反击，攻击后消耗",
     "伏击": "被攻击时先出手打击攻击者；攻击者若阵亡则攻击无效",
     "奋战": "每回合可攻击两次",
     "动员": "你的回合开始时 +1/+1，直到它受到伤害为止",
     "收缴": "消灭敌方单位时，将一张 1/1 副本（费用至多 3）加入手牌",
 }
+
+RULES_TEXT = [
+    "部署: 新单位进入支援线; 移动与攻击都消耗行动费(⚡)",
+    "无[闪击]的单位部署当回合不能移动或攻击",
+    "步兵每回合移动/攻击二选一; 坦克可以移动并攻击",
+    "空军(战斗机/轰炸机)与炮兵在支援线即可攻击(仅限敌方前线单位与总部)",
+    "炮兵/轰炸机无视[警卫]; 轰炸机必须优先攻击敌方战斗机, 且会被战斗机拦截",
+    "炮兵/轰炸机攻击不吃反击; 轰炸机不反击(打它不吃反击); 轰炸机打总部+2",
+    "[伏击]被攻击时先出手；[奋战]每回合攻击两次；[装甲]战斗伤害-1（[装甲2]-2、[装甲3]-3）",
+    "[动员]回合开始+1/+1直至受伤；[亡计]被消灭时对敌方总部造成伤害",
+    "[收缴]消灭敌方单位时，一张 1/1 副本（费用至多3）加入手牌",
+    "[警卫]保护相邻位置的单位；位于#0位（紧邻总部）的警卫还保护总部",
+]
 
 
 # ---- 稀有度 -----------------------------------------------------------------
@@ -198,6 +213,7 @@ class Unit:
         self.attacks_made = 0
         self.traits = dict(getattr(card, "traits", None) or {})  # 原版效果标记
         self.mob = 0                # [动员]当前加成（受伤时移除）
+        self.fresh_deploy = False   # 本回合刚部署（无[闪击]不能立即移动/攻击）
         self.operate = int(getattr(card, "operate", 0))  # 行动费：每次攻击消耗
         self.dying_hq = int((getattr(card, "traits", None) or {}).get("dying_hq", 0))
         self.overflow_turn = False  # 本回合溢出伤害转移敌方总部（呜啦！）
@@ -1317,6 +1333,8 @@ class Game:
             return None
         u = Unit(card, p)
         u.slot = self.next_slot(p)
+        if "闪击" not in u.keywords:
+            u.fresh_deploy = True   # 无[闪击]的单位部署当回合不能移动/攻击
         p.board.append(u)
         self.emit({"type": "deploy", "unit": u, "player": p})
         # 九七式坦克光环：友方步兵部署时 +1 攻击
@@ -1445,9 +1463,16 @@ class Game:
         return sum(1 for u in p.board if u.position == "前线") < FRONTLINE_SLOTS
 
     def move_unit(self, unit, dest):
-        """移动单位到 前线/后方，免费，每单位每回合一次"""
+        """移动单位到 前线/后方：消耗行动费，每单位每回合一次。
+        规则：无[闪击]部署当回合不能移动；步兵移动与攻击二选一。"""
         if unit.moved:
             self.log(f"  {unit.name} 本回合已经移动过了。")
+            return False
+        if unit.fresh_deploy:
+            self.log(f"  {unit.name} 刚加入战场，需要[闪击]才能立即移动！")
+            return False
+        if unit.unit_type == "步兵" and unit.attacks_made > 0:
+            self.log(f"  {unit.name}（步兵）本回合已攻击过，不能再移动！")
             return False
         if dest == "前线":
             if unit.position == "前线":
@@ -1459,11 +1484,20 @@ class Game:
                 else:
                     self.log("  我方前线位已满（4 个）！")
                 return False
-            unit.position = "前线"
-            self.log(f"  {unit.name} 奔赴前线，占领前线！")
         else:
             if unit.position == "后方":
                 return False
+        # 行动费：移动同样消耗（不足则失败）
+        if unit.operate:
+            if unit.owner.kredits < unit.operate:
+                self.log(f"  {unit.name} 移动需要 {unit.operate} 点行动费，Kredits 不足！")
+                return False
+            unit.owner.kredits -= unit.operate
+            self.log(f"  {unit.name} 支付 {unit.operate} 点行动费进行移动（剩余 {unit.owner.kredits}）。")
+        if dest == "前线":
+            unit.position = "前线"
+            self.log(f"  {unit.name} 奔赴前线，占领前线！")
+        else:
             unit.position = "后方"
             self.log(f"  {unit.name} 撤回了后方。")
         unit.moved = True
@@ -1471,12 +1505,23 @@ class Game:
 
     # ---------------- 攻击 ----------------
     def attack_targets(self, attacker):
-        """可攻击的敌方单位：先按前线位置筛选，再按警卫相邻保护筛选"""
+        """可攻击的敌方单位。
+        - 前线单位可攻击敌方全场；后方只有空军/炮兵能攻击（仅限敌方前线单位）
+        - 炮兵/轰炸机无视[警卫]
+        - 轰炸机：敌方前线有战斗机时必须优先攻击战斗机"""
         enemy = self.opponent_of(attacker.owner)
         if attacker.position == "前线":
             pool = list(enemy.board)
         else:
+            if attacker.unit_type not in RANGED_TYPES:
+                return []
             pool = [u for u in enemy.board if u.position == "前线"]
+        if attacker.unit_type == "轰炸机":
+            fighters = [u for u in pool if u.unit_type == "战斗机"]
+            if fighters:
+                return fighters          # 必须优先打战斗机
+        if attacker.unit_type in ("炮兵", "轰炸机"):
+            return pool                  # 无视警卫
         guards = [u for u in pool if u.has("警卫")]
         if not guards:
             return pool
@@ -1492,23 +1537,29 @@ class Game:
         return res or pool
 
     def can_hit_hq(self, attacker):
-        """只有前线单位能直击敌方总部；敌方#0位（紧邻总部）的警卫保护总部"""
-        if attacker.position != "前线":
-            return False, "只有前线单位能攻击敌方总部！"
+        """前线单位（或支援线的空军/炮兵）能直击敌方总部；
+        敌方#0位警卫保护总部，但炮兵/轰炸机无视警卫"""
+        if attacker.position != "前线" and attacker.unit_type not in RANGED_TYPES:
+            return False, "只有前线单位能攻击敌方总部！（空军/炮兵在支援线也可以）"
         enemy = self.opponent_of(attacker.owner)
-        if any(u.has("警卫") and u.slot == 0 for u in enemy.board):
-            return False, "敌方#0位（紧邻总部）有警卫，总部受到保护！"
+        if attacker.unit_type not in ("炮兵", "轰炸机"):
+            if any(u.has("警卫") and u.slot == 0 for u in enemy.board):
+                return False, "敌方#0位（紧邻总部）有警卫，总部受到保护！"
         return True, ""
 
     def hq_damage(self, attacker):
         return attacker.attack + (2 if attacker.unit_type == "轰炸机" else 0)
 
     def unit_ready(self, u):
-        """单位本回合是否还能攻击（含[奋战]两次、特种空勤团封锁、行动费）"""
+        """单位本回合是否还能攻击（含[奋战]两次、特种空勤团封锁、行动费、步兵限制）"""
         if not u.can_attack or u.attacks_made >= u.max_attacks:
             return False
+        if u.fresh_deploy:
+            return False            # 无[闪击]部署当回合不能攻击
         if u.operate and u.owner.kredits < u.operate:
             return False            # 行动费不足
+        if u.unit_type == "步兵" and u.moved:
+            return False            # 步兵：移动与攻击每回合二选一
         if u.attack >= 5 and any(x.traits.get("lock5")
                                  for pl in self.players for x in pl.board):
             return False
@@ -1532,7 +1583,19 @@ class Game:
             self.log(f"  {attacker.name} 面对更强的敌人，攻击 +2！")
         return dmg
 
+    def _interceptor(self, defender_side):
+        """拦截者：防守方攻击力最高的存活战斗机（轰炸机攻击非战斗机目标时触发）"""
+        fs = [u for u in defender_side.board
+              if u.unit_type == "战斗机" and u.defense > 0]
+        return max(fs, key=lambda u: (u.attack, u.defense)) if fs else None
+
     def do_attack(self, attacker, target):
+        # 战斗机拦截：轰炸机攻击非战斗机目标时，敌方战斗机紧急升空
+        if attacker.unit_type == "轰炸机" and target.unit_type != "战斗机":
+            fi = self._interceptor(target.owner)
+            if fi is not None:
+                self.log(f"  ⚡ {fi.name} 紧急升空拦截 {attacker.name}！攻击被迫转向！")
+                target = fi
         self.log(f"  {attacker.name} 攻击 {target.name}！")
         # 行动费：攻击前支付（不足则取消攻击）
         if attacker.operate:
@@ -1592,12 +1655,20 @@ class Game:
         if shocked:
             attacker.keywords.remove("冲击")
             self.log(f"  {attacker.name} 的[冲击]已消耗。")
-        # 反击规则：目标未死亡才会反击；冲击免反击；[伏击]目标已先出手不再反击
+        # 反击规则：目标未死亡才会反击；冲击免反击；[伏击]目标已先出手不再反击；
+        # 轰炸机不反击（打它不吃反击）；炮兵攻击永远不吃反击；
+        # 轰炸机只在攻击战斗机时吃反击（高空投弹躲开地面火力）
         if target in target.owner.board and target.defense > 0:
             if shocked:
                 self.log(f"  [冲击]生效：{attacker.name} 不受反击！")
             elif target.has("伏击"):
                 pass
+            elif target.unit_type in NO_COUNTER_DEAL:
+                self.log(f"  {target.name}（轰炸机）不进行反击。")
+            elif attacker.unit_type == "炮兵":
+                self.log(f"  {attacker.name}（炮兵）远处开火，不受反击！")
+            elif attacker.unit_type == "轰炸机" and target.unit_type != "战斗机":
+                self.log(f"  {attacker.name}（轰炸机）高空投弹，不受反击！")
             else:
                 self.log(f"  {target.name} 反击！{attacker.name} 受到 {target.attack} 点伤害。")
                 self.damage_unit(attacker, target.attack, source=target, combat=True)
@@ -1605,6 +1676,13 @@ class Game:
 
     def do_hq_attack(self, attacker):
         enemy = self.opponent_of(attacker.owner)
+        # 战斗机拦截轰炸机对总部的空袭
+        if attacker.unit_type == "轰炸机":
+            fi = self._interceptor(enemy)
+            if fi is not None:
+                self.log(f"  ⚡ {fi.name} 紧急升空拦截 {attacker.name} 的空袭！")
+                self.do_attack(attacker, fi)
+                return
         counter = self.check_counter(enemy, "attack", attacker)
         if counter:
             self.log(f"  ⚡ {enemy.name} 的反制 [ {counter.name} ] 触发！{attacker.name} 被消灭！")
@@ -1726,6 +1804,7 @@ class Game:
             u.can_attack = True
             u.attacks_made = 0
             u.moved = False
+            u.fresh_deploy = False
             # [动员]：回合开始 +1/+1，直到受伤
             if "动员" in u.keywords:
                 u.attack += 1
@@ -1790,16 +1869,12 @@ class Game:
             if cmd == "e":
                 break
             elif cmd == "h":
-                print("  p N   打出手牌第 N 张\n  a X Y 用我方 M 攻击敌方 E(或 h 打总部, 需在前线)\n"
-                      "  f N   将我方单位 N 调往前线（免费, 每回合一次; 前线同一时刻只能被一方占领, 占领方最多5个单位）\n"
-                      "  b N   将我方单位 N 撤回后方\n"
-                      "  部署: 前线/后方各 5 个位置, 新单位部署在后方\n"
-                      "  打单位必吃反击（目标未死时）；[冲击]打单位免反击但消耗；轰炸机打总部+2\n"
-                      "  [伏击]被攻击时先出手；[奋战]每回合攻击两次；[装甲]战斗伤害-1（[装甲2]-2、[装甲3]-3）\n"
-                      "  [动员]回合开始+1/+1直至受伤；[亡计]被消灭时对敌方总部造成伤害\n"
-                      "  [收缴]消灭敌方单位时，一张 1/1 副本（费用至多3）加入手牌\n"
-                      "  [警卫]保护相邻位置的单位；位于#0位（紧邻总部）的警卫还保护总部\n"
-                      "  e     结束回合")
+                print("  p N   打出手牌第 N 张\n  a X Y 用我方 M 攻击敌方 E(或 h 打总部)\n"
+                      "  f N   将我方单位 N 调往前线（耗行动费, 每回合一次; 前线同一时刻只能被一方占领, 占领方最多5个单位）\n"
+                      "  b N   将我方单位 N 撤回后方（耗行动费）")
+                for line in RULES_TEXT:
+                    print("  " + line)
+                print("  e     结束回合")
             elif cmd.startswith("p"):
                 try:
                     idx = int(cmd.split()[1])
@@ -1827,7 +1902,7 @@ class Game:
                         continue
                     attacker = p.board[mi]
                     if not self.unit_ready(attacker):
-                        print("  该单位本回合无法攻击（需要[闪击]，或已用完攻击次数/被封锁）")
+                        print("  该单位本回合无法攻击（部署当回合需[闪击]；步兵移动过不能攻击；或行动费不足/攻击次数用完）")
                         continue
                     targets = self.attack_targets(attacker)
                     if ti == "h":
@@ -1889,10 +1964,12 @@ class Game:
         if self.force_end:
             yield {"type": "end"}
             return
-        # 机动：前线可占时，优先把突击力量调往前线
+        # 机动：前线可占时优先把坦克调往前线（坦克移动后仍可攻击；
+        # 空军/炮兵在支援线即可攻击无需上前线，步兵移动后当回合无法攻击）
         for u in list(p.board):
-            if u.position == "后方" and not u.moved and self.can_take_frontline(p):
-                if u.unit_type in ("坦克", "战斗机") or u.attack >= 5 or u.unit_type == "轰炸机":
+            if (u.position == "后方" and not u.moved and not u.fresh_deploy
+                    and self.can_take_frontline(p)):
+                if u.unit_type == "坦克":
                     if self.move_unit(u, "前线"):
                         yield {"type": "move", "unit": u}
         # 攻击

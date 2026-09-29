@@ -8,7 +8,7 @@ KARDS 简化版 - 图形界面（tkinter，纯标准库）
   → 支持粘贴原版卡牌清单导入（中英文名均可）→ 随机匹配（可内战）→ 随机先手/后手
 - 对战中右上角「⚙ 设置/投降」：投降 / 返回主菜单 / 安全退出；Esc 快捷退出
 - 拖拽操作：手牌拖到「我方支援阵线」部署；我方单位拖到敌方单位/总部攻击；
-  拖到「我方前线」行上前线、拖回「我方支援阵线」行撤后
+  拖到「我方前线」行上前线、拖回「我方支援阵线」行撤后（移动/攻击均消耗行动费）
 - AI 逐个动作播放（🐢慢速/🐇快速切换）；固定我方视角，AI 回合不泄露手牌
 - 联机对战（⚔ 战斗）：局域网 TCP 直连，主机/加入，锁定步同步
   （开始界面 → 战斗 → 主机/加入 → 选阵营组卡 → 开打；中途退出/投降会通知对手）
@@ -1412,11 +1412,12 @@ class App(tk.Tk):
     def _attack_unit(self, attacker, target):
         g = self.game
         if not g.unit_ready(attacker):
-            self.add_log(f"  {attacker.name} 本回合无法攻击（部署当回合攻击需要[闪击]）。")
+            self.add_log(f"  {attacker.name} 本回合无法攻击（部署当回合需[闪击]；"
+                         f"步兵移动过不能攻击；或行动费不足/攻击次数用完）。")
             return
         if target not in g.players[1].board or target not in g.attack_targets(attacker):
             if attacker.position == "后方":
-                self.add_log("  后方单位只能攻击敌方前线单位！")
+                self.add_log("  支援线只有空军/炮兵能攻击，且仅限敌方前线单位！")
             else:
                 self.add_log("  该目标被相邻位置的[警卫]保护，必须先攻击警卫！")
             return

@@ -58,9 +58,12 @@ LANGS = {
             "· 拖拽手牌到「我方支援阵线」部署单位\n"
             "· 拖拽我方单位到敌方单位/总部进行攻击\n"
             "· 拖到「我方前线」行上前线，拖回支援阵线撤后\n"
-            "· [闪击]部署当回合即可攻击；[冲击]攻击免反击（消耗）\n"
-            "· [警卫]保护相邻目标；#0位警卫保护总部\n"
-            "· 只有前线单位能攻击敌方总部；打单位未死会吃反击\n"
+            "· 移动与攻击都消耗行动费(⚡)；无[闪击]部署当回合不能移动/攻击\n"
+            "· 步兵每回合移动/攻击二选一；坦克可以移动并攻击\n"
+            "· 空军/炮兵在支援线即可攻击（敌方前线单位与总部）\n"
+            "· 炮兵/轰炸机无视[警卫]；轰炸机必须优先打战斗机且会被战斗机拦截\n"
+            "· 炮兵/轰炸机攻击不吃反击；轰炸机不反击（打它不吃反击）\n"
+            "· [闪击]部署当回合即可移动攻击；[冲击]攻击免反击（消耗）\n"
             "· [收缴]消灭敌方单位时缴获一张 1/1 副本入手牌\n"
             "· 联机：⚔ 战斗 → 主机/加入（局域网 TCP，默认端口 5555）"),
         "quit_title": "退出游戏",
@@ -202,9 +205,12 @@ LANGS = {
             "· Drag a hand card to 'My Support Line' to deploy\n"
             "· Drag my unit onto an enemy unit / HQ to attack\n"
             "· Drag to 'My Frontline' to advance; drag back to retreat\n"
-            "· Blitz: can attack the turn deployed; Charge: no counterattack (consumed)\n"
-            "· Guard protects adjacent slots; slot #0 Guard protects the HQ\n"
-            "· Only frontline units can hit the enemy HQ; survivors counterattack\n"
+            "· Moving and attacking both cost Operation (⚡); without Blitz a unit cannot move/attack the turn it deploys\n"
+            "· Infantry: move OR attack each turn; tanks may move and attack\n"
+            "· Air & artillery can attack from the support line (enemy frontline & HQ)\n"
+            "· Artillery & bombers ignore Guard; bombers must target fighters and can be intercepted\n"
+            "· Artillery & bombers take no counterattack; bombers never counterattack\n"
+            "· Blitz: move & attack the turn deployed; Charge: no counterattack (consumed)\n"
             "· Confiscate: killing a unit adds a 1/1 copy to your hand\n"
             "· Online: Battle -> Host/Join (LAN TCP, default port 5555)"),
         "quit_title": "Quit",
@@ -340,9 +346,12 @@ LANGS = {
             "· 手札カードを「味方支援ライン」へドラッグして配置\n"
             "· 味方ユニットを敵ユニット/本部へドラッグして攻撃\n"
             "· 「味方前線」へドラッグで前進、支援ラインへ戻すと後退\n"
-            "· 電撃：配置したターンに攻撃可；突撃：反撃を受けない（消費）\n"
-            "· 護衛は隣接スロットを保護；#0番の護衛は本部も保護\n"
-            "· 前線ユニットのみ敵本部を攻撃可；倒せなかった相手は反撃する\n"
+            "· 移動と攻撃は両方行動コスト(⚡)を消費；電撃なしの配置ターンは移動/攻撃不可\n"
+            "· 步兵は毎ターン移動か攻撃のどちらか；戦車は移動して攻撃も可\n"
+            "· 空軍・砲兵は支援ラインから攻撃可（敵前線ユニットと本部）\n"
+            "· 砲兵・爆撃機は護衛を無視；爆撃機は戦闘機を優先攻撃し、迎撃される\n"
+            "· 砲兵・爆撃機の攻撃は反撃を受けない；爆撃機は反撃しない\n"
+            "· 電撃：配置したターンに移動・攻撃可；突撃：反撃を受けない（消費）\n"
             "· 接収：敵ユニットを倒すと 1/1 のコピーが手札に追加\n"
             "· オンライン：バトル → ホスト/参加（LAN TCP、既定ポート 5555）"),
         "quit_title": "終了",

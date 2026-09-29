@@ -74,6 +74,7 @@ def main():
     db = K.card_database()
     fury = deploy(g, p1, db["装甲掷弹兵"])      # 2/2 奋战
     fury.can_attack = True
+    fury.fresh_deploy = False
     t1 = deploy(g, p2, K.UnitCard("靶1", "德国", 1, 0, 3, [], "步兵"))
     t2 = deploy(g, p2, K.UnitCard("靶2", "德国", 1, 0, 3, [], "步兵"))
     check("第一次可攻击", g.unit_ready(fury))
