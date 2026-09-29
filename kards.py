@@ -100,7 +100,7 @@ class UnitCard:
     kind = "unit"
 
     def __init__(self, name, nation, cost, attack, defense, keywords=None, unit_type="步兵",
-                 traits=None, rarity=None):
+                 traits=None, rarity=None, operate=0):
         self.name = name
         self.nation = nation
         self.cost = cost
@@ -110,6 +110,7 @@ class UnitCard:
         self.unit_type = unit_type
         self.traits = traits or {}      # 原版效果标记（部署/亡计/双倍伤害等）
         self.rarity = rarity or auto_rarity(cost, keywords)
+        self.operate = int(operate)     # 行动费：每次攻击额外消耗的 Kredits（原版机制）
 
 
 class OrderCard:
@@ -132,7 +133,7 @@ class CounterCard:
         self.name = name
         self.nation = nation
         self.cost = cost
-        self.trigger = trigger  # attack_tank | attack_air | attack_inf | attack_any | order | friendly_death
+        self.trigger = trigger  # attack_tank | attack_air | attack_inf | attack_any | order | friendly_death | hq_damage
         self.desc = desc
         self.effect = effect    # 自定义触发效果 callable(game, owner)；None 走默认（消灭攻击者）
         self.rarity = rarity or auto_rarity(cost)
@@ -148,6 +149,8 @@ class CounterCard:
             return event == "attack"
         if self.trigger == "order":
             return event == "order"
+        if self.trigger == "hq_damage":
+            return event == "hq_damage"
         return False
 
 
@@ -195,6 +198,7 @@ class Unit:
         self.attacks_made = 0
         self.traits = dict(getattr(card, "traits", None) or {})  # 原版效果标记
         self.mob = 0                # [动员]当前加成（受伤时移除）
+        self.operate = int(getattr(card, "operate", 0))  # 行动费：每次攻击消耗
         self.dying_hq = int((getattr(card, "traits", None) or {}).get("dying_hq", 0))
         self.overflow_turn = False  # 本回合溢出伤害转移敌方总部（呜啦！）
         # 总部研发被动
@@ -229,7 +233,8 @@ class Unit:
 
     def __str__(self):
         kws = ("/" + "".join(f"[{k}]" for k in self.keywords)) if self.keywords else ""
-        return f"{self.name} {self.attack}/{self.defense}({self.unit_type}@{self.position}#{self.slot}){kws}"
+        op = f"⚡{self.operate}" if self.operate else ""
+        return f"{self.name} {self.attack}/{self.defense}({self.unit_type}@{self.position}#{self.slot}){op}{kws}"
 
 
 # ---------------------------------------------------------------- 指令效果
@@ -362,6 +367,17 @@ def effect_anzac_storm(game, caster):
         if not u.has("冲击"):
             u.keywords.append("冲击")
     game.log("  己方所有单位 +1 攻击并获得 [冲击]！")
+
+
+def effect_lotta(game, caster):
+    """洛塔组织: 己方所有单位 +1 防御（原版另有减行动费，简化版无行动费加成项）"""
+    if not caster.board:
+        game.log("  没有友方单位，洛塔组织落空。")
+        return
+    for u in caster.board:
+        u.defense += 1
+        u.max_defense += 1
+    game.log("  洛塔组织：己方所有单位 +1 防御！")
 
 
 def effect_anzac_spirit(game, caster):
@@ -637,6 +653,23 @@ EXTRA_CARDS = [
             OrderCard("俾斯麦号", "德国", 10, mk_deal_hq(7), "对敌方总部造成 7 点伤害", rarity="传说"),
 ]
 
+# ---- 芬兰（盟国，冬季战争扩展）----------------------------------------------
+FINLAND_CARDS = [
+    # I. STRIDSGRUPPEN: 2费 1/4，行动费2，[收缴]，对攻击力更高的单位 +2 攻击
+    UnitCard("第1战斗群", "芬兰", 2, 1, 4, ["收缴"], "步兵",
+             traits={"anti_strong": True}, operate=2, rarity="稀有"),
+    # INFANTRY REGIMENT 13: 5费 2/4，行动费1，[警卫]，部署时每有一个敌方单位 +1/+1
+    UnitCard("第13步兵团", "芬兰", 5, 2, 4, ["警卫"], "步兵",
+             traits={"deploy": "per_enemy"}, operate=1, rarity="普通"),
+    # LOTTA SVÄRD: 2费指令，己方所有单位 +1 防御
+    OrderCard("洛塔组织", "芬兰", 2, effect_lotta,
+              "己方所有单位 +1 防御", rarity="稀有"),
+    # SISU: 3费反制，总部受到的伤害转嫁给敌方总部
+    CounterCard("西苏精神", "芬兰", 3, "hq_damage",
+                "暗置：你的总部即将受到伤害时，改为敌方总部承受", rarity="稀有"),
+]
+
+
 def card_database():
     """卡池：核心 61 张对齐原版 KARDS 数据（费用/攻防/关键词/效果/稀有度），
     EXTRA_CARDS 为扩充卡（数据同样取自原版 CSV；效果用通用机制近似实现）。"""
@@ -772,6 +805,7 @@ def card_database():
         CounterCard("滩头阵地", "澳新军团", 2, "attack_air", "暗置：当敌方战斗机或轰炸机攻击时，将其消灭"),
     ]
     db.extend(EXTRA_CARDS)
+    db.extend(FINLAND_CARDS)
     return {c.name: c for c in db}
 
 
@@ -1204,6 +1238,13 @@ class Game:
             if amount > 0:
                 self.emit({"type": "hq_damage", "player": player, "amount": amount})
             return
+        # 西苏精神: 总部即将受到伤害时，转嫁给敌方总部（反制消耗）
+        c = self.check_counter(player, "hq_damage", None)
+        if c:
+            self.log(f"  ⚡ {player.name} 的反制 [ {c.name} ] 触发！{amount} 点伤害转嫁给敌方总部！")
+            self.emit({"type": "counter", "card": c})
+            self.damage_hq(self.opponent_of(player), amount, source=source)
+            return
         player.hq -= amount
         self.emit({"type": "hq_damage", "player": player, "amount": amount})
         # 近卫步兵: 你的总部受到伤害时 +1 攻击
@@ -1299,6 +1340,13 @@ class Game:
                 self.emit({"type": "move", "unit": t})
             else:
                 self.log("  [部署] 敌方没有前线单位，撤退效果落空。")
+        elif d == "per_enemy":  # 第13步兵团: 每有一个敌方单位，+1/+1
+            n = len(foe.board)
+            if n:
+                unit.attack += n
+                unit.defense += n
+                unit.max_defense += n
+                self.log(f"  [部署] {unit.name} 因敌方 {n} 个单位获得 +{n}/+{n}（{unit.attack}/{unit.defense}）。")
         elif d == "us_draw2":   # 谢尔曼: 前线有美军单位则抽 2 张牌
             if any(u.position == "前线" and u.card.nation == "美国" for u in p.board):
                 self.draw_cards(p, 2)
@@ -1450,9 +1498,11 @@ class Game:
         return attacker.attack + (2 if attacker.unit_type == "轰炸机" else 0)
 
     def unit_ready(self, u):
-        """单位本回合是否还能攻击（含[奋战]两次、特种空勤团封锁）"""
+        """单位本回合是否还能攻击（含[奋战]两次、特种空勤团封锁、行动费）"""
         if not u.can_attack or u.attacks_made >= u.max_attacks:
             return False
+        if u.operate and u.owner.kredits < u.operate:
+            return False            # 行动费不足
         if u.attack >= 5 and any(x.traits.get("lock5")
                                  for pl in self.players for x in pl.board):
             return False
@@ -1471,10 +1521,20 @@ class Game:
             if extra:
                 dmg += extra
                 self.log(f"  喀秋莎的火箭弹造成 {extra} 点额外伤害！")
+        if attacker.traits.get("anti_strong") and target.attack > attacker.attack:
+            dmg += 2
+            self.log(f"  {attacker.name} 面对更强的敌人，攻击 +2！")
         return dmg
 
     def do_attack(self, attacker, target):
         self.log(f"  {attacker.name} 攻击 {target.name}！")
+        # 行动费：攻击前支付（不足则取消攻击）
+        if attacker.operate:
+            if attacker.owner.kredits < attacker.operate:
+                self.log(f"  {attacker.name} 需要 {attacker.operate} 点行动费，Kredits 不足，攻击取消！")
+                return
+            attacker.owner.kredits -= attacker.operate
+            self.log(f"  {attacker.name} 支付 {attacker.operate} 点行动费（剩余 {attacker.owner.kredits}）。")
         # 反制触发
         counter = self.check_counter(target.owner, "attack", attacker)
         if counter:
@@ -1546,6 +1606,13 @@ class Game:
             self.destroy_unit(attacker)
             attacker.attacks_made += 1
             return
+        # 行动费：攻击总部同样需要支付
+        if attacker.operate:
+            if attacker.owner.kredits < attacker.operate:
+                self.log(f"  {attacker.name} 需要 {attacker.operate} 点行动费，Kredits 不足，攻击取消！")
+                return
+            attacker.owner.kredits -= attacker.operate
+            self.log(f"  {attacker.name} 支付 {attacker.operate} 点行动费（剩余 {attacker.owner.kredits}）。")
         dmg = self.hq_damage(attacker)
         bonus = "（轰炸机 +2）" if attacker.unit_type == "轰炸机" else ""
         if attacker.traits.get("katyusha"):
@@ -1699,7 +1766,8 @@ class Game:
             tag = "" if cost <= me.kredits else " (资源不足)"
             if c.kind == "unit":
                 kws = "".join(f"[{k}]" for k in c.keywords)
-                print(f"    {i}: {c.name} 费{cost} {c.unit_type} {c.attack}/{c.defense} {kws}{tag}")
+                op = f" ⚡行动{c.operate}" if getattr(c, "operate", 0) else ""
+                print(f"    {i}: {c.name} 费{cost}{op} {c.unit_type} {c.attack}/{c.defense} {kws}{tag}")
             elif c.kind == "counter":
                 print(f"    {i}: [反制] {c.name} 费{cost} - {c.desc}{tag}")
             else:

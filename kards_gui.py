@@ -133,6 +133,9 @@ def card_tooltip(c, cost=None, unit=None):
         lines.append(f"{c.nation} · [{tag}]")
     eff = cost if cost is not None else c.cost
     lines.append(f"费用 {eff}" + (f"（原 {c.cost}）" if eff != c.cost else ""))
+    op = getattr(c, "operate", 0)
+    if op:
+        lines.append(f"行动费 {op}（每次攻击额外消耗）")
     desc = getattr(c, "desc", "")
     if desc:
         lines.append("—— " + desc)
@@ -1176,6 +1179,8 @@ class App(tk.Tk):
         ready = self.game.unit_ready(u) if self.game else u.can_attack
         slot_tag = f"#{u.slot}⌂" if u.slot == 0 else f"#{u.slot}"
         sub = f"{slot_tag} {u.unit_type} " + kw_text(u.keywords)
+        if u.operate:
+            sub += f" ⚡{u.operate}"
         if ready:
             sub += "（可攻击）"
         cw = CardWidget(parent, title=u.name, sub=sub, cost=None, color=color,

@@ -104,9 +104,12 @@ def download(dest):
                     f.write(chunk)
                     done += len(chunk)
                     if total:
-                        pct = done * 100 // total
-                        print(f"\r    {done / 1048576:.1f} / "
-                              f"{total / 1048576:.1f} MB ({pct}%)", end="")
+                        filled = int(28 * done / total)
+                        bar = "#" * filled + "-" * (28 - filled)
+                        print(f"\r    [{bar}] {done * 100 // total:3d}% "
+                              f"{done / 1048576:.1f}/{total / 1048576:.1f} MB", end="")
+                    else:
+                        print(f"\r    已下载 {done / 1048576:.1f} MB", end="")
                 print()
             if total and done != total:
                 raise IOError("下载不完整")
@@ -124,7 +127,13 @@ def extract(zip_path, install_dir):
         top = {n.split("/")[0] for n in names if n.strip("/")}
         target = os.path.dirname(install_dir) if top == {"KARDS"} else install_dir
         os.makedirs(install_dir, exist_ok=True)
-        z.extractall(target)
+        for i, n in enumerate(names, 1):
+            z.extract(n, target)
+            if i % 40 == 0 or i == len(names):
+                filled = 20 * i // len(names)
+                print(f"\r    解压进度 [{'#' * filled}{'-' * (20 - filled)}] "
+                      f"{i}/{len(names)}", end="")
+        print()
     print(f"  解压完成 -> {install_dir}")
 
 
