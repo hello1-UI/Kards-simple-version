@@ -55,7 +55,7 @@ APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 # a: 重要修复(1位数)  b: 卡牌更新(2位数)  c: 赛季更新(2位数)  d: 补丁修复(3位数)
 # 升位规则: 某位 +1 后, 其右侧所有位清零（如卡牌更新 1.01.00.000）
 # 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
-VERSION = (1, 1, 0, 0)
+VERSION = (1, 1, 1, 0)
 
 FONT = ("Microsoft YaHei UI", 12)
 FONT_S = ("Microsoft YaHei UI", 10)
