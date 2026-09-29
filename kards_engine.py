@@ -967,6 +967,12 @@ def setup_error_log():
 DECKS_DIR = os.path.join(DATA_DIR, "decks")
 
 
+def set_decks_dir(path):
+    """账号系统：切换自组卡组目录（None 还原默认）"""
+    global DECKS_DIR
+    DECKS_DIR = path or os.path.join(DATA_DIR, "decks")
+
+
 def save_deck_text(name, counts, nation):
     """把 {卡名:数量} 保存到 decks/<名字>.txt，返回保存路径"""
     os.makedirs(DECKS_DIR, exist_ok=True)

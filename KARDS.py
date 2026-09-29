@@ -29,6 +29,7 @@ from tkinter import messagebox, simpledialog
 import kards_engine as core
 import kards_i18n as i18n
 import kards_net as net
+import kards_account as account
 
 # ---------------------------------------------------------------- 主题配色
 
@@ -250,8 +251,14 @@ class App(tk.Tk):
         self._mp_game_over = False
         self._lobby_active = False
         self.db = core.card_database()
+        # ---- 本地账号 ----
+        self.account = account.current()
+        if self.account:
+            core.set_decks_dir(account.deck_dir(self.account))
         self.bind_all("<Escape>", self.on_esc)
         self._build_start()
+        if not self.account and self.anim_enabled:
+            self.after(300, self._account_dialog)
 
     def destroy(self):
         """退出前关闭联机连接"""
@@ -290,6 +297,95 @@ class App(tk.Tk):
         # 主页下端：版本号
         tk.Label(self.start_frame, text="v" + ".".join(map(str, VERSION)),
                  bg=BG, fg=DIM, font=FONT_S).pack(side="bottom", pady=(0, 14))
+        # 左上角：账号入口
+        self.account_btn = tk.Button(self.start_frame, text=self._account_btn_text(),
+                                     bg="#4a4f5a", fg=TEXT, font=FONT_S, bd=0,
+                                     padx=12, pady=6, cursor="hand2",
+                                     command=self._account_dialog)
+        self.account_btn.pack(anchor="nw", padx=16)
+
+    # ---------------- 账号管理 ----------------
+    def _account_btn_text(self):
+        if self.account:
+            s = account.get_stats(self.account)
+            return i18n.t("account_btn", name=self.account,
+                          w=s["win"], l=s["lose"], d=s["draw"])
+        return i18n.t("account_nouser")
+
+    def _refresh_account_btn(self):
+        if getattr(self, "account_btn", None) and self.account_btn.winfo_exists():
+            self.account_btn.configure(text=self._account_btn_text())
+
+    def _apply_account(self, name):
+        """登录/注册成功后应用账号（卡组目录 + 按钮）"""
+        self.account = name
+        core.set_decks_dir(account.deck_dir(name))
+        self._refresh_account_btn()
+
+    def _account_dialog(self):
+        win = tk.Toplevel(self)
+        win.title(i18n.t("account_title"))
+        win.configure(bg=BG)
+        win.geometry("380x360")
+        win.transient(self)
+        tk.Label(win, text=i18n.t("account_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(pady=(18, 8))
+        info = tk.Label(win, text="", bg=BG, fg=RED, font=FONT_S)
+        info.pack()
+
+        if self.account:
+            s = account.get_stats(self.account)
+            tk.Label(win, text=i18n.t("account_stats", w=s["win"], l=s["lose"], d=s["draw"]),
+                     bg=BG, fg=GOLD, font=FONT).pack(pady=10)
+
+            def do_logout():
+                account.logout()
+                self.account = None
+                core.set_decks_dir(None)
+                self._refresh_account_btn()
+                win.destroy()
+
+            row = tk.Frame(win, bg=BG)
+            row.pack(pady=14)
+            tk.Button(row, text=i18n.t("account_logout"), bg="#8a3a3a", fg=TEXT,
+                      font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
+                      command=do_logout).pack()
+            return
+
+        # 登录 / 注册表单
+        tk.Label(win, text=i18n.t("account_user"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(10, 2))
+        e_user = tk.Entry(win, font=FONT, width=22, bg=PANEL, fg=TEXT,
+                          insertbackground=TEXT, relief="flat")
+        e_user.pack(pady=2)
+        tk.Label(win, text=i18n.t("account_pw"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(8, 2))
+        e_pw = tk.Entry(win, font=FONT, width=22, show="*", bg=PANEL, fg=TEXT,
+                        insertbackground=TEXT, relief="flat")
+        e_pw.pack(pady=2)
+
+        def done(ok, err):
+            if ok:
+                self._apply_account(account.current())
+                win.destroy()
+                self.add_log(f"账号已登录: {self.account}")
+            else:
+                info.configure(text=err)
+
+        def try_login():
+            done(*account.login(e_user.get(), e_pw.get()))
+
+        def try_register():
+            done(*account.register(e_user.get(), e_pw.get()))
+
+        row = tk.Frame(win, bg=BG)
+        row.pack(pady=16)
+        tk.Button(row, text=i18n.t("account_login"), bg="#3a5a80", fg=TEXT,
+                  font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
+                  command=try_login).pack(side="left", padx=8)
+        tk.Button(row, text=i18n.t("account_register"), bg="#4a7a4a", fg=TEXT,
+                  font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
+                  command=try_register).pack(side="left", padx=8)
 
     def open_start_settings(self):
         """主界面右上角设置：语言 / 操作说明 / 退出游戏"""
@@ -1729,6 +1825,11 @@ class App(tk.Tk):
         else:
             won = winner is me
             self.add_log(f"战斗结束！{winner.name} 获胜！")
+        # 账号战绩
+        if self.account:
+            account.stats_add(self.account,
+                              "draw" if won is None else ("win" if won else "lose"))
+            self._refresh_account_btn()
         self.refresh()
 
         def after_click():
