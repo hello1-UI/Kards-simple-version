@@ -14,3 +14,5 @@ debug/*_out*.txt
 
 # 工作区元数据
 .workbuddy/
+KARDS_SimpleVersion-Setup.zip
+accounts.json
