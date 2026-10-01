@@ -45,9 +45,12 @@ def relaunch_as_admin():
 
 def shell_desktop():
     ps = "[Environment]::GetFolderPath('Desktop')"
-    r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                       capture_output=True, text=True)
-    return r.stdout.strip()
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                           capture_output=True, text=True, timeout=30)
+        return r.stdout.strip()
+    except Exception:
+        return os.path.join(os.path.expanduser("~"), "Desktop")
 
 
 def remove_shortcuts():
@@ -61,18 +64,22 @@ def remove_shortcuts():
 
 
 def remove_registry():
+    """尝试删除 HKLM 与 HKCU 两处的注册项。
+    注意：不能因为某处"不存在"或"无权限"就提前 return —— 两处都要试，
+    否则管理员安装（HKLM）后换普通用户卸载、或反之，都会留下残留。"""
+    found = False
     for hive, name in ((winreg.HKEY_LOCAL_MACHINE, "HKLM"),
                        (winreg.HKEY_CURRENT_USER, "HKCU")):
         try:
             winreg.DeleteKey(hive, UNINSTALL_KEY)
             print(f"  系统注册项（{name}）✓")
-            return
+            found = True
         except FileNotFoundError:
             continue
         except OSError as e:
             print(f"  注册项删除失败（{name}）: {e}")
-            return
-    print("  系统注册项：未找到（跳过）")
+    if not found:
+        print("  系统注册项：未找到（跳过）")
 
 
 def remove_install_dir():
@@ -85,17 +92,21 @@ def remove_install_dir():
                        "kards_uninstall_tmp.py")
     try:
         # 延迟删除：先把删除任务交给临时脚本，退出自身后再删目录
+        # 目标路径用 repr 生成，避免路径含反斜杠/引号时的转义问题
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(
                 "import os, shutil, sys, time\n"
-                f"target = r'{SELF_DIR}'\n"
+                f"target = {SELF_DIR!r}\n"
                 "for _ in range(20):\n"
                 "    try:\n"
                 "        shutil.rmtree(target)\n"
                 "        break\n"
                 "    except OSError:\n"
                 "        time.sleep(0.5)\n"
-                "os.remove(sys.argv[0])\n"
+                "try:\n"
+                "    os.remove(sys.argv[0])\n"
+                "except OSError:\n"
+                "    pass\n"
             )
         subprocess.Popen([sys.executable, tmp],
                          creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
