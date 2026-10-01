@@ -19,6 +19,7 @@ KARDS 简化版 - 图形界面（tkinter，纯标准库）
     python kards_gui.py --smoke   # 自动完整对局冒烟测试（无交互）
 """
 
+import math
 import queue
 import random
 import sys
@@ -55,7 +56,7 @@ APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 # a: 重要修复(1位数)  b: 卡牌更新(2位数)  c: 赛季更新(2位数)  d: 补丁修复(3位数)
 # 升位规则: 某位 +1 后, 其右侧所有位清零（如卡牌更新 1.01.00.000）
 # 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
-VERSION = (1, 1, 2, 0)
+VERSION = (1, 1, 2, 1)
 
 FONT = ("Microsoft YaHei UI", 12)
 FONT_S = ("Microsoft YaHei UI", 10)
@@ -159,9 +160,10 @@ def foe_hq_tooltip(foe):
 class GUIGame(core.Game):
     """把 log 输出重定向到回调"""
 
-    def __init__(self, p1, p2, log_fn):
+    def __init__(self, p1, p2, log_fn, event_fn=None):
         super().__init__(p1, p2, interactive=False)
         self.log_fn = log_fn
+        self.event_hook = event_fn        # 动画事件钩子（部署/伤害/摧毁…）
 
     def log(self, msg):
         self.log_fn(msg)
@@ -232,14 +234,17 @@ class App(tk.Tk):
         self.minsize(1024, 680)
         self.game = None
         self.busy = False          # AI 行动/动画期间锁定输入
-        self.anim_enabled = "--smoke" not in sys.argv
+        self.anim_enabled = ("--smoke" not in sys.argv) or ("--anim-test" in sys.argv)
         self.ai_step_ms = 0 if not self.anim_enabled else 850
         self.fast_ai = False
         self.unit_widgets = {}     # id(unit) -> 卡片控件
         self.enemy_widgets = []    # (unit, 卡片控件)，用于拖拽命中检测
         self.hq_widget = None      # 敌方总部控件（拖拽落点）
         self.drag = None           # 当前拖拽状态
-        self.pending_flash = []    # 刷新后待播放的入场高亮 (id, color)
+        self.pending_flash = []    # 刷新后待播放入场动画的单位 (unit, color)
+        self._last_drag_src = None # 最近一次拖拽起点坐标（部署入场动画的来源）
+        self._anim_tokens = set()  # 存活的动画令牌（退出对局时清理）
+        self._anim_count = {"entry": 0, "move": 0, "attack": 0}  # 自测统计
         # ---- 联机状态 ----
         self.mp_link = None        # net.NetLink（联机时非 None）
         self.mp_role = None        # "host" / "client"
@@ -921,7 +926,7 @@ class App(tk.Tk):
         random.seed(seed)
         me = core.Player("你", self.deck_nation, my_deck)
         foe = core.Player(f"对手·{opp.get('nation', '?')}", opp.get("nation", "德国"), opp_deck)
-        self.game = GUIGame(me, foe, self.add_log)
+        self.game = GUIGame(me, foe, self.add_log, self.on_game_event)
         for attr in ("start_frame", "builder_frame"):
             fr = getattr(self, attr, None)
             if fr is not None and fr.winfo_exists():
@@ -982,6 +987,7 @@ class App(tk.Tk):
             return
         foe = g.players[1]
         k = msg.get("k")
+        anim = None
         if k == "end":
             g.end_turn()
             if g.over or g.players[0].hq <= 0:
@@ -999,18 +1005,43 @@ class App(tk.Tk):
             tgt = next((u for u in g.players[0].board if u.slot == msg.get("t")), None)
             if att is not None and tgt is not None:
                 g.do_attack(att, tgt)
+                tw = self.unit_widgets.get(id(tgt))
+                if (self.anim_enabled and tw is not None and tw.winfo_exists()
+                        and self._wcenter(tw) is not None):
+                    anim = lambda a=att, w=tw: self._anim_attack(
+                        a, w, on_done=self._mp_replay_tail)
         elif k == "hq":
             att = next((u for u in foe.board if u.slot == msg.get("s")), None)
             if att is not None:
                 g.do_hq_attack(att)
+                if (self.anim_enabled and self.hq_widget is not None
+                        and self.hq_widget.winfo_exists()):
+                    anim = lambda a=att: self._anim_attack(
+                        a, self.hq_widget, on_done=self._mp_replay_tail)
         elif k == "move":
             u = next((u for u in foe.board if u.slot == msg.get("s")), None)
             if u is not None:
                 g.move_unit(u, msg.get("p", "前线"))
+                if self.anim_enabled:
+                    anim = lambda uu=u: self._anim_move(uu, on_done=self._mp_replay_tail)
+        if anim is not None:
+            self.busy = True
+            anim()          # 动画落地后由回调刷新棋盘并解锁
+            return
         self.cleanup_dead()
         self.check_over()
         if self.game:
             self.refresh()
+
+    def _mp_replay_tail(self):
+        """联机对手动作动画落地后的收尾"""
+        if self.game is None:
+            return
+        self.cleanup_dead()
+        self.check_over()
+        if self.game:
+            self.refresh()
+        self.busy = False
 
     def _mp_disconnected(self):
         link = self.mp_link
@@ -1050,7 +1081,7 @@ class App(tk.Tk):
         ai_nation = random.choice(core.MAIN_NATIONS)  # 随机匹配，可能内战
         p1 = core.Player("你", nation, deck if deck is not None else core.build_deck(nation, self.db))
         p2 = core.Player("AI", ai_nation, core.build_deck(ai_nation, self.db))
-        self.game = GUIGame(p1, p2, self.add_log)
+        self.game = GUIGame(p1, p2, self.add_log, self.on_game_event)
         if hasattr(self, "start_frame") and self.start_frame.winfo_exists():
             self.start_frame.destroy()
         if hasattr(self, "builder_frame") and self.builder_frame.winfo_exists():
@@ -1218,6 +1249,12 @@ class App(tk.Tk):
         for u in my_rear:
             self._my_card(u, mc, self.my_rear_row)
 
+        # ---- 入场动画：新部署单位先在牌桌外待命，等令牌飞到位再落地 ----
+        for u, _color in self.pending_flash:
+            w = self.unit_widgets.get(id(u))
+            if w is not None and w.winfo_exists():
+                w.pack_forget()
+
         # ---- 手牌（仅我方回合显示，AI 手牌保密）----
         if not human_turn:
             tk.Label(self.hand_frame, text=i18n.t("hand_hidden"), bg=PANEL, fg=DIM,
@@ -1253,11 +1290,9 @@ class App(tk.Tk):
                 self._bind_drag(cw, ("hand", i))
                 bind_tooltip_tree(cw, lambda c=c, eff=eff: card_tooltip(c, eff))
 
-        # 入场高亮补播
-        for uid, color in self.pending_flash:
-            w = self.unit_widgets.get(uid)
-            if w is not None and w.winfo_exists():
-                self.flash_widget(w, color)
+        # 入场动画补播（真身已在上面 pack_forget，令牌飞到位才落地）
+        for u, color in self.pending_flash:
+            self._anim_entry(u)
         self.pending_flash = []
 
     def _enemy_card(self, u, color, parent):
@@ -1297,8 +1332,8 @@ class App(tk.Tk):
                 yield from descendants(c)
         targets = [widget] + list(descendants(widget))
 
-        def press(e, p=payload):
-            self._drag_start(p, e)
+        def press(e, p=payload, ww=widget):
+            self._drag_start(p, e, ww)
         for w in targets:
             w.bind("<Button-1>", press)
             w.bind("<B1-Motion>", self._drag_motion)
@@ -1312,9 +1347,11 @@ class App(tk.Tk):
         return (self.game is not None and not self.busy
                 and self.game.current is self.game.players[0])
 
-    def _drag_start(self, payload, e):
+    def _drag_start(self, payload, e, widget=None):
         if not self._drag_ok():
             return
+        if widget is not None:
+            self._last_drag_src = self._wcenter(widget)   # 部署入场动画的起飞点
         self.drag = {"payload": payload, "ghost": None,
                      "sx": e.x_root, "sy": e.y_root}
 
@@ -1399,15 +1436,24 @@ class App(tk.Tk):
         if self.hq_widget is not None and self._hit(x, y, self.hq_widget):
             self._attack_hq(unit)
             return
-        if self._hit(x, y, self.my_front_row):
-            if g.move_unit(unit, "前线") and self.mp_link is not None:
-                self._mp_send_act({"k": "move", "s": unit.slot, "p": "前线"})
+        if self._hit(x, y, self.my_front_row) or self._hit(x, y, self.my_rear_row):
+            dest = "前线" if self._hit(x, y, self.my_front_row) else "后方"
+            moved = g.move_unit(unit, dest)
+            if moved and self.mp_link is not None:
+                self._mp_send_act({"k": "move", "s": unit.slot, "p": dest})
             self.cleanup_dead()
+            if moved and self.anim_enabled:
+                self.busy = True
+                self._anim_move(unit, on_done=self._refresh_unlock)
+            elif self.game:
+                self.refresh()
+            return
+
+    def _refresh_unlock(self):
+        """动画落地后的统一收尾：刷新棋盘并解锁输入"""
+        if self.game:
             self.refresh()
-        elif self._hit(x, y, self.my_rear_row):
-            if g.move_unit(unit, "后方") and self.mp_link is not None:
-                self._mp_send_act({"k": "move", "s": unit.slot, "p": "后方"})
-            self.refresh()
+        self.busy = False
 
     def _attack_unit(self, attacker, target):
         g = self.game
@@ -1421,6 +1467,17 @@ class App(tk.Tk):
             else:
                 self.add_log("  该目标被相邻位置的[警卫]保护，必须先攻击警卫！")
             return
+        if self.anim_enabled:
+            self.busy = True
+            self._anim_attack(attacker, self.unit_widgets.get(id(target)),
+                              on_done=lambda: self._attack_resolve(attacker, target))
+        else:
+            self._attack_resolve(attacker, target)
+
+    def _attack_resolve(self, attacker, target):
+        g = self.game
+        if g is None:
+            return
         self.flash_widget(self.unit_widgets.get(id(attacker)), GOLD)
         if self.mp_link is not None:
             self._mp_send_act({"k": "attack", "s": attacker.slot, "t": target.slot})
@@ -1429,6 +1486,7 @@ class App(tk.Tk):
         self.check_over()
         if self.game:
             self.refresh()
+        self.busy = False
 
     def _attack_hq(self, attacker):
         g = self.game
@@ -1439,6 +1497,17 @@ class App(tk.Tk):
         if not ok:
             self.add_log(f"  {msg}")
             return
+        if self.anim_enabled:
+            self.busy = True
+            self._anim_attack(attacker, self.hq_widget,
+                              on_done=lambda: self._attack_hq_resolve(attacker))
+        else:
+            self._attack_hq_resolve(attacker)
+
+    def _attack_hq_resolve(self, attacker):
+        g = self.game
+        if g is None:
+            return
         self.flash_widget(self.unit_widgets.get(id(attacker)), GOLD)
         if self.mp_link is not None:
             self._mp_send_act({"k": "hq", "s": attacker.slot})
@@ -1447,6 +1516,7 @@ class App(tk.Tk):
         self.check_over()
         if self.game:
             self.refresh()
+        self.busy = False
 
     # ---------------- 动画 ----------------
     def _guard(self):
@@ -1529,6 +1599,191 @@ class App(tk.Tk):
                 lbl.destroy()
 
         self.after(ms // 3, fade)
+
+    # ---------------- 战术动画：部署入场 / 行军 / 进攻冲刺 ----------------
+    UNIT_ICON = {"步兵": "🚶", "坦克": "🚜", "战斗机": "✈", "轰炸机": "🛩", "炮兵": "💣"}
+
+    def _wcenter(self, w):
+        """控件中心相对主窗口的坐标（动画令牌用绝对定位）"""
+        try:
+            return (w.winfo_rootx() - self.winfo_rootx() + w.winfo_width() // 2,
+                    w.winfo_rooty() - self.winfo_rooty() + w.winfo_height() // 2)
+        except tk.TclError:
+            return None
+
+    def _profile(self, u):
+        """按兵种选运动风格"""
+        return {"步兵": "infantry", "坦克": "tank",
+                "战斗机": "air", "轰炸机": "air"}.get(u.unit_type, "flat")
+
+    def _spawn_token(self, text, color):
+        lbl = tk.Label(self, text=text, bg=color, fg="#f2f4f8",
+                       font=("Microsoft YaHei UI", 10, "bold"), bd=0, padx=8, pady=3)
+        lbl.place(x=-300, y=-300)
+        lbl.lift()
+        self._anim_tokens.add(lbl)
+        return lbl
+
+    def _fly(self, lbl, path, step_ms=28, on_done=None):
+        """令牌沿路径点移动，走完销毁并回调（坐标为令牌中心点）"""
+        self._anim_tokens.add(lbl)
+
+        def cleanup():
+            self._anim_tokens.discard(lbl)
+            if lbl.winfo_exists():
+                lbl.destroy()
+            if on_done:
+                on_done()
+
+        if not self.anim_enabled or not path:
+            cleanup()
+            return
+        hw, hh = lbl.winfo_reqwidth() / 2, lbl.winfo_reqheight() / 2
+
+        def step(i):
+            if not lbl.winfo_exists():
+                self._anim_tokens.discard(lbl)
+                return
+            if i >= len(path):
+                cleanup()
+                return
+            x, y = path[i]
+            lbl.place(x=int(x - hw), y=int(y - hh))
+            self.after(step_ms, lambda: step(i + 1))
+
+        step(0)
+
+    def _path(self, src, dst, profile, n=14):
+        """按兵种生成路径点：步兵颠簸跑动 / 坦克震动推进 / 空军弧线 / 炮弹抛物线"""
+        (x1, y1), (x2, y2) = src, dst
+        pts = []
+        for i in range(n + 1):
+            t = i / n
+            x = x1 + (x2 - x1) * t
+            y = y1 + (y2 - y1) * t
+            if profile == "infantry":
+                y -= abs(math.sin(t * math.pi * 4)) * 8     # 跑步上下颠簸
+            elif profile == "tank":
+                x += math.sin(t * math.pi * 12) * 1.5       # 引擎震动
+            elif profile in ("air", "artillery"):
+                y -= math.sin(t * math.pi) * (55 if profile == "air" else 40)
+            pts.append((x, y))
+        return pts
+
+    def _land(self, u, w, color, text):
+        """部署落地：单位现身 + 闪光"""
+        if self.game is None or u not in u.owner.board or not w.winfo_exists():
+            return
+        w.pack(side="left", padx=5, ipady=6)
+        self.flash_widget(w, color)
+        if text:
+            self.float_text(w, text, color)
+
+    def _anim_entry(self, u):
+        """部署入场：令牌从来源飞到部署位，落地亮绿框。
+        新单位必在行尾，藏起真身不会挤动同排其他卡"""
+        if not self.anim_enabled:
+            return
+        w = self.unit_widgets.get(id(u))
+        dst = self._wcenter(w) if w is not None else None
+        if w is None or dst is None:
+            return
+        src = self._deploy_source(u, dst)
+        self._anim_count["entry"] += 1
+        w.pack_forget()
+        token = self._spawn_token(f"{self.UNIT_ICON.get(u.unit_type, '⚔')} {u.name}",
+                                  NATION_COLOR.get(u.card.nation, "#4a5260"))
+        self._fly(token, self._path(src, dst, self._profile(u)), step_ms=28,
+                  on_done=lambda: self._land(u, w, GREEN, "部署！"))
+
+    def _deploy_source(self, u, dst):
+        """部署动画起点：我方=手牌拖拽起点，敌方=从屏幕上方压入"""
+        if u.owner is self.game.players[0]:
+            if self._last_drag_src is not None:
+                src = self._last_drag_src
+                self._last_drag_src = None
+                return src
+            c = self._wcenter(self.hand_frame)
+            if c is not None:
+                return c
+            return (dst[0], self.winfo_height() - 40)
+        return (dst[0], -30)
+
+    def _anim_move(self, u, on_done=None):
+        """行军动画：令牌从原位置开到目标行，落地后刷新棋盘（刷新前先藏起原控件）"""
+        if not self.anim_enabled:
+            if on_done:
+                on_done()
+            return
+        w = self.unit_widgets.get(id(u))
+        src = self._wcenter(w) if w is not None and w.winfo_exists() else None
+        dst = None
+        if src is not None and self.game is not None:
+            mine = u.owner is self.game.players[0]
+            row_attr = ("my_front_row" if u.position == "前线" else "my_rear_row") \
+                if mine else ("foe_front_row" if u.position == "前线" else "foe_rear_row")
+            dst = self._wcenter(getattr(self, row_attr))
+        if src is None or dst is None:
+            if on_done:
+                on_done()
+            return
+        if w is not None and w.winfo_exists():
+            w.pack_forget()
+        self._anim_count["move"] += 1
+        token = self._spawn_token(f"{self.UNIT_ICON.get(u.unit_type, '⚔')} {u.name}",
+                                  NATION_COLOR.get(u.card.nation, "#4a5260"))
+        self._fly(token, self._path(src, dst, self._profile(u)), step_ms=28,
+                  on_done=on_done)
+
+    def _anim_attack(self, att, tgt_w, on_done=None):
+        """进攻动画：坦克两段冲刺（咣咣），步兵冲锋颠簸，空军俯冲，
+        炮兵原地开火发射抛物线炮弹。命中后闪红 + 震动 + 💥，再回调"""
+        if not self.anim_enabled:
+            if on_done:
+                on_done()
+            return
+        aw = self.unit_widgets.get(id(att))
+        src = self._wcenter(aw) if aw is not None and aw.winfo_exists() else None
+        dst = self._wcenter(tgt_w) if tgt_w is not None and tgt_w.winfo_exists() else None
+        if src is None or dst is None:
+            if on_done:
+                on_done()
+            return
+        if aw is not None and aw.winfo_exists():
+            self.flash_widget(aw, GOLD)
+        self._anim_count["attack"] += 1
+        if att.unit_type == "炮兵":
+            shell = self._spawn_token("●", "#ff9c54")
+            self._fly(shell, self._path(src, dst, "artillery", n=8), step_ms=22,
+                      on_done=lambda: self._impact(tgt_w, on_done))
+            return
+
+        def seg(a, b, n=7):
+            return [(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n)
+                    for i in range(1, n + 1)]
+
+        if att.unit_type == "坦克":
+            p70 = (src[0] + (dst[0] - src[0]) * 0.7, src[1] + (dst[1] - src[1]) * 0.7)
+            p45 = (src[0] + (dst[0] - src[0]) * 0.45, src[1] + (dst[1] - src[1]) * 0.45)
+            path = seg(src, p70, 6) + seg(p70, p45, 3) + seg(p45, dst, 6)
+        else:
+            profile = "air" if att.unit_type in ("战斗机", "轰炸机") else "infantry"
+            path = self._path(src, dst, profile, n=12)
+        token = self._spawn_token(f"{self.UNIT_ICON.get(att.unit_type, '⚔')} {att.name}",
+                                  NATION_COLOR.get(att.card.nation, "#4a5260"))
+        self._fly(token, path, step_ms=24, on_done=lambda: self._impact(tgt_w, on_done))
+
+    def _impact(self, tgt_w, on_done=None):
+        """命中效果：目标闪红 + 💥 + 短促震动，然后回调"""
+        if tgt_w is not None and tgt_w.winfo_exists():
+            self.flash_widget(tgt_w, RED)
+            self.float_text(tgt_w, "💥", "#ffb347")
+            if tgt_w is self.hq_widget:
+                self.shake()
+            else:
+                self.shake(times=2, amp=3, interval=30)
+        if on_done:
+            on_done()
 
     def _draw_end_emblem(self, cv, nation, won):
         """国家专属徽章：英国皇冠 / 美国白鹰 / 德国黑鹰 / 苏联锤子镰刀 / 日本太阳。
@@ -1651,7 +1906,9 @@ class App(tk.Tk):
         elif t == "confiscate":
             self.show_banner(f"📦 [收缴] 缴获 {ev['card'].name}！", GOLD, 900)
         elif t == "deploy":
-            self.pending_flash.append((id(ev["unit"]), GREEN))
+            self.pending_flash.append((ev["unit"], GREEN))
+        elif t == "move":
+            pass    # 行军动画由 _ai_play_next / 联机 msg 回放负责
 
     # ---------------- 设置 / 投降 / 退出 ----------------
     def open_settings(self):
@@ -1715,6 +1972,12 @@ class App(tk.Tk):
         self.selected = None
         self.unit_widgets = {}
         self.pending_flash = []
+        # 清理残留的动画令牌
+        for t in list(self._anim_tokens):
+            if t.winfo_exists():
+                t.destroy()
+        self._anim_tokens.clear()
+        self._last_drag_src = None
         for attr in ("main_frame", "bottom_frame", "builder_frame", "start_frame"):
             fr = getattr(self, attr, None)
             if fr is not None and fr.winfo_exists():
@@ -1766,8 +2029,17 @@ class App(tk.Tk):
         g = self.game
         if g is None:
             return
+        step = None
         try:
-            next(self._ai_iter)
+            while True:
+                step = next(self._ai_iter)
+                # 打出卡牌 → 等 refresh 播放入场动画后再继续
+                if step.get("type") in ("play", "end"):
+                    self.cleanup_dead()
+                    self.refresh()
+                    self.after(max(60, self.ai_step_ms), self._ai_play_next)
+                    return
+                break       # move / attack / hq_attack：走下面的动画分支
         except StopIteration:
             self._ai_iter = None
             self.cleanup_dead()
@@ -1779,9 +2051,25 @@ class App(tk.Tk):
                 self.show_banner("你的回合", GREEN, 800)
             self.after(900, self.begin_human_turn)
             return
-        # 每步之间留出动画时间：先让高亮飘字播一会儿，再刷新棋盘
+        # move / attack：先播令牌动画（令牌结束后 refresh），再等一拍继续下一步
         if self.anim_enabled:
-            self.after(int(self.ai_step_ms * 0.7), self.refresh)
+            continue_next = lambda: self.after(
+                max(40, int(self.ai_step_ms * 0.5)), self._ai_play_next)
+            if step.get("type") == "attack":
+                tw = self.unit_widgets.get(id(step.get("target")))
+                if tw is not None and tw.winfo_exists() and self._wcenter(tw) is not None:
+                    self._anim_attack(step["unit"], tw, on_done=self.refresh)
+                    continue_next()
+                    return
+            elif step.get("type") == "hq_attack":
+                if self.hq_widget is not None and self.hq_widget.winfo_exists():
+                    self._anim_attack(step["unit"], self.hq_widget, on_done=self.refresh)
+                    continue_next()
+                    return
+            elif step.get("type") == "move":
+                self._anim_move(step["unit"], on_done=self.refresh)
+                continue_next()
+                return
         else:
             self.refresh()
         self.after(max(1, self.ai_step_ms), self._ai_play_next)
@@ -1797,6 +2085,8 @@ class App(tk.Tk):
             return
         self.busy = False
         self.refresh()
+        if getattr(self, "_ai_replay", False):
+            self.after(150, self._ai_replay)
 
     def cleanup_dead(self):
         for pl in self.game.players:
@@ -1962,11 +2252,37 @@ class App(tk.Tk):
         self.mainloop()
         print(f"SMOKE OK: {rounds} rounds")
 
+    def anim_test(self):
+        """动画链路自测：开启动画跑 AI 对战回放（部署入场/行军/进攻冲刺全链路），定时自动结束"""
+        self.ai_step_ms = 120
+        self.new_game_smoke()
+        self._ai_replay = self._run_ai_replay
+        self.after(150, self._ai_replay)
+        self.after(40000, self.destroy)
+        self.mainloop()
+        self._ai_replay = None
+        c = self._anim_count
+        total = c["entry"] + c["move"] + c["attack"]
+        print(f"ANIM TEST OK: 入场 {c['entry']} / 行军 {c['move']} / 进攻 {c['attack']}，共 {total} 次")
+        missing = [k for k in ("entry", "move", "attack") if c[k] == 0]
+        if missing:
+            raise SystemExit(f"[FAIL] 未触发动画类型: {missing}（检查 anim_enabled / 事件钩子 / _anim_* 调用链）")
+
+    def _run_ai_replay(self):
+        """双方都由 AI 驱动、开启动画：用于自测部署/行军/进攻全链路"""
+        g = self.game
+        if g is None or g.over or g.players[0].hq <= 0:
+            self.finish()
+            return
+        self.busy = True
+        self._ai_iter = g.ai_steps()
+        self.after(80, self._ai_play_next)
+
     def new_game_smoke(self):
         nations = random.choices(core.MAIN_NATIONS, k=2)
         p1 = core.Player("AI-红军", nations[0], core.build_deck(nations[0], self.db))
         p2 = core.Player("AI-蓝军", nations[1], core.build_deck(nations[1], self.db))
-        self.game = GUIGame(p1, p2, lambda m: None)
+        self.game = GUIGame(p1, p2, lambda m: None, self.on_game_event)
         self.start_frame.destroy()
         self._build_main()
         self.game.draw_cards(p1, core.START_HP)
@@ -2060,11 +2376,14 @@ def main():
     if "--debug-on-net" in sys.argv:
         run_debug_net()
         return
-    if "--smoke" not in sys.argv and _another_instance_running():
+    if "--smoke" not in sys.argv and "--anim-test" not in sys.argv and _another_instance_running():
         return
     app = App()
     if "--smoke" in sys.argv:
         app.after(100, app.smoke_test)
+        app.mainloop()
+    elif "--anim-test" in sys.argv:
+        app.after(100, app.anim_test)
         app.mainloop()
     else:
         app.mainloop()
