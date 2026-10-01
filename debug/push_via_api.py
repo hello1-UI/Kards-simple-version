@@ -14,8 +14,14 @@ import base64
 import json
 import os
 import subprocess
+import sys
 import urllib.request
 from datetime import datetime, timezone, timedelta
+
+# 本机 DNS 对 github.com 系列域名返回被污染的不可达 IP，这里做进程级解析重定向
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gh_dns
+gh_dns.install()
 
 OWNER, REPO = "hello1-UI", "Kards-simple-version"
 REPO_API = f"https://api.github.com/repos/{OWNER}/{REPO}"
