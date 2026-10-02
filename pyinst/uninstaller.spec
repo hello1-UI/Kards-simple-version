@@ -1,9 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""卸载器打包 spec：把 apk/uninstall.py 打成单文件 KARDS卸载器.exe（带控制台）。"""
+"""卸载器打包 spec：apk/uninstall.py → pyinst/dist_tools/KARDS卸载器.exe（带控制台）"""
+import os
+
+# SPECPATH 由 PyInstaller 注入，等于「spec 文件所在目录」（已是绝对路径）。
+# 项目根 = 它再往上一层。
+ROOT = os.path.dirname(SPECPATH)
 
 a = Analysis(
-    ['apk/uninstall.py'],
-    pathex=[],
+    [os.path.join(ROOT, 'apk', 'uninstall.py')],
+    pathex=[ROOT],
     binaries=[],
     datas=[],
     hiddenimports=['winreg'],

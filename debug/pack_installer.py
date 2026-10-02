@@ -75,15 +75,16 @@ README = """KARDS 简化版 —— 安装说明
 
 def main():
     # 发布包以 exe 为主；源码作为可选补充一起塞进去
+    tools = os.path.join(ROOT, "pyinst", "dist_tools")
     files = [
-        (os.path.join(ROOT, "dist_tools", "KARDS安装器.exe"), "KARDS安装器.exe"),
-        (os.path.join(ROOT, "dist_tools", "KARDS卸载器.exe"), "KARDS卸载器.exe"),
+        (os.path.join(tools, "KARDS安装器.exe"), "KARDS安装器.exe"),
+        (os.path.join(tools, "KARDS卸载器.exe"), "KARDS卸载器.exe"),
         (os.path.join(ROOT, "apk", "install.py"), "源码版/install.py"),
         (os.path.join(ROOT, "apk", "uninstall.py"), "源码版/uninstall.py"),
     ]
     for src, _ in files:
         if not os.path.isfile(src):
-            raise SystemExit(f"缺少文件: {src}\n（exe 请先运行 PyInstaller 打包）")
+            raise SystemExit(f"缺少文件: {src}\n（exe 请先运行 python debug/build_tools.py）")
 
     with zipfile.ZipFile(OUT, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for src, arc in files:

@@ -13,7 +13,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-EXE = os.path.join(ROOT, "dist_tools", "KARDS卸载器.exe")
+EXE = os.path.join(ROOT, "pyinst", "dist_tools", "KARDS卸载器.exe")
 
 PASS, FAIL = [], []
 

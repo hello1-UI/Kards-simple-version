@@ -1,9 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""安装器打包 spec：把 apk/install.py 打成单文件 KARDS安装器.exe（带控制台）。"""
+"""安装器打包 spec：apk/install.py → pyinst/dist_tools/KARDS安装器.exe（带控制台）
+
+⚠ excludes 里**绝不能包含 email** —— urllib.request 依赖它解析响应头，
+排掉后运行安装器会直接 ModuleNotFoundError 崩掉。
+"""
+import os
+
+# SPECPATH 由 PyInstaller 注入，等于「spec 文件所在目录」（已是绝对路径）。
+# 项目根 = 它再往上一层。
+ROOT = os.path.dirname(SPECPATH)
 
 a = Analysis(
-    ['apk/install.py'],
-    pathex=[],
+    [os.path.join(ROOT, 'apk', 'install.py')],
+    pathex=[ROOT],
     binaries=[],
     datas=[],
     hiddenimports=['winreg'],

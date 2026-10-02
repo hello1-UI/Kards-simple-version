@@ -2,22 +2,28 @@
 __pycache__/
 *.py[cod]
 
-# 构建产物（dist 用 PyInstaller 生成后自行打包分发）
-build/
-dist/
-build_tools/
-dist_tools/
+# ---- PyInstaller 产物（全部收拢在 pyinst/ 下）----
+# pyinst/*.spec 是源文件、要入库；下面四个是生成物，不入库
+pyinst/build/
+pyinst/build_tools/
+pyinst/dist/
+pyinst/dist_tools/
 
-# 运行时状态与日志
+# 分发包（本地打包后自行上传 Release）
+KARDS.zip
+KARDS_SimpleVersion-Setup.zip
+
+# ---- 运行时状态与日志 ----
 logs/
 *.log
 settings.json
-debug/*_out*.txt
-
-# 工作区元数据
-.workbuddy/
-KARDS_SimpleVersion-Setup.zip
 accounts.json
-
-# 服务器运行时数据库
+session.json
 kards_server.db*
+
+# 自组卡组（玩家数据）
+decks/
+decks_*/
+
+# ---- 工作区元数据 ----
+.workbuddy/
