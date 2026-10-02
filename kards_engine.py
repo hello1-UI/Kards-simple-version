@@ -1179,6 +1179,7 @@ class Game:
         self.current = p1
         self.interactive = interactive
         self.over = False
+        self.conceded = None    # 投降方（Player）；None = 正常打到总部倒下
         self.force_end = False  # 万岁冲锋等强制结束回合标记
         self.event_hook = None  # GUI 动画钩子: fn(event: dict)
         write_game_log(f"===== 新对局: {p1.name}({p1.nation}) vs "
@@ -1269,16 +1270,22 @@ class Game:
             self.emit({"type": "unit_damage", "unit": unit, "amount": amount})
             if unit.defense <= 0:
                 self.destroy_unit(unit)
-                if source is not None and source.has("收缴") \
-                        and unit not in unit.owner.board:
+                # [收缴] 只能缴获"敌人的"单位：不校验阵营的话，全场/随机
+                # 清除类效果打到自己人身上也会触发缴获。
+                if (source is not None and source.has("收缴")
+                        and source.owner is not unit.owner
+                        and unit not in unit.owner.board):
                     self.apply_confiscate(source, unit)
 
     def damage_hq(self, player, amount, source=None):
         """统一的总部伤害入口：处理近卫步兵成长 / 本土防卫军抽牌联动"""
         if amount <= 0 or player.hq <= 0:
-            player.hq -= max(0, amount)
-            if amount > 0:
+            # 总部已经倒下：不再继续扣血（否则血量会一路变负，污染 ai_power 等
+            # 按血量算分的逻辑）。至少保证有下限 0。
+            if amount > 0 and player.hq > 0:
+                player.hq = max(0, player.hq - amount)
                 self.emit({"type": "hq_damage", "player": player, "amount": amount})
+            self._check_game_over()
             return
         # 西苏精神: 总部即将受到伤害时，转嫁给敌方总部（反制消耗）
         c = self.check_counter(player, "hq_damage", None)
@@ -1287,7 +1294,7 @@ class Game:
             self.emit({"type": "counter", "card": c})
             self.damage_hq(self.opponent_of(player), amount, source=source)
             return
-        player.hq -= amount
+        player.hq = max(0, player.hq - amount)
         self.emit({"type": "hq_damage", "player": player, "amount": amount})
         # 近卫步兵: 你的总部受到伤害时 +1 攻击
         for u in player.board:
@@ -1299,6 +1306,17 @@ class Game:
             marker = self.players[player.ats_mark - 1]
             self.draw_cards(marker, 1)
             self.log(f"  [本土防卫军] {player.name} 的总部受到 {amount} 点伤害，{marker.name} 抽了 1 张牌。")
+        self._check_game_over()
+
+    def _check_game_over(self):
+        """血 ≤ 0 就结束对局。
+
+        统一收口：所有扣血路径最后都过这里，就不会出现「有人死了但 over
+        还是 False」的中间态（之前只在 end_turn 里判当前方，对手死了不管）。
+        """
+        if not self.over and any(p.hq <= 0 for p in self.players):
+            self.over = True
+
 
     def apply_confiscate(self, killer, victim):
         """[收缴]：消灭单位时把一张 1/1 副本（费用至多 3）加入手牌"""
@@ -1759,6 +1777,11 @@ class Game:
 
     # ---------------- 出牌 ----------------
     def play_card(self, p, idx):
+        # 边界校验：负索引在 Python 里是合法的（-1 取最后一张），网络/插件
+        # 传来的 idx 只挡了正向越界，负数会静默打出错误的手牌。
+        if not isinstance(idx, int) or not (0 <= idx < len(p.hand)):
+            self.log("  手牌编号无效！")
+            return False
         card = p.hand[idx]
         cost = self.get_cost(card, p)
         if cost > p.kredits:
@@ -1808,6 +1831,11 @@ class Game:
 
     # ---------------- 回合流程 ----------------
     def start_turn(self):
+        # 对局已结束（有人总部倒下 / 投降）就不要再推进回合了。
+        # GUI 有多处会无条件调用 start_turn，缺这道守卫时死掉的玩家
+        # 还会继续抽牌、拿 Kredits、结算动员。
+        if self.over or self.current.hq <= 0:
+            return
         self.turn_num += 1
         self.force_end = False
         p = self.current
@@ -1834,10 +1862,19 @@ class Game:
                 self.log(f"  [动员] {u.name} 获得 +1/+1（{u.attack}/{u.defense}）。")
 
     def end_turn(self):
-        if self.current.hq <= 0:
+        # 临时增益必须在任何早退之前还原，否则「闪电战 / 呜啦！」的加攻
+        # 会在对局结束的那一刻永久留在场上（temp_buffs 再没机会清空）。
+        self._cleanup_own_turn()
+        if any(p.hq <= 0 for p in self.players):
+            # 任一方总部倒下就结束。只看 self.current 会漏掉「对手已死但
+            # 还没轮到我方结算」的情形，导致死人继续抽牌拿 Kredits。
             self.over = True
             return
-        # 还原本回合临时攻击增益（闪电战 / 呜啦！）
+        self.force_end = False
+        self.current = self.opponent_of(self.current)
+
+    def _cleanup_own_turn(self):
+        """回合结束时的收尾：还原临时攻击增益与各类临时标记"""
         for u, amount in self.current.temp_buffs:
             if u in self.current.board:
                 u.attack -= amount
@@ -1846,8 +1883,6 @@ class Game:
         for u in self.current.board:
             u.overflow_turn = False
         self.opponent_of(self.current).ats_mark = 0
-        self.force_end = False
-        self.current = self.opponent_of(self.current)
 
     # ---------------- 界面（命令行）----------------
     def show_board(self):
@@ -2038,25 +2073,30 @@ class Game:
         return his >= my * AI_CONCEDE_RATIO
 
     def incoming_damage(self, foe):
-        """对方场上所有单位一轮内能打出的理论最大伤害（含轰炸机 +2）。"""
+        """对方场上所有单位一轮内能打出的**总部**伤害（含轰炸机 +2）。
+
+        只统计真的打得到总部的单位。曾经把打不到总部的单位按 0.5 折算
+        进来，结果一个后方步兵 9 攻也能凑出 4.5 点"斩杀伤害"，
+        濒死判定（incoming >= hq）被误判，AI 会在其实安全时投降。
+        """
         total = 0
         for u in foe.board:
             if u.defense <= 0:
                 continue
-            dmg = self.hq_damage(u)
             if self.can_hit_hq(u)[0]:
-                total += dmg * max(1, u.max_attacks)   # 奋战可打两次
-            else:
-                # 打不到总部：能解掉的场面价值按一半折算
-                total += dmg * max(1, u.max_attacks) * 0.5
+                total += self.hq_damage(u) * max(1, u.max_attacks)   # 奋战可打两次
         return total
 
     def ai_steps(self):
         """AI 回合的分步执行器：每完成一个动作 yield 一次，供 GUI 逐步播放动画"""
         p = self.current
+        # 对局已结束就别再动了（GUI 可能在结算后又推进了一次）
+        if self.over:
+            return
         # 开局先判断有没有胜算，没有就直接投降（省得陪打到最后一滴血）
         if self.ai_should_concede(p):
             self.over = True
+            self.conceded = p
             yield {"type": "concede", "player": p, "reason": self.ai_concede_reason(p)}
             return
         acted = True
@@ -2115,32 +2155,47 @@ class Game:
                             self.destroy_unit(dead)
         yield {"type": "end"}
 
+    def winner_of(self):
+        """判定胜者（None = 平局）。
+
+        三种结束方式，必须分开处理：
+          - 双方总部同时倒下 → 平局
+          - 一方总部倒下 → 另一方获胜
+          - 投降（self.conceded）→ 投降方的对手获胜
+
+        之前只靠"谁的 hq > 0"来猜，把"投降"和"被打死"混为一谈，
+        而且双死时会因为 players[0].hq > 0 为假而错判给 players[1]。
+        """
+        p0, p1 = self.players
+        if p0.hq <= 0 and p1.hq <= 0:
+            return None
+        if self.conceded is not None:
+            return self.opponent_of(self.conceded)
+        if p0.hq <= 0:
+            return p1
+        if p1.hq <= 0:
+            return p0
+        return None
+
     def run(self):
         for p in self.players:
             self.draw_cards(p, START_HP)
         self.draw_cards(self.players[1], 1)  # 后手多抽一张
         while not self.over:
             self.start_turn()
-            if self.current.hq <= 0:
+            if self.over or self.current.hq <= 0:
                 break
             if self.interactive and self.current.name == "你":
                 self.human_turn()
             else:
                 self.log("  [AI 行动中]")
                 self.ai_turn()
-            if self.over and self.current.hq > 0:
+            if self.conceded is not None:
                 # AI 判定无胜算投降：不结算回合，直接结束
                 self.log(f"  🏳 {self.current.name} 认为已无胜算，选择投降！")
                 break
             self.end_turn()
-        if self.players[0].hq <= 0 and self.players[1].hq <= 0:
-            winner = None             # 同归于尽：平局
-        elif self.over:
-            # 投降：血少没死的那一方（AI）判负
-            self.over = False
-            winner = self.players[0] if self.players[0].hq > 0 else self.players[1]
-        else:
-            winner = self.players[0] if self.players[1].hq <= 0 else self.players[1]
+        winner = self.winner_of()
         print(f"\n{'='*40}")
         if winner is None:
             print("  战斗结束！双方总部同时陷落——平局！")

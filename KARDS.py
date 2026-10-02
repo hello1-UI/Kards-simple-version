@@ -56,7 +56,7 @@ APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 # a: 重要修复(1位数)  b: 卡牌更新(2位数)  c: 赛季更新(2位数)  d: 补丁修复(3位数)
 # 升位规则: 某位 +1 后, 其右侧所有位清零（如卡牌更新 1.01.00.000）
 # 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
-VERSION = (1, 2, 0, 0)
+VERSION = (1, 2, 0, 1)
 
 FONT = ("Microsoft YaHei UI", 12)
 FONT_S = ("Microsoft YaHei UI", 10)
@@ -2281,9 +2281,12 @@ class App(tk.Tk):
         if reason:
             self.add_log(i18n.t("ai_concede_reason", reason=reason))
         g.over = True
+        # 记录投降方：engine 的 winner_of() 靠它区分"投降"和"被打死"
+        g.conceded = (step or {}).get("player") or g.players[1]
         self.busy = False
         self.refresh()
-        self.finish(winner=g.players[0])
+        # 用引擎判定胜者（= 投降方的对手），比写死 players[0] 更稳
+        self.finish(winner=g.winner_of() or g.players[0])
 
     def _ai_play_next(self):
         g = self.game
@@ -2369,10 +2372,14 @@ class App(tk.Tk):
         g = self.game
         self._mp_game_over = True
         if winner is None:
-            if g.players[0].hq <= 0 and g.players[1].hq <= 0:
-                winner = None            # 同归于尽：平局
-            else:
-                winner = g.players[0] if g.players[1].hq <= 0 else g.players[1]
+            # 交给引擎统一判定（区分平局 / 投降 / 被打死）。
+            # 注意：winner_of() 在"没人死"时也返回 None，所以不能直接拿来
+            # 当平局用 —— 只有双方总部都倒下才是真平局。
+            winner = g.winner_of()
+            if winner is None and not (g.players[0].hq <= 0 and g.players[1].hq <= 0):
+                # 既没分胜负也不是双死：说明是对手断线之类的提前结算。
+                # 我方还在 → 判我方获胜。
+                winner = g.players[0] if g.players[0].hq > 0 else g.players[1]
         me = g.players[0]
         if winner is None:
             won = None

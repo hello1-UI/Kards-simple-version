@@ -201,6 +201,7 @@ LANGS = {
         "practice_title": "🎯 Practice",
         "practice_sub": "Play vs AI\nBuild your deck · random match",
         "settings_title": "Settings",
+        "settings_language": "Language / 语言",
         "btn_help": "📖 How to Play",
         "btn_quit": "🚪 Quit",
         "help_title": "How to Play",
@@ -344,6 +345,7 @@ LANGS = {
         "practice_title": "🎯 練習",
         "practice_sub": "AI と対戦\nデッキ構築可能 · ランダムマッチ",
         "settings_title": "設定",
+        "settings_language": "言語 / Language",
         "btn_help": "📖 遊び方",
         "btn_quit": "🚪 終了",
         "help_title": "操作説明",
@@ -352,7 +354,7 @@ LANGS = {
             "· 味方ユニットを敵ユニット/本部へドラッグして攻撃\n"
             "· 「味方前線」へドラッグで前進、支援ラインへ戻すと後退\n"
             "· 移動と攻撃は両方行動コスト(⚡)を消費；電撃なしの配置ターンは移動/攻撃不可\n"
-            "· 步兵は毎ターン移動か攻撃のどちらか；戦車は移動して攻撃も可\n"
+            "· 歩兵は毎ターン移動か攻撃のどちらか；戦車は移動して攻撃も可\n"
             "· 空軍・砲兵は支援ラインから攻撃可（敵前線ユニットと本部）\n"
             "· 砲兵・爆撃機は護衛を無視；爆撃機は戦闘機を優先攻撃し、迎撃される\n"
             "· 砲兵・爆撃機の攻撃は反撃を受けない；爆撃機は反撃しない\n"
