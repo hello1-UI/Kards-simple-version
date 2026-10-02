@@ -37,7 +37,7 @@ import sys
 import time
 
 MAX_KREDITS = 12
-HQ_HP = 25
+HQ_HP = 20             # 总部血量：各国统一 20（实际取值见下方 HQ_CARDS）
 BOARD_SIZE = 9         # 一方场上总上限（前线5 + 支援线4；总部不算单位）
 REAR_SLOTS = 4         # 支援阵线（后方）最多 4 个单位
 FRONTLINE_SLOTS = 5    # 前线最多 5 个单位（占领方）
@@ -49,6 +49,16 @@ COUNTER_SLOTS = 3    # 反制区上限
 DECK_SIZE = 39       # 卡组张数：39 张单位/指令/反制 + 1 张总部卡 = 40 张
 MAX_COPIES = 3       # 单卡上限
 ALLY_LIMIT = 20      # 盟国卡上限（约卡组的 1/3）
+
+# ---- AI 自动投降 ----
+# 设计原则：宁可多打一会儿，也不要早退。只有"确实已经输了"才投降。
+# 阈值按总部血量 HQ_HP 标定：HQ=20 时，HP2 取 8（40% 血线）。
+AI_AUTO_CONCEDE = True     # 总开关：AI 觉得没胜算时主动投降
+AI_CONCEDE_HP = 4          # 濒死线：总部血 ≤ 此值 + 对方场攻够 → 投
+AI_CONCEDE_HP2 = 8         # 资源枯竭判定的血线：血高于此值一律不投
+AI_CONCEDE_RATIO = 3.0     # 对方场面强度 ≥ 我方此倍数才算被碾压
+AI_CONCEDE_DECK_LEFT = 3   # 牌库剩余 ≤ 此值才算"资源枯竭"
+AI_CONCEDE_IGNORE_HAND = False  # True=忽略"手里还攒着牌"这一保留条件
 
 MAIN_NATIONS = ["德国", "苏联", "美国", "英国", "日本"]
 ALLY_NATIONS = ["意大利", "法国", "芬兰", "波兰", "澳新军团"]
@@ -181,18 +191,28 @@ class HQCard:
         self.perk_desc = perk_desc
 
 
+# 总部血量统一为 20：各国只靠"研发被动"区分特色，血量不再造成额外强弱差
 HQ_CARDS = {
-    "德国": HQCard("德国", "德国国防军总部", 25, "tank_discount",
+    "德国": HQCard("德国", "德国国防军总部", 20, "tank_discount",
                    "研发·闪电战术: 你的坦克费用 -1"),
-    "苏联": HQCard("苏联", "苏联最高统帅部", 27, "regen",
+    "苏联": HQCard("苏联", "苏联最高统帅部", 20, "regen",
                    "研发·纵深防御: 每回合开始总部恢复 1 点生命"),
-    "美国": HQCard("美国", "盟军远征军总部", 24, "air_attack",
+    "美国": HQCard("美国", "盟军远征军总部", 20, "air_attack",
                    "研发·航空引擎: 你的战斗机与轰炸机攻击 +1"),
-    "英国": HQCard("英国", "英国皇家司令部", 24, "support_discount",
+    "英国": HQCard("英国", "英国皇家司令部", 20, "support_discount",
                    "研发·情报部门: 你的指令与反制费用 -1"),
-    "日本": HQCard("日本", "大日本帝国大本营", 24, "inf_attack",
+    "日本": HQCard("日本", "大日本帝国大本营", 20, "inf_attack",
                    "研发·精神注入: 你的步兵攻击 +1"),
 }
+
+# 一致性校验：所有国家的总部血量必须相同（统一 20）。
+# 曾经各国血量不同（25/27/24/24/24），等于偷偷给某些国家加/减上限，
+# 强弱不在同一基准线上。这里显式断言，防止以后改单张卡时又飘掉。
+assert len({c.hp for c in HQ_CARDS.values()}) == 1, \
+    "各国总部血量必须一致，当前: " + \
+    ", ".join(f"{n}={c.hp}" for n, c in HQ_CARDS.items())
+assert next(iter(HQ_CARDS.values())).hp == HQ_HP, \
+    f"总部血量应为 {HQ_HP}，当前 {next(iter(HQ_CARDS.values())).hp}"
 
 
 class Unit:
@@ -1942,9 +1962,103 @@ class Game:
         for _ in self.ai_steps():
             pass
 
+    # ---------------- AI 投降判定 ----------------
+
+    def ai_power(self, p):
+        """估算一方当前的"场面强度"：总部血 + 场上单位的攻防 + 手牌/牌库资源。
+
+        单位按 攻击+防御 计（防御权重略高，因为站得住才有输出），
+        手牌按 每张 2 点、牌库按 每 5 张 1 点折算成等效血量。
+        结果只用于比较双方强弱，绝对值没有意义。
+        """
+        score = p.hq * 1.0
+        for u in p.board:
+            score += u.attack + u.defense * 1.15
+            # 关键特性（警卫/亡计等）略微加分
+            score += 0.4 * len([k for k in u.keywords if k in ("警卫", "伏击", "重甲", "亡计")])
+        score += 2.0 * len(p.hand)
+        score += 1.0 * len(p.deck) / 5.0
+        score += 1.5 * len(p.counters)          # 暗置反制 = 潜在收益
+        return score
+
+    def ai_concede_reason(self, p):
+        """给投降补一句人话理由（写进战斗日志）"""
+        foe = self.opponent_of(p)
+        return (f"总部 {p.hq} vs {foe.hq}，"
+                f"场面 {len(p.board)} 单位 vs {len(foe.board)} 单位")
+
+    def ai_should_concede(self, p):
+        """AI 判断自己已经彻底没胜算 → 投降。
+
+        判定分两种情形（都要求"确实已经输了"，宁可多打一会儿也不早退）：
+
+          1. **濒死必死**：总部血 ≤ AI_CONCEDE_HP，且对方场上现有单位
+             一轮能打出的伤害就足以打死我，而我没有任何即时保命手段
+             （血量再少也不救——救不回来就是白送）
+
+          2. **资源枯竭 + 场面碾压**：总部血量已经低于 AI_CONCEDE_HP2
+             （不是"还健康"），牌库抽干、手里也没有能打出的牌，
+             同时对方场面强度是我方 AI_CONCEDE_RATIO 倍以上。
+             三个条件同时成立才算——只满足"打不出牌"是后期常态，不能投。
+
+        两种情形都额外要求"本回合已经没有攻击可打"：如果场上还有 ready
+        的单位能出手，就应该先打完这一轮再谈投降（手里攒着一次攻击却
+        直接认输，看起来像 AI 在摆烂）。
+
+        返回 True 表示该投降。真人玩家不受影响（只在 ai_steps 里调用）。
+        """
+        if not AI_AUTO_CONCEDE:
+            return False
+        g = self
+        foe = g.opponent_of(p)
+
+        incoming = self.incoming_damage(foe)
+        my, his = self.ai_power(p), self.ai_power(foe)
+
+        # --- 情形 0：还有能出手的单位就先打完，不打完不许投 ---
+        if any(self.unit_ready(u) and self.attack_targets(u) for u in p.board):
+            return False
+
+        # --- 情形 1：濒死必死 ---
+        if p.hq <= AI_CONCEDE_HP and incoming >= p.hq:
+            # 手里有牌也可能翻盘（治疗/清场/斩杀对面总部），再给自己一次机会
+            if self.playable_cards(p) and p.hq > 2:
+                return False
+            return True
+
+        # --- 情形 2：资源枯竭 + 场面碾压 + 血线已低 ---
+        if p.hq > AI_CONCEDE_HP2:
+            return False                        # 血还很健康，谈不上没胜算
+        if p.hand and self.playable_cards(p):
+            return False                        # 还有牌可打，别投
+        if len(p.deck) > AI_CONCEDE_DECK_LEFT:
+            return False                        # 牌库还有货，后面能抽到东西
+        if p.hand and not AI_CONCEDE_IGNORE_HAND:
+            return False                        # 手里还攒着牌（只是暂时打不出）
+        return his >= my * AI_CONCEDE_RATIO
+
+    def incoming_damage(self, foe):
+        """对方场上所有单位一轮内能打出的理论最大伤害（含轰炸机 +2）。"""
+        total = 0
+        for u in foe.board:
+            if u.defense <= 0:
+                continue
+            dmg = self.hq_damage(u)
+            if self.can_hit_hq(u)[0]:
+                total += dmg * max(1, u.max_attacks)   # 奋战可打两次
+            else:
+                # 打不到总部：能解掉的场面价值按一半折算
+                total += dmg * max(1, u.max_attacks) * 0.5
+        return total
+
     def ai_steps(self):
         """AI 回合的分步执行器：每完成一个动作 yield 一次，供 GUI 逐步播放动画"""
         p = self.current
+        # 开局先判断有没有胜算，没有就直接投降（省得陪打到最后一滴血）
+        if self.ai_should_concede(p):
+            self.over = True
+            yield {"type": "concede", "player": p, "reason": self.ai_concede_reason(p)}
+            return
         acted = True
         while acted:
             acted = False
@@ -2014,9 +2128,17 @@ class Game:
             else:
                 self.log("  [AI 行动中]")
                 self.ai_turn()
+            if self.over and self.current.hq > 0:
+                # AI 判定无胜算投降：不结算回合，直接结束
+                self.log(f"  🏳 {self.current.name} 认为已无胜算，选择投降！")
+                break
             self.end_turn()
         if self.players[0].hq <= 0 and self.players[1].hq <= 0:
             winner = None             # 同归于尽：平局
+        elif self.over:
+            # 投降：血少没死的那一方（AI）判负
+            self.over = False
+            winner = self.players[0] if self.players[0].hq > 0 else self.players[1]
         else:
             winner = self.players[0] if self.players[1].hq <= 0 else self.players[1]
         print(f"\n{'='*40}")

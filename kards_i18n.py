@@ -188,6 +188,9 @@ LANGS = {
         "account_logout": "退出登录",
         "account_stats": "战绩：{w} 胜 / {l} 负 / {d} 平",
         "click_hint": "▼ 点击屏幕回到大厅 ▼",
+        # ---- AI 投降 ----
+        "ai_concede_log": "  🏳 AI 认为已无胜算，选择投降！",
+        "ai_concede_reason": "  （{reason}）",
     },
     "en": {
         "app_title": "KARDS Lite",
@@ -329,6 +332,8 @@ LANGS = {
         "account_logout": "Log Out",
         "account_stats": "Record: {w}W / {l}L / {d}D",
         "click_hint": "▼ Click anywhere to return to the lobby ▼",
+        "ai_concede_log": "  🏳 The AI sees no way to win and surrenders!",
+        "ai_concede_reason": "  ({reason})",
     },
     "ja": {
         "app_title": "KARDS 簡易版",
@@ -470,6 +475,8 @@ LANGS = {
         "account_logout": "ログアウト",
         "account_stats": "戦績：{w} 勝 / {l} 負 / {d} 分",
         "click_hint": "▼ 画面をクリックしてロビーへ ▼",
+        "ai_concede_log": "  🏳 AI は勝ち目がないと判断し、降伏しました！",
+        "ai_concede_reason": "  （{reason}）",
     },
 }
 
