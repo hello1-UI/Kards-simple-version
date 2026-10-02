@@ -75,9 +75,13 @@ URLS = [
 SPEED_TEST_BYTES = 512 * 1024   # 测速只拉前 512KB
 SPEED_TEST_TIMEOUT = 8          # 单个源测速上限
 SPEED_TEST_MIN_BPS = 30 * 1024  # 低于 30KB/s 视为不可用
-DL_TOTAL_TIMEOUT = 300          # 单源总时长上限
+DL_TOTAL_TIMEOUT = 600          # 单源总时长上限
 DL_STALL_TIMEOUT = 45           # 连续无数据多久算卡住
 CONNECT_TIMEOUT = 15            # 建连超时
+# ⚠ 读超时必须明显大于 DL_STALL_TIMEOUT：resp.read() 用的是 socket 级超时，
+# 若设成 15s，镜像在 98% 处卡一下就整包作废（实测踩过：ghfast.top 跑到
+# 11.0/11.2MB 抛 "read operation timed out"，白等 58 秒才换源）。
+DL_READ_TIMEOUT = DL_STALL_TIMEOUT + 30
 
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Kards-Simple-Version"
 
@@ -217,7 +221,7 @@ def _download_one(url, dest, name):
     try:
         req = urllib.request.Request(
             url, headers={"User-Agent": "kards-installer"})
-        with urllib.request.urlopen(req, timeout=CONNECT_TIMEOUT) as resp, \
+        with urllib.request.urlopen(req, timeout=DL_READ_TIMEOUT) as resp, \
                 open(dest, "wb") as f:
             total_hdr = resp.getheader("Content-Length")
             total = int(total_hdr) if total_hdr and total_hdr.isdigit() else None
@@ -281,7 +285,13 @@ def extract(zip_path, install_dir):
     zip 内的路径都带 `KARDS/` 顶层前缀，这里**剥掉该前缀**再写入，
     保证 KARDS.exe 直接落在 install_dir 下，而不是多套一层。
     以文件为单位推进进度，避免大文件造成进度长时间不动。
+
+    若某个目标文件正被占用（最常见：安装器自己被装在同一个目录里），
+    就写到 `<名字>.new` 而不是直接崩掉 —— 安装要继续，不能让一个
+    被锁的 exe 毁掉整次安装。
     """
+    running = _running_exes()
+    renamed = []
     with zipfile.ZipFile(zip_path) as z:
         members = [(i, i.filename) for i in z.infolist() if not i.is_dir()]
         if not members:
@@ -300,13 +310,27 @@ def extract(zip_path, install_dir):
             rel = fn[len(strip):] if strip else fn
             dest = os.path.join(install_dir, *rel.split("/"))
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with z.open(info) as src, open(dest, "wb") as out:
-                shutil.copyfileobj(src, out, 512 * 1024)
+            if os.path.normcase(os.path.abspath(dest)) in running:
+                dest += ".new"
+                renamed.append((rel, os.path.basename(dest)))
+            try:
+                with z.open(info) as src, open(dest, "wb") as out:
+                    shutil.copyfileobj(src, out, 512 * 1024)
+            except PermissionError:
+                # 极端情况：文件被别的进程锁住（杀软 / 资源管理器预览）
+                alt = dest + ".new"
+                with z.open(info) as src, open(alt, "wb") as out:
+                    shutil.copyfileobj(src, out, 512 * 1024)
+                renamed.append((rel, os.path.basename(alt)))
             if n % 25 == 0 or n == total:
                 filled = 20 * n // total
                 print(f"\r    [{'#' * filled}{'-' * (20 - filled)}] "
                       f"{n}/{total} 文件", end="")
         print()
+    if renamed:
+        print("  ⚠ 以下文件正在使用中，已另存为 .new（关闭相关程序后可手动改名）：")
+        for rel, alt in renamed:
+            print(f"      {rel}  ->  {alt}")
     print("  解压完成")
 
 
@@ -469,15 +493,71 @@ def fetch_latest_version():
 
 # ---------------------------------------------------------------- 主流程
 
+def _running_exes():
+    """返回当前进程与父进程（都是本安装器）的 exe 全路径，用于避免自删/自覆盖。
+
+    打包后 sys.executable 就是安装器 exe；源码运行时是 python.exe。
+    两种情况都要保护：安装器可能被安装在它自己所在的目录里
+    （用户把 Setup 包解压到 D 盘某目录，再在那里直接双击安装器并填同一路径）。
+    """
+    out = set()
+    for pid in (os.getpid(), os.getppid()):
+        if not pid or pid <= 0:
+            continue
+        try:
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.restype = wintypes.HANDLE
+            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL,
+                                        wintypes.DWORD]
+            k32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+            k32.QueryFullProcessImageNameW.argtypes = [
+                wintypes.HANDLE, wintypes.DWORD,
+                wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+            k32.CloseHandle.argtypes = [wintypes.HANDLE]
+            h = k32.OpenProcess(0x1000, False, pid)   # QUERY_LIMITED_INFORMATION
+            if not h:
+                continue
+            buf = ctypes.create_unicode_buffer(32767)
+            size = wintypes.DWORD(32767)
+            try:
+                if k32.QueryFullProcessImageNameW(h, 0, buf,
+                                                  ctypes.byref(size)):
+                    out.add(os.path.normcase(os.path.abspath(buf.value)))
+            finally:
+                k32.CloseHandle(h)
+        except Exception:
+            pass
+    if getattr(sys, "frozen", False):
+        out.add(os.path.normcase(os.path.abspath(sys.executable)))
+    return out
+
+
 def cleanup_old(install_dir):
-    """覆盖安装：清掉旧程序文件（保留卸载器）"""
+    """覆盖安装：清掉旧程序文件（保留卸载器与正在运行的安装器自身）"""
     keep = {"uninstall.py", "KARDS卸载器.exe", "uninstaller.exe"}
+    running = _running_exes()
     try:
         for n in os.listdir(install_dir):
             p = os.path.join(install_dir, n)
             if n in keep:
                 continue
-            if n in ("KARDS.exe", "KARDS.zip", "_internal"):
+            # 绝不删正在运行的程序（否则解压时又写同名文件会 WinError 32）
+            if os.path.normcase(os.path.abspath(p)) in running:
+                print(f"    (跳过正在运行的文件: {n})")
+                continue
+            if n in ("KARDS.exe", "KARDS.zip", "_internal",
+                     "KARDS安装器.exe", "KARDS_SimpleVersion-Setup.zip"):
+                if os.path.isdir(p):
+                    shutil.rmtree(p, ignore_errors=True)
+                else:
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+            else:
+                # 其它残留（上一次解压出的源码版、安装说明等）一并清掉，
+                # 让安装目录只留下本次安装的内容
                 if os.path.isdir(p):
                     shutil.rmtree(p, ignore_errors=True)
                 else:
@@ -489,28 +569,89 @@ def cleanup_old(install_dir):
         pass
 
 
+def _echo(text):
+    """尽力把提示打出来（没有控制台时失败也不影响流程）"""
+    try:
+        print(text, flush=True)
+    except (OSError, ValueError, UnicodeError):
+        pass
+
+
+def _try_read_line(prompt):
+    """尝试读一行输入。
+
+    返回 (成功?, 文本)。任何"读不到"的情况（没有控制台、stdin 被关、
+    exe 双击时句柄无效）都返回 (False, "")，绝不抛异常。
+    """
+    try:
+        if sys.stdin is None:
+            return False, ""
+        _echo(prompt)
+        line = input()
+    except (EOFError, OSError, ValueError, KeyboardInterrupt):
+        return False, ""
+    return True, line
+
+
+def ask_install_dir():
+    """询问安装路径：命令行参数 > 交互输入 > 默认。
+
+    ⚠ 关键教训（用户实际踩过）：**不要**用 `sys.stdin.isatty()` 或
+    `GetConsoleWindow()` 预判"有没有控制台"再决定要不要问 —— 这两个在
+    PyInstaller 的 exe 双击时都不可靠（都返回 False），结果安装器会
+    **静默跳过询问**，用户在控制台里敲的路径根本没被读进去。
+    正确做法：直接尝试读，读不到才回退到默认值。
+    """
+    if len(sys.argv) > 1:
+        return os.path.abspath(sys.argv[1]), "命令行参数"
+
+    _echo("")
+    _echo("-" * 56)
+    _echo("  想装在哪里？")
+    _echo(f"    直接回车  →  {DEFAULT_DIR}")
+    _echo(r"    或输入    →  D:\Games\KARDS   这样的路径")
+    _echo("-" * 56)
+
+    for attempt in range(3):
+        ok, raw = _try_read_line("安装路径 > ")
+        if not ok:
+            # 读不到输入（无控制台 / EOF）→ 用默认，不纠缠
+            _echo(f"  读不到输入，改用默认路径: {DEFAULT_DIR}")
+            return DEFAULT_DIR, "默认（非交互）"
+        raw = raw.strip().strip('"').strip("'").strip()
+        if not raw:
+            return DEFAULT_DIR, "默认（回车）"
+        try:
+            path = os.path.abspath(os.path.expanduser(raw))
+        except (OSError, ValueError) as e:
+            _echo(f"  ✗ 路径无法解析（{e}），请重新输入。")
+            continue
+        if os.path.dirname(path) == path:
+            _echo(f"  ✗ {path} 是磁盘根目录，请换成子目录，例如 "
+                  f"{path.rstrip(os.sep)}{os.sep}Kards-Simple-Version")
+            continue
+        # 拒绝 Windows 不允许的字符，以及容易造成困惑的转义序列
+        # （实测踩过：粘贴的路径里带字面量 \n / \t，会建出名为 "n" 的目录）
+        bad = [c for c in '<>:"|?*' if c in path.lstrip(os.sep)[2:]]
+        if bad:
+            _echo(f"  ✗ 路径含 Windows 不允许的字符: {' '.join(bad)}")
+            continue
+        if any(s in raw for s in ("\\n", "\\t", "\\r")):
+            _echo(r"  ✗ 路径里含 \n \t \r 这类转义写法，"
+                  r"请直接粘贴真实路径（例如 D:\Games\KARDS）")
+            continue
+        return path, "手动输入"
+    _echo("  连续 3 次输入无效，改用默认路径。")
+    return DEFAULT_DIR, "默认（输入无效）"
+
+
 def main():
     print("=" * 56)
     print("  KARDS 简化版 安装器")
     print("=" * 56)
 
-    # 安装路径：命令行参数 > 交互输入 > 默认
-    if len(sys.argv) > 1:
-        install_dir = os.path.abspath(sys.argv[1])
-    elif not sys.stdin or not sys.stdin.isatty():
-        # 非交互（双击 exe / 管道）时 input() 会立刻 EOF，直接用默认目录。
-        # PyInstaller 打包的 exe 双击运行时 stdin 常常不可读，必须先判断，
-        # 否则会在"安装路径"这一步直接崩掉。
-        install_dir = DEFAULT_DIR
-        print(f"  安装路径(非交互，用默认): {install_dir}")
-    else:
-        try:
-            raw = input(f"安装路径 [{DEFAULT_DIR}]（直接回车用默认，"
-                        "或输入如 D:\\Games\\KARDS）:\n> ").strip().strip('"')
-        except EOFError:
-            raw = ""
-        install_dir = os.path.abspath(raw) if raw else DEFAULT_DIR
-    print(f"  安装到: {install_dir}")
+    install_dir, how = ask_install_dir()
+    print(f"  安装到: {install_dir}   [{how}]")
     # 管理权限：目标不可写且当前非管理员 → 请求提权
     if not can_write(install_dir) and not is_admin():
         print("  目标目录需要管理员权限，弹出 UAC 授权窗口...")
@@ -623,8 +764,9 @@ def main():
     print(f"  用户数据: {DATA_DIR}")
     print("=" * 56)
     if os.path.isfile(exe):
+        # 闪一下安装目录，让用户能确认文件确实落在哪里
         try:
-            os.startfile(DATA_DIR)
+            os.startfile(install_dir)          # noqa: S606
         except OSError:
             pass
     input("按回车键退出安装器 ...")

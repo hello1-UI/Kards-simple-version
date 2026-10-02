@@ -292,15 +292,18 @@ def main():
 
     print("[4/4] 用户数据 ...")
     purge = "--purge" in sys.argv
-    if not purge and not sys.stdin.isatty():
-        # 从"应用和功能"双击卸载时通常无交互控制台，默认保留用户数据
-        purge = "--purge" in sys.argv
-    if not purge:
+    keep = "--keep" in sys.argv
+    if not purge and not keep:
+        # ⚠ 不要用 sys.stdin.isatty() 预判"有没有控制台"：exe 双击时它返回
+        # False，会把用户的 y 输入吞掉。直接问，读不到就默认保留。
+        # 从"应用和功能"里点卸载通常是静默的，那种情况 input() 会立刻 EOF。
         try:
-            ans = input("  同时删除用户数据（设置/日志/自组卡组）? [y/N]: ")
+            print("  是否同时删除用户数据（设置/日志/自组卡组）？")
+            ans = input("  [y/N]: ")
             purge = ans.strip().lower() in ("y", "yes")
-        except (EOFError, KeyboardInterrupt):
+        except (EOFError, OSError, ValueError, KeyboardInterrupt):
             purge = False
+            print("  （读不到输入，默认保留用户数据）")
     if purge:
         shutil.rmtree(DATA_DIR, ignore_errors=True)
         print(f"  已删除: {DATA_DIR}")
