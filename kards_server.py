@@ -41,6 +41,23 @@ HEARTBEAT_TIMEOUT = 60            # 超过该秒数没收到任何消息则判�
 PRINT_LOCK = threading.Lock()
 
 
+def user_data_db():
+    """打包运行时的数据库路径（%USERPROFILE%\\AppData\\Kards-Simple-Version）。
+
+    安装目录常在 Program Files 下，普通用户没有写权限；把库放那儿
+    第一次注册就会炸。用户数据目录与游戏主体（settings/logs/decks）保持一致。
+    """
+    base = os.environ.get("KARDS_DATA_DIR")
+    if not base:
+        base = os.path.join(os.path.expanduser("~"), "AppData", "Kards-Simple-Version")
+    try:
+        os.makedirs(base, exist_ok=True)
+    except OSError:
+        return os.path.join(os.path.dirname(os.path.abspath(sys.executable)),
+                            "kards_server.db")
+    return os.path.join(base, "kards_server.db")
+
+
 def log(msg):
     with PRINT_LOCK:
         sys.stdout.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
@@ -607,7 +624,21 @@ def norm_pw(pw):
 # ----------------------------------------------------------------- 启动
 
 class Server(socketserver.ThreadingTCPServer):
-    allow_reuse_address = True
+    """联机服务器。
+
+    ⚠ `allow_reuse_address` 在 Windows 上的语义与 Unix **完全不同**：
+    它不是「等 TIME_WAIT 结束后能立刻重绑」，而是「两个 socket 可以同时
+    绑到同一个端口」—— 于是第二个服务器进程会**静默抢走**第一个的端口，
+    两边都以为自己监听着（实测：先开的进程还在 serve_forever，后开的
+    照样 bind 成功）。玩家连的是谁全看运气。
+
+    典型触发场景：大厅里点了两次「建立服务器」，或者游戏进程没退干净
+    又启动了一个。这时应该**明确报错「端口已被占用」**，而不是默默起两个。
+
+    Unix 上则相反：TIME_WAIT 期间不设 SO_REUSEADDR 会导致「刚重启就连不上」。
+    所以按平台分开设。
+    """
+    allow_reuse_address = (os.name != "nt")
     daemon_threads = True
 
 
@@ -619,8 +650,25 @@ def main():
     ap.add_argument("--db", default=None, help="数据库文件（默认同目录 kards_server.db）")
     args = ap.parse_args()
 
-    db_path = args.db or os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "kards_server.db")
+    if getattr(sys, "frozen", False):
+        # ⚠ 打包后 __file__ 指向 _internal/ 里的数据文件，同目录可能是只读的
+        # 安装目录（Program Files）。数据库必须落到用户数据目录，
+        # 否则第一次写入就 PermissionError。user_data_db() 内部已经
+        # 优先认 KARDS_DATA_DIR（测试隔离用）。
+        db_default = user_data_db()
+    else:
+        # 源码运行：KARDS_DATA_DIR 优先（测试/便携），否则放脚本同目录
+        env_dir = os.environ.get("KARDS_DATA_DIR")
+        if env_dir:
+            try:
+                os.makedirs(env_dir, exist_ok=True)
+            except OSError:
+                pass
+            db_default = os.path.join(env_dir, "kards_server.db")
+        else:
+            db_default = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "kards_server.db")
+    db_path = args.db or db_default
     DB = Store(db_path)
 
     log("=" * 56)

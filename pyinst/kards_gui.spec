@@ -17,8 +17,22 @@ a = Analysis(
     [os.path.join(ROOT, 'KARDS.py')],
     pathex=[ROOT],
     binaries=[],
-    datas=[],
-    hiddenimports=[],
+    datas=[
+        # ⚠ kards_server.py 是**独立的服务器程序**，由玩家自己启动
+        # （python kards_server.py 或打包后的 exe）。它不是被 import 的模块，
+        # PyInstaller 的依赖分析看不见它 —— 必须当数据文件带进包，
+        # 否则联机模式在大厅里根本起不来服务器。
+        (os.path.join(ROOT, 'kards_server.py'), '.'),
+    ],
+    hiddenimports=[
+        # 这几个是同目录的兄弟模块，正常 import 能被分析到；显式列出是为了
+        # 防止将来有人把 import 挪进函数体（延迟导入）导致漏打。
+        # kards_server 是**故意**列进来的：`KARDS.exe --server` 会
+        # import kards_server（见 KARDS.py::run_server_entry），
+        # 但那是在一个分支里延迟导入的，分析器可能看不到。
+        'kards_engine', 'kards_i18n', 'kards_net', 'kards_account',
+        'kards_host', 'kards_update', 'kards_server',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

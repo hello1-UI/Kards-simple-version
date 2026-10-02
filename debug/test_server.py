@@ -21,6 +21,12 @@ ROOT = os.path.dirname(HERE)
 PY = sys.executable
 PORT = 6399
 
+# ⚠ 服务器 stdout **绝不能**用 PIPE 而不读：Windows 的管道缓冲区只有 4-8KB，
+# 服务器 log() 每条连接都会打印，写满后 print 阻塞 → 整个单线程 accept 循环
+# 卡死 → 测试在中途出现无法解释的随机失败（实测踩过）。
+# 这里直接丢弃输出；需要排查时把 SERVER_LOG 指到一个文件。
+SERVER_LOG = os.devnull
+
 PASS, FAIL = [], []
 
 
@@ -137,7 +143,7 @@ def main():
     proc = subprocess.Popen(
         [PY, os.path.join(ROOT, "kards_server.py"),
          "--port", str(PORT), "--host", "127.0.0.1", "--db", db_path],
-        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        cwd=ROOT, stdout=open(SERVER_LOG, "wb"), stderr=subprocess.STDOUT)
     try:
         # 等服务器就绪
         ok = False
@@ -149,9 +155,8 @@ def main():
             except OSError:
                 time.sleep(0.1)
         if not ok:
-            print("服务器启动失败：")
+            print("服务器启动失败")
             proc.terminate()
-            print(proc.stdout.read().decode("utf-8", "ignore"))
             return 1
 
         print("\n=========== 1. 注册 / 登录 ===========")
@@ -409,9 +414,9 @@ def main():
     finally:
         proc.terminate()
         try:
-            out = proc.stdout.read().decode("utf-8", "ignore")
-        except Exception:
-            out = ""
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
         time.sleep(0.3)
         for suffix in ("", "-wal", "-shm"):
             try:
@@ -425,9 +430,6 @@ def main():
         print("失败项：")
         for f in FAIL:
             print("  - " + f)
-        if out:
-            print("\n--- 服务器输出 ---")
-            print(out[-3000:])
         return 1
     print("全部通过 ✓")
     return 0

@@ -1175,7 +1175,17 @@ ALIAS = {
 
 # ---- 用户数据目录 -------------------------------------------------------------
 # 打包运行时: 用户数据(日志/卡组)统一存到 %USERPROFILE%\AppData\Kards-Simple-Version
-if getattr(sys, "frozen", False):
+#
+# 环境变量 KARDS_DATA_DIR 优先级最高：便于自动化测试/便携部署把数据
+# 写到指定目录，避免污染真实用户数据（测试脚本据此隔离账号与会话）。
+_env_data = os.environ.get("KARDS_DATA_DIR")
+if _env_data:
+    DATA_DIR = os.path.abspath(_env_data)
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+    except OSError:
+        pass
+elif getattr(sys, "frozen", False):
     DATA_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Kards-Simple-Version")
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
