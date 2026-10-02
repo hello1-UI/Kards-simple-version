@@ -346,26 +346,89 @@ def _ps_quote(s):
     return str(s).replace("'", "''")
 
 
-def make_shortcut(lnk, target, workdir, desc):
+def make_shortcut(lnk, target, workdir, desc, icon=None):
+    """创建快捷方式（含图标）。
+
+    ⚠ 必须显式设置 IconLocation：WScript.Shell 默认不会从 target 提取图标，
+    生成的 .lnk 在桌面显示为**空白图标**，用户会误以为"没创建"。
+    图标直接用 KARDS.exe 自身的图标（第 0 号资源）。
+    """
+    if icon is None:
+        icon = target
     ps = (
+        "$ErrorActionPreference='Stop';"
         "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%s');"
         "$s.TargetPath='%s';$s.WorkingDirectory='%s';"
-        "$s.Description='%s';$s.Save()"
-        % (_ps_quote(lnk), _ps_quote(target), _ps_quote(workdir), _ps_quote(desc))
+        "$s.Description='%s';$s.IconLocation='%s,0';$s.Save()"
+        % (_ps_quote(lnk), _ps_quote(target), _ps_quote(workdir),
+           _ps_quote(desc), _ps_quote(icon))
     )
-    r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                       capture_output=True, text=True, timeout=30)
+    r = _ps_run(ps)
     if r.returncode != 0:
         detail = (r.stderr or r.stdout or "").strip().splitlines()
         raise RuntimeError(detail[-1] if detail else f"exit {r.returncode}")
+    # 复核：PowerShell 有时返回 0 但其实没写成（比如路径不可写被吞掉）。
+    # 测试里会替换 _ps_run 做纯参数校验，此时跳过写盘复核。
+    if _ps_run is _ps_run_real and not os.path.isfile(lnk):
+        raise RuntimeError(f"快捷方式未生成: {lnk}")
 
 
 def shell_folder(name):
-    ps = f"[Environment]::GetFolderPath('{name}')"
-    r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                       check=True, capture_output=True, text=True, timeout=30)
-    out = r.stdout.strip()
-    return out or os.path.join(os.path.expanduser("~"), name)
+    """取系统外壳目录（Desktop / StartMenu / Programs 等）。
+
+    ⚠ 不能用 [Environment]::GetFolderPath('Desktop') —— 它返回的是
+    「旧式」桌面路径，在开了 OneDrive 桌面同步的机器上会拿到
+    C:\\Users\\X\\Desktop，而用户真正看到的是
+    C:\\Users\\X\\OneDrive\\Desktop，快捷方式就"凭空消失"了。
+    WScript.Shell 的 SpecialFolders 走的是 Explorer 的实际指向，更准。
+    """
+    ps = ("$ErrorActionPreference='Stop';"
+          "(New-Object -ComObject WScript.Shell).SpecialFolders.Item('%s')"
+          % _ps_quote(name))
+    try:
+        r = _ps_run(ps)
+        out = (r.stdout or "").strip()
+        if r.returncode == 0 and out and os.path.isdir(out):
+            return out
+    except Exception:
+        pass
+    # 回退：先试 OneDrive 重定向桌面，再试传统路径
+    home = os.path.expanduser("~")
+    alt = os.path.join(home, "OneDrive", name)
+    if name == "Desktop" and os.path.isdir(alt):
+        return alt
+    return os.path.join(home, name)
+
+
+def _ps_run(script, timeout=30):
+    """跑一段 PowerShell 脚本。用**二进制**读输出再手工解码。
+
+    ⚠ 不能传 text=True：中文 Windows 的 PowerShell 用 GBK 输出，
+    Python 默认按 UTF-8 解码会抛 UnicodeDecodeError
+    （报错发生在 subprocess 的 reader 线程里，主线程只能看到
+    "exit 1"，完全看不出真正原因）。
+    """
+    r = subprocess.run(["powershell", "-NoProfile", "-Command", script],
+                       capture_output=True, timeout=timeout)
+    return subprocess.CompletedProcess(
+        r.args, r.returncode, _dec(r.stdout), _dec(r.stderr))
+
+
+def _dec(b):
+    """按可能出现的编码依次尝试解码控制台输出"""
+    if b is None:
+        return ""
+    if isinstance(b, str):
+        return b
+    for enc in ("utf-8", "gbk", "mbcs", "latin-1"):
+        try:
+            return b.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return b.decode("utf-8", "replace")
+
+
+_ps_run_real = _ps_run        # 供测试判断是否被替换
 
 
 def register_uninstall(install_dir, version, hklm, uni_path):
@@ -434,11 +497,20 @@ def main():
     # 安装路径：命令行参数 > 交互输入 > 默认
     if len(sys.argv) > 1:
         install_dir = os.path.abspath(sys.argv[1])
+    elif not sys.stdin or not sys.stdin.isatty():
+        # 非交互（双击 exe / 管道）时 input() 会立刻 EOF，直接用默认目录。
+        # PyInstaller 打包的 exe 双击运行时 stdin 常常不可读，必须先判断，
+        # 否则会在"安装路径"这一步直接崩掉。
+        install_dir = DEFAULT_DIR
+        print(f"  安装路径(非交互，用默认): {install_dir}")
     else:
-        raw = input(f"安装路径 [{DEFAULT_DIR}]: ").strip().strip('"')
+        try:
+            raw = input(f"安装路径 [{DEFAULT_DIR}]（直接回车用默认，"
+                        "或输入如 D:\\Games\\KARDS）:\n> ").strip().strip('"')
+        except EOFError:
+            raw = ""
         install_dir = os.path.abspath(raw) if raw else DEFAULT_DIR
     print(f"  安装到: {install_dir}")
-
     # 管理权限：目标不可写且当前非管理员 → 请求提权
     if not can_write(install_dir) and not is_admin():
         print("  目标目录需要管理员权限，弹出 UAC 授权窗口...")
@@ -502,26 +574,47 @@ def main():
     # 4. 快捷方式 + 系统注册
     print("\n[4/4] 创建快捷方式并注册到系统 ...")
     exe = os.path.join(install_dir, "KARDS.exe")
-    try:
-        desktop = shell_folder("Desktop")
-        make_shortcut(os.path.join(desktop, "KARDS 简化版.lnk"),
-                      exe, DATA_DIR, "KARDS Simplified - WWII Card Game")
-        sm = os.path.join(os.environ.get("APPDATA", ""),
-                          "Microsoft", "Windows", "Start Menu", "Programs")
-        os.makedirs(sm, exist_ok=True)
-        make_shortcut(os.path.join(sm, "KARDS 简化版.lnk"),
-                      exe, DATA_DIR, "KARDS Simplified - WWII Card Game")
-        print("  快捷方式: 桌面 + 开始菜单 ✓")
-    except Exception as e:
-        print(f"  快捷方式创建失败（不影响游戏本体）: {e}")
+    if not os.path.isfile(exe):
+        print(f"  ⚠ 未找到 KARDS.exe（{exe}），请确认安装包完整")
+    lnk_made = []
+    for label, folder, name in (
+            ("桌面", "Desktop", "KARDS 简化版.lnk"),
+            ("开始菜单", "Programs", "KARDS 简化版.lnk")):
+        try:
+            where = shell_folder(folder)
+            os.makedirs(where, exist_ok=True)
+            path = os.path.join(where, name)
+            make_shortcut(path, exe, DATA_DIR,
+                          "KARDS Simplified - WWII Card Game",
+                          icon=exe if os.path.isfile(exe) else None)
+            lnk_made.append(path)
+            print(f"  {label}快捷方式 ✓  {path}")
+        except Exception as e:
+            print(f"  ⚠ {label}快捷方式创建失败: {e}")
+
+    # 兜底：ShellExecute 层面的"桌面"不可写时，直接把快捷方式放用户目录
+    if not lnk_made:
+        try:
+            path = os.path.join(os.path.expanduser("~"), "KARDS 简化版.lnk")
+            make_shortcut(path, exe, DATA_DIR,
+                          "KARDS Simplified - WWII Card Game")
+            lnk_made.append(path)
+            print(f"  已把快捷方式放到用户目录 ✓  {path}")
+        except Exception as e:
+            print(f"  ⚠ 快捷方式全部失败: {e}")
+            print("    不影响游戏本体，可直接运行: " + exe)
+
     try:
         if uni_dst:
             register_uninstall(install_dir, fetch_latest_version(),
                                hklm=is_admin(), uni_path=uni_dst)
         else:
             print("  跳过应用注册（没有可用卸载器）")
+    except PermissionError as e:
+        print(f"  ⚠ 应用注册需要管理员权限（{e}）")
+        print("    以管理员身份重跑安装器即可注册到「应用和功能」")
     except Exception as e:
-        print(f"  应用注册失败（不影响游戏本体）: {e}")
+        print(f"  ⚠ 应用注册失败（不影响游戏本体）: {e}")
 
     print()
     print("=" * 56)
