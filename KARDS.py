@@ -56,7 +56,7 @@ APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 # a: 重要修复(1位数)  b: 卡牌更新(2位数)  c: 赛季更新(2位数)  d: 补丁修复(3位数)
 # 升位规则: 某位 +1 后, 其右侧所有位清零（如卡牌更新 1.01.00.000）
 # 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
-VERSION = (1, 1, 2, 2)
+VERSION = (1, 2, 0, 0)
 
 FONT = ("Microsoft YaHei UI", 12)
 FONT_S = ("Microsoft YaHei UI", 10)
@@ -2270,6 +2270,21 @@ class App(tk.Tk):
         self._ai_iter = g.ai_steps()
         self.after(max(1, self.ai_step_ms), self._ai_play_next)
 
+    def _ai_concede(self, step=None):
+        """AI 认定没胜算，主动投降 → 直接判我方获胜"""
+        g = self.game
+        self._ai_iter = None
+        if g is None:
+            return
+        reason = (step or {}).get("reason", "")
+        self.add_log(i18n.t("ai_concede_log"))
+        if reason:
+            self.add_log(i18n.t("ai_concede_reason", reason=reason))
+        g.over = True
+        self.busy = False
+        self.refresh()
+        self.finish(winner=g.players[0])
+
     def _ai_play_next(self):
         g = self.game
         if g is None:
@@ -2278,6 +2293,10 @@ class App(tk.Tk):
         try:
             while True:
                 step = next(self._ai_iter)
+                # AI 认输：直接结算（我方获胜）
+                if step.get("type") == "concede":
+                    self._ai_concede(step)
+                    return
                 # 打出卡牌 → 等 refresh 播放入场动画后再继续
                 if step.get("type") in ("play", "end"):
                     self.cleanup_dead()
