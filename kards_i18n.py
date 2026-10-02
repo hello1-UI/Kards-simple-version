@@ -52,6 +52,14 @@ LANGS = {
         "settings_title": "设置",
         "settings_language": "语言 / Language",
         "btn_help": "📖 操作说明",
+        "btn_keywords": "🔑 关键词说明",
+        "kw_title": "关键词与机制说明",
+        "kw_sub": "卡牌上会出现下面这些词，含义如下（对局中随时可查）",
+        "kw_group_unit": "单位关键词",
+        "kw_group_trigger": "触发类关键词",
+        "kw_group_term": "规则术语",
+        "kw_group_planned": "原版词条（本作暂未实装，供查阅规则）",
+        "kw_close": "知道了",
         "btn_quit": "🚪 退出游戏",
         "help_title": "操作说明",
         "help_text": (
@@ -63,9 +71,8 @@ LANGS = {
             "· 空军/炮兵在支援线即可攻击（敌方前线单位与总部）\n"
             "· 炮兵/轰炸机无视[警卫]；轰炸机必须优先打战斗机且会被战斗机拦截\n"
             "· 炮兵/轰炸机攻击不吃反击；轰炸机不反击（打它不吃反击）\n"
-            "· [闪击]部署当回合即可移动攻击；[冲击]攻击免反击（消耗）\n"
-            "· [收缴]消灭敌方单位时缴获一张 1/1 副本入手牌\n"
-            "· 联机：⚔ 战斗 → 主机/加入（局域网 TCP，默认端口 5555）"),
+            "· 卡牌上不认识的关键词 → 设置里的「🔑 关键词说明」\n"
+            "· 联机：⚔ 战斗 → 服务器模式（填服务器地址）或局域网直连"),
         "quit_title": "退出游戏",
         "quit_confirm": "确定退出 KARDS 吗？",
         # ---- 联机大厅 ----
@@ -203,6 +210,14 @@ LANGS = {
         "settings_title": "Settings",
         "settings_language": "Language / 语言",
         "btn_help": "📖 How to Play",
+        "btn_keywords": "🔑 Keywords",
+        "kw_title": "Keywords & Mechanics",
+        "kw_sub": "These words appear on cards — here is what they mean (available anytime in a match)",
+        "kw_group_unit": "Unit keywords",
+        "kw_group_trigger": "Triggered keywords",
+        "kw_group_term": "Rules glossary",
+        "kw_group_planned": "Original KARDS keywords (not yet implemented here — for reference)",
+        "kw_close": "Got it",
         "btn_quit": "🚪 Quit",
         "help_title": "How to Play",
         "help_text": (
@@ -214,9 +229,8 @@ LANGS = {
             "· Air & artillery can attack from the support line (enemy frontline & HQ)\n"
             "· Artillery & bombers ignore Guard; bombers must target fighters and can be intercepted\n"
             "· Artillery & bombers take no counterattack; bombers never counterattack\n"
-            "· Blitz: move & attack the turn deployed; Charge: no counterattack (consumed)\n"
-            "· Confiscate: killing a unit adds a 1/1 copy to your hand\n"
-            "· Online: Battle -> Host/Join (LAN TCP, default port 5555)"),
+            "· Don't know a keyword on a card? Settings -> '🔑 Keywords'\n"
+            "· Online: Battle -> server mode (enter server address) or direct LAN"),
         "quit_title": "Quit",
         "quit_confirm": "Quit KARDS?",
         "lobby_title": "Online Battle",
@@ -347,6 +361,14 @@ LANGS = {
         "settings_title": "設定",
         "settings_language": "言語 / Language",
         "btn_help": "📖 遊び方",
+        "btn_keywords": "🔑 キーワード説明",
+        "kw_title": "キーワードとルール",
+        "kw_sub": "カードに出てくる用語の意味（対戦中いつでも確認できます）",
+        "kw_group_unit": "ユニットキーワード",
+        "kw_group_trigger": "誘発型キーワード",
+        "kw_group_term": "ルール用語",
+        "kw_group_planned": "オリジナル KARDS のキーワード（本作では未実装・参考用）",
+        "kw_close": "閉じる",
         "btn_quit": "🚪 終了",
         "help_title": "操作説明",
         "help_text": (
@@ -358,9 +380,8 @@ LANGS = {
             "· 空軍・砲兵は支援ラインから攻撃可（敵前線ユニットと本部）\n"
             "· 砲兵・爆撃機は護衛を無視；爆撃機は戦闘機を優先攻撃し、迎撃される\n"
             "· 砲兵・爆撃機の攻撃は反撃を受けない；爆撃機は反撃しない\n"
-            "· 電撃：配置したターンに移動・攻撃可；突撃：反撃を受けない（消費）\n"
-            "· 接収：敵ユニットを倒すと 1/1 のコピーが手札に追加\n"
-            "· オンライン：バトル → ホスト/参加（LAN TCP、既定ポート 5555）"),
+            "· カードの用語が分からない → 設定の「🔑 キーワード説明」\n"
+            "· オンライン：バトル → サーバーモード（アドレス入力）または LAN 直結"),
         "quit_title": "終了",
         "quit_confirm": "KARDS を終了しますか？",
         "lobby_title": "オンライン対戦",

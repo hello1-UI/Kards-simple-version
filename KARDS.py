@@ -142,9 +142,9 @@ def card_tooltip(c, cost=None, unit=None):
     if desc:
         lines.append("—— " + desc)
     for kw in getattr(c, "keywords", []):
-        d = core.KEYWORD_DESC.get(kw)
+        d = core.kw_desc(kw, i18n.get_lang())
         if d:
-            lines.append(f"[{kw}] {d}")
+            lines.append(f"[{core.kw_label(kw, i18n.get_lang())}] {d}")
     rar = getattr(c, "rarity", "")
     if rar:
         lines.append("★ " + rar)
@@ -261,6 +261,7 @@ class App(tk.Tk):
         if self.account:
             core.set_decks_dir(account.deck_dir(self.account))
         self.bind_all("<Escape>", self.on_esc)
+        self.bind_all("<F1>", self.on_f1)
         self._build_start()
         if not self.account and self.anim_enabled:
             self.after(300, self._account_dialog)
@@ -328,7 +329,18 @@ class App(tk.Tk):
         self._refresh_account_btn()
 
     def _account_dialog(self):
+        # 单实例：反复点击（或启动定时器与手动点击撞车）时不再叠开多个窗口
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "account":
+                try:
+                    w.deiconify()
+                    w.lift()
+                    w.focus_force()
+                    return
+                except tk.TclError:
+                    pass
         win = tk.Toplevel(self)
+        win.role = "account"                # 便于查找/测试定位
         win.title(i18n.t("account_title"))
         win.configure(bg=BG)
         win.geometry("380x360")
@@ -395,9 +407,10 @@ class App(tk.Tk):
     def open_start_settings(self):
         """主界面右上角设置：语言 / 操作说明 / 退出游戏"""
         win = tk.Toplevel(self)
+        win.role = "start_settings"
         win.title(i18n.t("settings_title"))
         win.configure(bg=BG)
-        win.geometry("380x400")
+        win.geometry("380x460")
         win.transient(self)
         tk.Label(win, text=i18n.t("settings_title"), bg=BG, fg=TEXT,
                  font=FONT_XL).pack(pady=(18, 6))
@@ -415,15 +428,80 @@ class App(tk.Tk):
         def show_help():
             messagebox.showinfo(i18n.t("help_title"), i18n.t("help_text"))
 
+        def show_keywords():
+            self.open_keyword_guide()
+
         def quit_app():
             if messagebox.askyesno(i18n.t("quit_title"), i18n.t("quit_confirm")):
                 win.destroy()
                 self.destroy()
 
         for text, cmd, color in ((i18n.t("btn_help"), show_help, "#3a5a80"),
+                                 (i18n.t("btn_keywords"), show_keywords, "#4a6b8a"),
                                  (i18n.t("btn_quit"), quit_app, "#4a4f5a")):
             tk.Button(win, text=text, bg=color, fg=TEXT, font=FONT_B, bd=0,
                       padx=18, pady=8, cursor="hand2", command=cmd).pack(pady=6)
+
+    def open_keyword_guide(self):
+        """关键词说明：分组列出全部关键词与规则术语，可滚动。"""
+        win = tk.Toplevel(self)
+        win.role = "keyword_guide"          # 便于查找/测试定位本类窗口
+        win.title(i18n.t("kw_title"))
+        win.configure(bg=BG)
+        win.geometry("620x660")
+        win.minsize(520, 420)
+        win.transient(self)
+        tk.Label(win, text=i18n.t("kw_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(pady=(16, 4))
+        tk.Label(win, text=i18n.t("kw_sub"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(0, 10))
+
+        # ---- 可滚动区域 ----
+        outer = tk.Frame(win, bg=BG)
+        outer.pack(fill="both", expand=True, padx=16)
+        canvas = tk.Canvas(outer, bg=BG, highlightthickness=0)
+        bar = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=BG)
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+
+        # 让滚动区宽度跟随窗口（否则说明文字不会随窗口变宽换行）
+        def _fit(_e=None):
+            canvas.itemconfigure(cw, width=canvas.winfo_width())
+        cw = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.bind("<Configure>", _fit)
+
+        lang = i18n.get_lang()
+        for gkey, rows in core.keyword_guide(lang):
+            # 「未实装」分组用暗金色 + 分隔线区分，避免玩家误以为卡池里有这些词
+            planned = (gkey == "kw_group_planned")
+            if planned:
+                tk.Frame(inner, bg="#3a3f4a", height=1).pack(fill="x", pady=(18, 0))
+            tk.Label(inner, text=i18n.t(gkey), bg=BG,
+                     fg="#8a7a4a" if planned else GOLD,
+                     font=FONT_B, anchor="w").pack(fill="x", pady=(12, 4))
+            for name, desc in rows:
+                row = tk.Frame(inner, bg=PANEL if not planned else "#20242c")
+                row.pack(fill="x", pady=1)
+                tk.Label(row, text=name, bg=row["bg"], fg=DIM if planned else TEXT,
+                         font=FONT_B, width=12, anchor="w",
+                         padx=8, pady=4).pack(side="left")
+                tk.Label(row, text=desc, bg=row["bg"], fg=DIM, font=FONT_S,
+                         anchor="w", justify="left", wraplength=430,
+                         padx=4, pady=4).pack(side="left", fill="x", expand=True)
+
+        tk.Button(win, text=i18n.t("kw_close"), bg="#3a5a80", fg=TEXT,
+                  font=FONT_B, bd=0, padx=20, pady=8, cursor="hand2",
+                  command=win.destroy).pack(pady=12)
+
+        # 鼠标滚轮：只在指针位于本窗口时生效
+        def on_wheel(e):
+            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", on_wheel)
+        win.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
     def _lang_buttons(self, win, on_change):
         """设置窗中的语言切换行：三个语言按钮，当前语言置灰不可点"""
@@ -2158,9 +2236,10 @@ class App(tk.Tk):
     # ---------------- 设置 / 投降 / 退出 ----------------
     def open_settings(self):
         win = tk.Toplevel(self)
+        win.role = "ingame_settings"
         win.title(i18n.t("settings_title"))
         win.configure(bg=BG)
-        win.geometry("340x380")
+        win.geometry("340x460")
         win.transient(self)
         tk.Label(win, text=i18n.t("settings_title"), bg=BG, fg=TEXT,
                  font=FONT_XL).pack(pady=(16, 6))
@@ -2180,12 +2259,16 @@ class App(tk.Tk):
                 win.destroy()
                 self.back_to_menu()
 
+        def keywords():
+            self.open_keyword_guide()
+
         def quit_app():
             if messagebox.askyesno(i18n.t("quit_title"), i18n.t("quit_safe_confirm")):
                 win.destroy()
                 self.destroy()
 
-        for text, cmd, color in ((i18n.t("btn_surrender"), surrender, "#8a3a3a"),
+        for text, cmd, color in ((i18n.t("btn_keywords"), keywords, "#4a6b8a"),
+                                 (i18n.t("btn_surrender"), surrender, "#8a3a3a"),
                                  (i18n.t("btn_to_menu"), to_menu, "#3a5a80"),
                                  (i18n.t("btn_quit"), quit_app, "#4a4f5a")):
             tk.Button(win, text=text, bg=color, fg=TEXT, font=FONT_B, bd=0,
@@ -2199,6 +2282,13 @@ class App(tk.Tk):
         else:
             if messagebox.askyesno(i18n.t("quit_title"), i18n.t("quit_confirm")):
                 self.destroy()
+
+    def on_f1(self, event=None):
+        """F1：随时打开关键词说明（对局中也能查）"""
+        try:
+            self.open_keyword_guide()
+        except Exception:
+            pass
 
     def back_to_menu(self):
         """安全回到主菜单（放弃当前对局）"""

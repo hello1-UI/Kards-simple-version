@@ -74,7 +74,257 @@ KEYWORD_DESC = {
     "奋战": "每回合可攻击两次",
     "动员": "你的回合开始时 +1/+1，直到它受到伤害为止",
     "收缴": "消灭敌方单位时，将一张 1/1 副本（费用至多 3）加入手牌",
+    "亡计": "被消灭时，对敌方总部造成伤害（由卡牌效果授予）",
 }
+
+# 关键词速查表：给「关键词说明」界面用。
+# 每项 = (关键词, 一句话说明, 分类)
+# 分类用于界面分组：单位 / 触发 / 其他
+KEYWORD_GUIDE = [
+    ("闪击", "部署当回合即可移动和攻击（没有它的单位部署当回合不能动）", "单位"),
+    ("警卫", "保护相邻位置的单位；位于 #0 位（紧邻总部）的警卫还保护总部", "单位"),
+    ("奋战", "每回合可以攻击两次", "单位"),
+    ("伏击", "被攻击时先出手打击攻击者；攻击者若阵亡则本次攻击无效", "单位"),
+    ("装甲", "战斗伤害减少 1（指令等效果伤害不减）", "单位"),
+    ("装甲2", "战斗伤害减少 2（指令等效果伤害不减）", "单位"),
+    ("装甲3", "战斗伤害减少 3（指令等效果伤害不减）", "单位"),
+    ("冲击", "攻击敌方单位时不受反击，攻击后移除该关键词", "单位"),
+    ("动员", "你的回合开始时 +1/+1，直到它受到伤害为止", "触发"),
+    ("亡计", "被消灭时，对敌方总部造成伤害", "触发"),
+    ("收缴", "消灭敌方单位时，将一张 1/1 副本（费用至多 3）加入手牌", "触发"),
+]
+
+# 兵种与规则术语速查（同样用于「关键词说明」界面）
+TERM_GUIDE = [
+    ("行动费", "移动与攻击都要消耗。单位卡下方的 ⚡ 数字即行动费。"),
+    ("前线", "位于中间的一排。步兵必须在前线才能攻击敌方单位。"),
+    ("支援阵线", "自己后方的一排。新部署的单位默认进入这里。"),
+    ("步兵", "每回合「移动」与「攻击」二选一；要上前线才能打敌方单位。"),
+    ("坦克", "同一回合内可以既移动又攻击。"),
+    ("炮兵", "在支援阵线即可攻击，但只能打敌方前线单位与总部；无视[警卫]。"),
+    ("战斗机", "在支援阵线即可攻击；轰炸机攻击时必须优先打它，且能拦截轰炸机。"),
+    ("轰炸机", "在支援阵线即可攻击；攻击总部 +2 伤害；无视[警卫]；自身不进行反击。"),
+    ("研发", "总部卡自带的被动，每个主国各不相同。"),
+    ("Kredits", "每回合的资源，等于当前回合数（上限 12），用来支付卡牌费用。"),
+    ("疲劳", "牌库抽空后每回合受到的递增伤害。"),
+]
+
+# ---------------------------------------------------------------------------
+# 原版 KARDS 有、但本简化版尚未实装的关键词。
+# 单独成组列出，让说明界面既是一份「机制参考」，也是一份「路线图」。
+# 每项 = (关键词, 原版规则说明)；界面归入独立的「未实装」分组。
+# ---------------------------------------------------------------------------
+KEYWORD_PLANNED = [
+    ("部署", "部署效果会在该单位被部署时触发。"),
+    ("守护", "具有守护的单位两侧的目标获得[被守护]；守护单位自身无法获得[被守护]。"),
+    ("被守护", "被守护的单位只能被炮兵、轰炸机攻击。"),
+    ("重甲X", "受到的对战伤害 -X（X 为叠加层数，每张卡最多 3）；无法减免指令伤害。"
+              "本作对应关键词名为[装甲]/[装甲2]/[装甲3]。"),
+    ("烟幕", "无法被敌方单位攻击；该单位行动后失去烟幕。位于前线的单位不能具有烟幕。"),
+    ("隐蔽", "部署后以卡背朝上，敌人不知道它是什么单位，且无法被指令影响；"
+             "移动不会失去隐蔽，攻击或被攻击时揭示。"),
+    ("钳击", "部署时选择另一个友方单位，两者同时获得钳击效果；"
+             "其中一个离开战场后，另一个也失去该效果。"),
+    ("流亡", "流亡卡牌可用于其家乡国家与流亡所属国家（每张流亡卡的所属国都是指定好的，"
+             "一般以波兰为主）。"),
+    ("控制", "获得目标单位的控制权：若它是前线的唯一单位则保持原位，否则加入新控制者的支援阵线；"
+             "新控制者可随意调度，但单位的所有者不变。"),
+    ("情报X", "使对手手中 X 张牌变为明牌（X 为后缀数字，每张卡最多 3）。"),
+    ("山地", "部署或新增山地单位时，每控制一个其他山地单位，新单位获得 +1/+1。"),
+    ("抑制", "被抑制的单位失去所有词条、关键字与加成效果，并重置攻击力、防御值与行动花费。"),
+    ("协力", "使用该卡牌时，若本回合开始时场上没有相同国家的友方单位，总部将受到士气伤害。"),
+    ("士气伤害", "伤害值从 1 开始，每次递增 1（1、2、3、4……）。"),
+    ("老兵", "达到一定条件后升级为老兵，并重置攻击力与防御力。"),
+    ("特殊词条", "具有特殊词条的单位在场时即触发（特殊词条优先级高于手牌效果）。"),
+]
+
+# 关键词/术语的多语言译文：key = 中文原名（也是 KEYWORD_DESC 的键），
+# value = {"en": ..., "ja": ...}。中文原文直接用列表里的第二项。
+KEYWORD_I18N = {
+    "闪击": {"en": "Blitz", "ja": "電撃"},
+    "警卫": {"en": "Guard", "ja": "護衛"},
+    "奋战": {"en": "Fury", "ja": "奮戦"},
+    "伏击": {"en": "Ambush", "ja": "伏撃"},
+    "装甲": {"en": "Armor 1", "ja": "装甲1"},
+    "装甲2": {"en": "Armor 2", "ja": "装甲2"},
+    "装甲3": {"en": "Armor 3", "ja": "装甲3"},
+    "冲击": {"en": "Charge", "ja": "突撃"},
+    "动员": {"en": "Mobilize", "ja": "動員"},
+    "亡计": {"en": "Deathrattle", "ja": "遺言"},
+    "收缴": {"en": "Confiscate", "ja": "接収"},
+    "行动费": {"en": "Operation cost", "ja": "行動コスト"},
+    "前线": {"en": "Frontline", "ja": "前線"},
+    "支援阵线": {"en": "Support line", "ja": "支援ライン"},
+    "步兵": {"en": "Infantry", "ja": "歩兵"},
+    "坦克": {"en": "Tank", "ja": "戦車"},
+    "炮兵": {"en": "Artillery", "ja": "砲兵"},
+    "战斗机": {"en": "Fighter", "ja": "戦闘機"},
+    "轰炸机": {"en": "Bomber", "ja": "爆撃機"},
+    "研发": {"en": "Research", "ja": "研究"},
+    "Kredits": {"en": "Kredits", "ja": "Kredits"},
+    "疲劳": {"en": "Fatigue", "ja": "疲労"},
+    # ---- 尚未实装（原版规则参考）----
+    "部署": {"en": "Deploy", "ja": "配置"},
+    "守护": {"en": "Guard", "ja": "守護"},
+    "被守护": {"en": "Guarded", "ja": "被守護"},
+    "重甲X": {"en": "Heavy Armor X", "ja": "重装甲X"},
+    "烟幕": {"en": "Smoke", "ja": "煙幕"},
+    "隐蔽": {"en": "Camouflage", "ja": "隠蔽"},
+    "钳击": {"en": "Pincer", "ja": "挟撃"},
+    "流亡": {"en": "Exile", "ja": "亡命"},
+    "控制": {"en": "Control", "ja": "掌握"},
+    "情报X": {"en": "Intel X", "ja": "情報X"},
+    "山地": {"en": "Mountain", "ja": "山岳"},
+    "抑制": {"en": "Suppress", "ja": "抑圧"},
+    "协力": {"en": "Cooperation", "ja": "協力"},
+    "士气伤害": {"en": "Morale damage", "ja": "士気ダメージ"},
+    "老兵": {"en": "Veteran", "ja": "古参兵"},
+    "特殊词条": {"en": "Special keyword", "ja": "特殊キーワード"},
+}
+
+# 关键词说明的多语言详细解释
+KEYWORD_DESC_I18N = {
+    "闪击": {"en": "Can move and attack the turn it is deployed",
+             "ja": "配置したターンから移動・攻撃できる"},
+    "警卫": {"en": "Protects adjacent units; a Guard at slot #0 also protects the HQ",
+             "ja": "隣接ユニットを保護。スロット#0の護衛は本部も保護する"},
+    "奋战": {"en": "Can attack twice each turn",
+             "ja": "毎ターン2回攻撃できる"},
+    "伏击": {"en": "Strikes first when attacked; if the attacker dies, the attack is cancelled",
+             "ja": "攻撃された時、先に反撃する。攻撃側が倒れれば攻撃は無効"},
+    "装甲": {"en": "Combat damage -1 (ability damage is not reduced)",
+             "ja": "戦闘ダメージ -1（効果ダメージは軽減しない）"},
+    "装甲2": {"en": "Combat damage -2 (ability damage is not reduced)",
+              "ja": "戦闘ダメージ -2（効果ダメージは軽減しない）"},
+    "装甲3": {"en": "Combat damage -3 (ability damage is not reduced)",
+              "ja": "戦闘ダメージ -3（効果ダメージは軽減しない）"},
+    "冲击": {"en": "Attacking a unit takes no counterattack; removed after attacking",
+             "ja": "ユニット攻撃時に反撃を受けない。攻撃後に失われる"},
+    "动员": {"en": "+1/+1 at the start of your turn, until it takes damage",
+             "ja": "自分のターン開始時に +1/+1。ダメージを受けるまで持続"},
+    "亡计": {"en": "When destroyed, deals damage to the enemy HQ",
+             "ja": "破壊された時、敵本部にダメージを与える"},
+    "收缴": {"en": "When it kills an enemy unit, add a 1/1 copy (cost<=3) to your hand",
+             "ja": "敵ユニットを倒すと 1/1 コピー（コスト3以下）を手札に追加"},
+    "行动费": {"en": "Moving and attacking both cost this. The ⚡ number on the card.",
+               "ja": "移動と攻撃で消費する。カード下の ⚡ の数値。"},
+    "前线": {"en": "The middle row. Infantry must be here to attack enemy units.",
+             "ja": "中央の列。歩兵はここにいないと敵ユニットを攻撃できない。"},
+    "支援阵线": {"en": "Your rear row. Newly deployed units enter here by default.",
+                 "ja": "自陣後方の列。配置したユニットは通常ここに入る。"},
+    "步兵": {"en": "Move OR attack each turn; must reach the frontline to fight units.",
+             "ja": "毎ターン移動か攻撃のどちらか。前線に出ないとユニットと戦えない。"},
+    "坦克": {"en": "Can move and attack in the same turn.",
+             "ja": "同じターンに移動と攻撃の両方ができる。"},
+    "炮兵": {"en": "Attacks from the support line, but only enemy frontline units and HQ. Ignores Guard.",
+             "ja": "支援ラインから攻撃可。ただし敵前線ユニットと本部のみ。護衛を無視。"},
+    "战斗机": {"en": "Attacks from the support line; bombers must target it first and it can intercept them.",
+               "ja": "支援ラインから攻撃可。爆撃機はこれを優先攻撃し、迎撃もできる。"},
+    "轰炸机": {"en": "Attacks from the support line; +2 damage vs HQ; ignores Guard; never counterattacks.",
+               "ja": "支援ラインから攻撃可。本部に +2 ダメージ。護衛を無視。反撃しない。"},
+    "研发": {"en": "A passive built into the HQ card, different for each main nation.",
+             "ja": "本部カード固有のパッシブ。主要国ごとに異なる。"},
+    "Kredits": {"en": "Per-turn resource equal to the turn number (max 12), used to pay card costs.",
+                "ja": "ターン数と同じ毎ターンの資源（最大12）。カード費用の支払いに使う。"},
+    "疲劳": {"en": "Escalating damage each turn after your deck runs out.",
+             "ja": "山札が尽きた後、毎ターン受ける増加ダメージ。"},
+    # ---- 尚未实装（原版规则参考）----
+    "部署": {"en": "Triggers the moment the unit is deployed.",
+             "ja": "ユニットを配置した瞬間に発動する。"},
+    "守护": {"en": "Grants Guarded to both neighbouring targets; a Guard cannot gain Guarded itself.",
+             "ja": "両隣の対象に被守護を付与する。守護自身は被守護を得られない。"},
+    "被守护": {"en": "Can only be attacked by artillery and bombers.",
+               "ja": "砲兵と爆撃機からしか攻撃されない。"},
+    "重甲X": {"en": "Combat damage -X (max 3 per card); does not reduce ability damage. "
+                   "In this build it is called Armor 1/2/3.",
+              "ja": "戦闘ダメージ -X（1枚につき最大3）。効果ダメージは軽減しない。"
+                    "本作では装甲1/2/3 として実装。"},
+    "烟幕": {"en": "Cannot be attacked by enemy units; lost after it acts. "
+                   "A unit on the frontline cannot have Smoke.",
+             "ja": "敵ユニットから攻撃されない。行動すると失う。前線のユニットは煙幕を持てない。"},
+    "隐蔽": {"en": "Deployed face-down: the enemy cannot see what it is and orders cannot affect it. "
+                   "Movement does not reveal it; attacking or being attacked does.",
+             "ja": "裏向きで配置。敵には正体が分からず、命令の影響も受けない。"
+                   "移動では露見せず、攻撃・被攻撃で露見する。"},
+    "钳击": {"en": "On deploy, pick another friendly unit: both gain the Pincer effect. "
+                   "When one leaves the battlefield, the other loses it too.",
+             "ja": "配置時、他の味方ユニット1体を選び両者が挟撃効果を得る。"
+                   "片方が戦場を離れると他方も失う。"},
+    "流亡": {"en": "Exile cards can be used by their home nation and their exile nation "
+                   "(each card's exile nation is fixed, usually Poland).",
+             "ja": "亡命カードは母国と亡命先の国で使用できる"
+                   "（亡命先はカードごとに固定。多くはポーランド）。"},
+    "控制": {"en": "Take control of the target unit: it keeps its slot if it is the only "
+                   "frontline unit, otherwise it joins the new controller's support line. "
+                   "The owner never changes.",
+             "ja": "対象ユニットの支配権を得る。前線の唯一のユニットなら位置を維持し、"
+                   "それ以外は新しい支配者の支援ラインに入る。所有者は変わらない。"},
+    "情报X": {"en": "Reveals X cards in the opponent's hand (X is the suffix, max 3).",
+               "ja": "相手の手札 X 枚を公開する（X は数字、最大3）。"},
+    "山地": {"en": "When a Mountain unit is deployed, it gains +1/+1 for each other "
+                   "Mountain unit you control.",
+             "ja": "山岳ユニットを配置した時、他に支配している山岳ユニット1体ごとに +1/+1 を得る。"},
+    "抑制": {"en": "The unit loses all traits, keywords and buffs, and its attack, "
+                   "defense and operation cost are reset.",
+             "ja": "全ての特性・キーワード・強化を失い、攻撃力・防御力・行動コストがリセットされる。"},
+    "协力": {"en": "When played, if you did not control a friendly unit of the same nation "
+                   "at the start of the turn, your HQ takes morale damage.",
+             "ja": "使用時、ターン開始時に同じ国の味方ユニットを支配していなければ本部が士気ダメージを受ける。"},
+    "士气伤害": {"en": "Starts at 1 and increases by 1 each time (1, 2, 3, 4...).",
+                 "ja": "1 から始まり、回を追うごとに 1 ずつ増える（1、2、3、4…）。"},
+    "老兵": {"en": "Upgrades to a veteran once a condition is met, resetting its "
+                   "attack and defense.",
+             "ja": "条件を満たすと古参兵に昇格し、攻撃力と防御力がリセットされる。"},
+    "特殊词条": {"en": "Triggers while on the board (special keywords take priority "
+                     "over hand effects).",
+                 "ja": "戦場にある間発動する（特殊キーワードは手札効果より優先される）。"},
+}
+
+
+def kw_label(key, lang="zh"):
+    """关键词的显示名（中文原样，en/ja 查译文）"""
+    if lang == "zh":
+        return key
+    return KEYWORD_I18N.get(key, {}).get(lang, key)
+
+
+def kw_desc(key, lang="zh"):
+    """关键词的详细说明（中文优先取 KEYWORD_DESC，其次速查表）"""
+    if lang != "zh":
+        d = KEYWORD_DESC_I18N.get(key, {}).get(lang)
+        if d:
+            return d
+    if key in KEYWORD_DESC:
+        return KEYWORD_DESC[key]
+    for name, desc in TERM_GUIDE:
+        if name == key:
+            return desc
+    for src in (KEYWORD_GUIDE, KEYWORD_PLANNED):
+        for entry in src:
+            if entry[0] == key:
+                return entry[1]
+    return ""
+
+
+def keyword_guide(lang="zh"):
+    """返回 [(分组标题的 i18n key, [(显示名, 说明), ...]), ...]。
+
+    分组标题是 i18n key，由 GUI 侧用 t() 翻译；
+    条目名与说明按 lang 取本地化文本。
+    最后一组是「原版有、本作未实装」的词条，供玩家查规则与看路线图。
+    """
+    unit_rows = [(kw_label(n, lang), kw_desc(n, lang))
+                 for n, _d, cat in KEYWORD_GUIDE if cat == "单位"]
+    trig_rows = [(kw_label(n, lang), kw_desc(n, lang))
+                 for n, _d, cat in KEYWORD_GUIDE if cat == "触发"]
+    term_rows = [(kw_label(n, lang), kw_desc(n, lang)) for n, _d in TERM_GUIDE]
+    plan_rows = [(kw_label(n, lang), kw_desc(n, lang)) for n, _d in KEYWORD_PLANNED]
+    return [("kw_group_unit", unit_rows),
+            ("kw_group_trigger", trig_rows),
+            ("kw_group_term", term_rows),
+            ("kw_group_planned", plan_rows)]
+
+
 
 RULES_TEXT = [
     "部署: 新单位进入支援线; 移动与攻击都消耗行动费(⚡)",
