@@ -1177,6 +1177,19 @@ class App(tk.Tk):
         g = self.game
         if g is None:
             return
+        # 刷新会重建所有卡片控件，先清掉拖拽残留（高亮/幽灵卡），
+        # 否则旧控件的引用会留在 _hl_saved 里，且幽灵卡可能浮在死控件上
+        self._clear_highlights()
+        self._hl_saved = {}
+        self._lift_saved = {}
+        d = self.drag
+        if d is not None and d.get("ghost") is not None:
+            try:
+                if d["ghost"].winfo_exists():
+                    d["ghost"].destroy()
+            except tk.TclError:
+                pass
+            d["ghost"] = None
         me, foe = g.players[0], g.players[1]   # 固定我方视角，AI 回合不泄露手牌
         human_turn = g.current is me
         fc = NATION_COLOR.get(foe.nation, "#666")
@@ -1347,48 +1360,234 @@ class App(tk.Tk):
         return (self.game is not None and not self.busy
                 and self.game.current is self.game.players[0])
 
+    # ---- 拖拽画布：覆盖整个窗口，让卡能"拖出"手牌区 ----
+    def _drag_layer(self):
+        """返回覆盖全窗口的拖拽层（懒创建）。
+
+        关键：卡要能拖出原容器（手牌区/牌桌）之外，所以幽灵卡不能放进
+        原容器里（会被父容器裁剪），必须挂在一个铺满整个窗口的层上，
+        并用 place() 以绝对坐标定位。
+        """
+        layer = getattr(self, "_drag_layer_w", None)
+        if layer is not None and layer.winfo_exists():
+            return layer
+        layer = tk.Frame(self, bg=BG, bd=0, highlightthickness=0)
+        layer.place(x=0, y=0, relwidth=1, relheight=1)
+        layer.lift()
+        self._drag_layer_w = layer
+        return layer
+
+    def _drop_zones(self):
+        """返回 [(widget, 类型)] —— 拖拽时可以落下的区域。
+
+        类型用于判定合法性：
+          "deploy" 部署单位（我方支援阵线）
+          "front"  我方前线（移动 / 部署到前线）
+          "enemy"  敌方单位卡（攻击目标）
+          "hq"     敌方总部（攻击目标）
+        """
+        zones = []
+        for attr, kind in (("foe_rear_row", "enemy"),
+                           ("foe_front_row", "enemy"),
+                           ("my_front_row", "front"),
+                           ("my_rear_row", "deploy")):
+            w = getattr(self, attr, None)
+            if w is not None and w.winfo_exists():
+                zones.append((w, kind))
+        if self.hq_widget is not None and self.hq_widget.winfo_exists():
+            zones.append((self.hq_widget, "hq"))
+        for _u, w in self.enemy_widgets:
+            if w.winfo_exists():
+                zones.append((w, "enemy_card"))
+        return zones
+
     def _drag_start(self, payload, e, widget=None):
         if not self._drag_ok():
             return
         if widget is not None:
             self._last_drag_src = self._wcenter(widget)   # 部署入场动画的起飞点
         self.drag = {"payload": payload, "ghost": None,
-                     "sx": e.x_root, "sy": e.y_root}
+                     "sx": e.x_root, "sy": e.y_root,
+                     "widget": widget, "hot": None,
+                     "unbind": None}
+        # 抬起效果：源卡描边高亮，明确"这张正在被拖动"
+        # 注意：这是拖拽的基本反馈，不受 anim_enabled（动画开关）影响
+        if widget is not None:
+            self._lift_widget(widget)
+
+    def _lift_widget(self, w):
+        """拖拽中的源卡加一圈金色描边（松手/刷新时自动还原）"""
+        try:
+            if not w.winfo_exists():
+                return
+            if not hasattr(self, "_lift_saved"):
+                self._lift_saved = {}
+            if w not in self._lift_saved:
+                # 同时记下原描边色和原描边宽度，还原时一模一样放回去
+                self._lift_saved[w] = (w.cget("highlightbackground"),
+                                       w.cget("highlightthickness"))
+            w.configure(highlightbackground=GOLD, highlightthickness=3)
+        except tk.TclError:
+            pass
+
+    def _unlift_all(self):
+        for w, saved in list(getattr(self, "_lift_saved", {}).items()):
+            try:
+                if w.winfo_exists():
+                    bg, th = saved if isinstance(saved, tuple) else (saved, 2)
+                    w.configure(highlightbackground=bg, highlightthickness=th)
+            except tk.TclError:
+                pass
+        self._lift_saved = {}
+
+    def _ghost_text(self, payload):
+        """拖动时显示的文案 + 颜色（非法操作给出不同配色）"""
+        g = self.game
+        p = payload
+        if p[0] == "hand":
+            if p[1] >= len(g.players[0].hand):
+                return None, None
+            card = g.players[0].hand[p[1]]
+            eff = g.get_cost(card, g.players[0])
+            playable = eff <= g.players[0].kredits
+            if card.kind == "unit":
+                ok = playable and g.can_deploy(g.players[0])
+                return f"{card.name}  ◆{eff}  拖到支援阵线", (GOLD if ok else "#8a5a3a")
+            return f"{card.name}  ◆{eff}  拖到桌面", (GOLD if playable else "#8a5a3a")
+        if p[0] == "unit" and p[1] in g.players[0].board:
+            u = p[1]
+            return f"{u.name}  {u.attack}/{u.defense}  拖到目标或阵线", GOLD
+        return None, None
+
+    def _valid_drop(self, payload, x, y):
+        """当前落点是否是可执行的操作（决定高亮颜色）"""
+        g = self.game
+        if g is None:
+            return False
+        me = g.players[0]
+        for w, kind in self._drop_zones():
+            if not self._hit(x, y, w):
+                continue
+            if payload[0] == "hand":
+                idx = payload[1]
+                if idx >= len(me.hand):
+                    return False
+                card = me.hand[idx]
+                if card.kind == "unit":
+                    # 单位只能落在支援阵线（部署）
+                    return kind == "deploy"
+                return kind in ("deploy", "front")
+            unit = payload[1]
+            if unit not in me.board:
+                return False
+            if kind == "enemy_card":
+                u = next((uu for uu, ww in self.enemy_widgets if ww is w), None)
+                return u is not None and g.unit_ready(unit) \
+                    and u in g.attack_targets(unit)
+            if kind == "hq":
+                return g.unit_ready(unit)
+            if kind in ("front", "deploy"):
+                return True     # 机动不要求"可攻击"，引擎内部会再校验
+            return False
+        return False
 
     def _drag_motion(self, e):
         d = self.drag
         if d is None:
             return
         if d["ghost"] is None:
-            if abs(e.x_root - d["sx"]) < 6 and abs(e.y_root - d["sy"]) < 6:
+            # 阈值放宽到 4px，兼顾"轻点"与"随手拖"
+            if abs(e.x_root - d["sx"]) < 4 and abs(e.y_root - d["sy"]) < 4:
                 return
-            g = self.game
-            p = d["payload"]
-            if p[0] == "hand" and p[1] < len(g.players[0].hand):
-                txt = f"打出：{g.players[0].hand[p[1]].name}"
-            elif p[0] == "unit" and p[1] in g.players[0].board:
-                txt = f"{p[1].name} → 拖到目标"
-            else:
+            txt, color = self._ghost_text(d["payload"])
+            if txt is None:
+                # 这张牌当前打不出去（费用/回合等），静默放弃，
+                # 但要撤掉源卡的金描边，否则会一直亮着
+                self.drag = None
+                self._drag_cancel()
                 return
-            ghost = tk.Toplevel(self)
-            ghost.overrideredirect(True)
-            try:
-                ghost.attributes("-topmost", True)
-            except tk.TclError:
-                pass
-            tk.Label(ghost, text=txt, bg=GOLD, fg="#15171c", font=FONT_B,
-                     padx=10, pady=6).pack()
+            ghost = tk.Label(self._drag_layer(), text=txt, bg=color,
+                             fg="#15171c", font=FONT_B, bd=0, padx=12, pady=7)
+            ghost.place(x=-500, y=-500)
+            ghost.lift()
             d["ghost"] = ghost
-        d["ghost"].geometry(f"+{e.x_root + 12}+{e.y_root + 12}")
+            d["base_color"] = color
+        # 幽灵卡跟随鼠标，并做边界收拢，保证始终可见
+        gh = d["ghost"]
+        if not gh.winfo_exists():        # 幽灵卡被 refresh() 意外销毁
+            self.drag = None
+            self._drag_cancel()
+            return
+        w, h = gh.winfo_reqwidth(), gh.winfo_reqheight()
+        gx = min(max(0, e.x_root - self.winfo_rootx() - w // 2),
+                 max(0, self.winfo_width() - w))
+        gy = min(max(0, e.y_root - self.winfo_rooty() - h // 2),
+                 max(0, self.winfo_height() - h))
+        gh.place(x=gx, y=gy)
+
+        # 高亮当前落点：绿=可执行，红=不可执行
+        ok = self._valid_drop(d["payload"], e.x_root, e.y_root)
+        zone = self._zone_at(e.x_root, e.y_root)
+        if zone is not d["hot"]:
+            self._unhighlight(d["hot"])
+            d["hot"] = zone
+            self._highlight(zone, GREEN if ok else RED)
+        gh.configure(bg=GOLD if ok else "#7a4a4a")
+
+    def _zone_at(self, x, y):
+        """落点命中的区域控件（用于高亮）"""
+        for w, _kind in self._drop_zones():
+            if self._hit(x, y, w):
+                return w
+        return None
+
+    def _highlight(self, w, color):
+        if w is None or not w.winfo_exists():
+            return
+        try:
+            if not hasattr(self, "_hl_saved"):
+                self._hl_saved = {}
+            if w not in self._hl_saved:
+                self._hl_saved[w] = (w.cget("highlightbackground"),
+                                     w.cget("highlightthickness"))
+            w.configure(highlightbackground=color, highlightthickness=3)
+        except tk.TclError:
+            pass
+
+    def _unhighlight(self, w):
+        if w is None:
+            return
+        try:
+            if w.winfo_exists():
+                orig = getattr(self, "_hl_saved", {}).pop(w, None)
+                if orig:
+                    w.configure(highlightbackground=orig[0],
+                                highlightthickness=orig[1])
+                else:
+                    w.configure(highlightthickness=0)
+        except tk.TclError:
+            pass
+
+    def _clear_highlights(self):
+        for w in list(getattr(self, "_hl_saved", {}).keys()):
+            self._unhighlight(w)
 
     def _drag_drop(self, e):
         d = self.drag
         self.drag = None
         if d is None:
             return
-        if d["ghost"] is not None:
+        # 注意：这里不要清高亮/抬起。_resolve_drop 里可能需要给"被拒绝的落点"
+        # 闪一下红框（_shake_widget），先还原再闪会看到闪不出来。
+        # 真正打出/移动时 refresh() 会统一清场，取消时会走下面的 _drag_cancel。
+        if d["ghost"] is not None and d["ghost"].winfo_exists():
             d["ghost"].destroy()
         self._resolve_drop(d["payload"], e.x_root, e.y_root)
+
+    def _drag_cancel(self):
+        """没有真的打出/移动（拖到桌外、非法落点、或状态被打断）→ 恢复视觉"""
+        self._clear_highlights()
+        self._unlift_all()
 
     def _hit(self, x, y, widget):
         try:
@@ -1401,20 +1600,37 @@ class App(tk.Tk):
     def _resolve_drop(self, payload, x, y):
         g = self.game
         if g is None or self.busy:
+            self._drag_cancel()
             return
         me = g.players[0]
+        # 记录落点命中的区域与合法性，便于给出"为什么没反应"的提示
+        hit_kind, hit_widget = None, None
+        for w, kind in self._drop_zones():
+            if self._hit(x, y, w):
+                hit_kind, hit_widget = kind, w
+                break
+        ok = self._valid_drop(payload, x, y)
+
         if payload[0] == "hand":
             idx = payload[1]
             if idx >= len(me.hand):
                 return
             card = me.hand[idx]
-            rows = (self.foe_rear_row, self.foe_front_row,
-                    self.my_front_row, self.my_rear_row)
-            hit_row = next((r for r in rows if self._hit(x, y, r)), None)
-            if hit_row is None:
-                return  # 拖回原处 = 取消
-            if card.kind == "unit" and hit_row is not self.my_rear_row:
-                self.add_log("  新单位只能部署在我方支援阵线。")
+            if hit_kind is None:
+                # 拖到牌桌外 = 取消，但给一句回馈，避免用户以为卡丢了
+                self.add_log("  已取消（把卡拖到支援阵线即可部署）。")
+                self._drag_cancel()
+                return
+            if not ok:
+                if card.kind == "unit":
+                    self.add_log("  新单位只能部署在我方支援阵线（绿色高亮处）。")
+                else:
+                    self.add_log("  该落点无法使用这张牌。")
+                # 顺序很重要：先撤掉全部高亮/抬起，让落点回到"出厂描边"，
+                # 再闪红。否则 _shake_widget 记下的"原值"其实是红色高亮，
+                # 320ms 后会把红框又还原成红色——看起来像卡住了。
+                self._drag_cancel()
+                self._shake_widget(hit_widget)
                 return
             if g.play_card(me, idx) and self.mp_link is not None:
                 self._mp_send_act({"k": "play", "i": idx})
@@ -1428,16 +1644,18 @@ class App(tk.Tk):
             return
         unit = payload[1]
         if unit not in me.board:
+            self._drag_cancel()
             return
-        for u, w in self.enemy_widgets:
-            if self._hit(x, y, w):
+        if hit_kind == "enemy_card":
+            u = next((uu for uu, ww in self.enemy_widgets if ww is hit_widget), None)
+            if u is not None:
                 self._attack_unit(unit, u)
-                return
-        if self.hq_widget is not None and self._hit(x, y, self.hq_widget):
+            return
+        if hit_kind == "hq":
             self._attack_hq(unit)
             return
-        if self._hit(x, y, self.my_front_row) or self._hit(x, y, self.my_rear_row):
-            dest = "前线" if self._hit(x, y, self.my_front_row) else "后方"
+        if hit_kind in ("front", "deploy"):
+            dest = "前线" if hit_kind == "front" else "后方"
             moved = g.move_unit(unit, dest)
             if moved and self.mp_link is not None:
                 self._mp_send_act({"k": "move", "s": unit.slot, "p": dest})
@@ -1448,6 +1666,33 @@ class App(tk.Tk):
             elif self.game:
                 self.refresh()
             return
+        # 拖回自己的阵线以外 → 取消
+        self.add_log("  已取消机动。")
+        self._drag_cancel()
+
+    def _shake_widget(self, w):
+        """无效落点时，给目标区域一个轻微的左右抖动，替代沉默失败"""
+        if not self.anim_enabled or w is None:
+            return
+        try:
+            if not w.winfo_exists():
+                return
+            # 记下原值（颜色 + 宽度），闪完原样还回去。
+            # 不能写死 1：手牌 CardWidget 静止态是 2px，写死会把它永久改坏。
+            base = (w.cget("highlightbackground"), w.cget("highlightthickness"))
+            w.configure(highlightbackground=RED, highlightthickness=3)
+        except tk.TclError:
+            return
+
+        def restore():
+            try:
+                if w.winfo_exists():
+                    w.configure(highlightbackground=base[0],
+                                highlightthickness=base[1])
+            except tk.TclError:
+                pass
+
+        self.after(320, restore)
 
     def _refresh_unlock(self):
         """动画落地后的统一收尾：刷新棋盘并解锁输入"""
@@ -2252,13 +2497,19 @@ class App(tk.Tk):
         self.mainloop()
         print(f"SMOKE OK: {rounds} rounds")
 
-    def anim_test(self):
-        """动画链路自测：开启动画跑 AI 对战回放（部署入场/行军/进攻冲刺全链路），定时自动结束"""
+    def anim_test(self, seed=20261002):
+        """动画链路自测：开启动画跑 AI 对战回放（部署入场/行军/进攻冲刺全链路）
+
+        必须固定随机种子：随机牌组下 AI 有可能 40 秒内一次都不移动/进攻，
+        导致"未触发 move/attack"的假失败（也偶发卡死跑不完）。
+        固定种子后每次牌局一致，结果可复现。
+        """
+        random.seed(seed)
         self.ai_step_ms = 120
         self.new_game_smoke()
         self._ai_replay = self._run_ai_replay
         self.after(150, self._ai_replay)
-        self.after(40000, self.destroy)
+        self.after(60000, self.destroy)
         self.mainloop()
         self._ai_replay = None
         c = self._anim_count

@@ -5,6 +5,8 @@ __pycache__/
 # 构建产物（dist 用 PyInstaller 生成后自行打包分发）
 build/
 dist/
+build_tools/
+dist_tools/
 
 # 运行时状态与日志
 logs/
@@ -16,3 +18,6 @@ debug/*_out*.txt
 .workbuddy/
 KARDS_SimpleVersion-Setup.zip
 accounts.json
+
+# 服务器运行时数据库
+kards_server.db*

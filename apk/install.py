@@ -33,6 +33,22 @@ import time
 import urllib.request
 import zipfile
 
+
+def _force_utf8():
+    """打包成 exe 后 Windows 控制台默认 GBK，输出 ✓ 之类的符号会崩。
+    这里把 stdout/stderr 切成 UTF-8 并容错，避免因编码中断安装流程。"""
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        if stream is None:
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
+_force_utf8()
+
 REPO = "hello1-UI/Kards-simple-version"
 APP_ID = "Kards-Simple-Version"
 APP_NAME = "KARDS Simplified"
@@ -296,6 +312,35 @@ def extract(zip_path, install_dir):
 
 # ---------------------------------------------------------------- 快捷方式 / 注册
 
+def bundled_dir():
+    """返回本安装器所在目录（源码运行 = apk/，打包后 = exe 所在目录）"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def find_uninstaller():
+    """找随安装器一起分发的卸载器文件。
+
+    优先级：
+      1. 同目录下的 KARDS卸载器.exe（打包分发时的形态）
+      2. 同目录下的 uninstall.py（源码运行时的形态）
+      3. apk/ 子目录下的 uninstall.py（在项目根运行源码时）
+    返回绝对路径，找不到返回 None。
+    """
+    base = bundled_dir()
+    for cand in (
+        os.path.join(base, "KARDS卸载器.exe"),
+        os.path.join(base, "uninstaller.exe"),
+        os.path.join(base, "uninstall.py"),
+        os.path.join(base, "apk", "uninstall.py"),
+        os.path.join(os.path.dirname(base), "apk", "uninstall.py"),
+    ):
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
 def _ps_quote(s):
     """PowerShell 单引号字面量转义：内部的 ' 需写成 ''"""
     return str(s).replace("'", "''")
@@ -323,20 +368,23 @@ def shell_folder(name):
     return out or os.path.join(os.path.expanduser("~"), name)
 
 
-def register_uninstall(install_dir, version, hklm):
+def register_uninstall(install_dir, version, hklm, uni_path):
+    """写入"应用和功能"卸载项。uni_path 为已复制到安装目录的卸载器路径。"""
     import winreg
     hive = winreg.HKEY_LOCAL_MACHINE if hklm else winreg.HKEY_CURRENT_USER
     exe = os.path.join(install_dir, "KARDS.exe")
-    uni = os.path.join(install_dir, "uninstall.py")
-    py = sys.executable
+    # 卸载命令：卸载器是 exe 就直接调用；是 .py 则用当前解释器拉起
+    if uni_path.lower().endswith(".exe"):
+        cmd = f'"{uni_path}"'
+    else:
+        cmd = f'"{sys.executable}" "{uni_path}"'
     with winreg.CreateKeyEx(hive, UNINSTALL_KEY, 0, winreg.KEY_SET_VALUE) as k:
         winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, APP_NAME)
         winreg.SetValueEx(k, "DisplayVersion", 0, winreg.REG_SZ, version)
         winreg.SetValueEx(k, "Publisher", 0, winreg.REG_SZ, PUBLISHER)
         winreg.SetValueEx(k, "InstallLocation", 0, winreg.REG_SZ, install_dir)
         winreg.SetValueEx(k, "DisplayIcon", 0, winreg.REG_SZ, exe)
-        winreg.SetValueEx(k, "UninstallString", 0, winreg.REG_SZ,
-                          f'"{py}" "{uni}"')
+        winreg.SetValueEx(k, "UninstallString", 0, winreg.REG_SZ, cmd)
         winreg.SetValueEx(k, "NoModify", 0, winreg.REG_DWORD, 1)
         winreg.SetValueEx(k, "NoRepair", 0, winreg.REG_DWORD, 1)
     where = "HKLM" if hklm else "HKCU"
@@ -359,11 +407,12 @@ def fetch_latest_version():
 # ---------------------------------------------------------------- 主流程
 
 def cleanup_old(install_dir):
-    """覆盖安装：清掉旧程序文件（保留 uninstall.py）"""
+    """覆盖安装：清掉旧程序文件（保留卸载器）"""
+    keep = {"uninstall.py", "KARDS卸载器.exe", "uninstaller.exe"}
     try:
         for n in os.listdir(install_dir):
             p = os.path.join(install_dir, n)
-            if n == "uninstall.py":
+            if n in keep:
                 continue
             if n in ("KARDS.exe", "KARDS.zip", "_internal"):
                 if os.path.isdir(p):
@@ -436,13 +485,19 @@ def main():
     for sub in ("", "logs", "decks"):
         os.makedirs(os.path.join(DATA_DIR, sub), exist_ok=True)
     print(f"  用户数据: {DATA_DIR}（设置/日志/自组卡组）")
-    uni_src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "uninstall.py")
-    if os.path.isfile(uni_src):
+
+    uni_src = find_uninstaller()
+    uni_dst = None
+    if uni_src:
+        uni_dst = os.path.join(install_dir, os.path.basename(uni_src))
         try:
-            shutil.copy2(uni_src, os.path.join(install_dir, "uninstall.py"))
+            shutil.copy2(uni_src, uni_dst)
+            print(f"  卸载器: {os.path.basename(uni_dst)} ✓")
         except OSError as e:
             print(f"  卸载器复制失败（不影响游戏）: {e}")
+            uni_dst = None
+    else:
+        print("  卸载器未随安装器分发（跳过，不影响游戏）")
 
     # 4. 快捷方式 + 系统注册
     print("\n[4/4] 创建快捷方式并注册到系统 ...")
@@ -460,8 +515,11 @@ def main():
     except Exception as e:
         print(f"  快捷方式创建失败（不影响游戏本体）: {e}")
     try:
-        register_uninstall(install_dir, fetch_latest_version(),
-                           hklm=is_admin())
+        if uni_dst:
+            register_uninstall(install_dir, fetch_latest_version(),
+                               hklm=is_admin(), uni_path=uni_dst)
+        else:
+            print("  跳过应用注册（没有可用卸载器）")
     except Exception as e:
         print(f"  应用注册失败（不影响游戏本体）: {e}")
 
