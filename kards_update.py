@@ -46,9 +46,26 @@ _UA = "KARDS-SimpleVersion-Updater"
 # ------------------------------------------------------------------ 版本比较
 
 def parse_version(text):
-    """'v1.2.0.3' / '1.2.0.3' / 'v1.2' → (1,2,0,3)；解析失败返回 ()"""
-    if not text:
+    """'v1.2.0.3' / '1.2.0.3' / 'v1.2' / (1,2,0,3) → (1,2,0,3)；解析失败返回 ()
+
+    ⚠ 必须能吃元组：调用方很容易顺手把 KARDS.py 的 `VERSION = (1,3,0,0)`
+      直接传进来。曾经这里只走 `str()`，于是 `str((1,3,0,0))` = "(1, 3, 0, 0)"
+      在第一个字符 '(' 处就断了，返回空元组 —— 而 is_newer 看到空元组会把
+      本地版本补成 (0,0,0,0)，导致**全宇宙任何版本号都被判成"有更新"**。
+      这种"静默地把未知当成最旧"的降级方式，比直接报错危险得多。
+    """
+    if text is None or text == "":
         return ()
+    if isinstance(text, (tuple, list)):
+        out = []
+        for x in text:
+            try:
+                out.append(int(x))
+            except (TypeError, ValueError):
+                return ()
+        return tuple(out) if out else ()
+    if isinstance(text, int):
+        return (text,)
     s = str(text).strip().lstrip("vV")
     parts = []
     for chunk in s.split("."):
@@ -65,9 +82,13 @@ def parse_version(text):
 
 
 def is_newer(remote, local):
-    """remote 是否比 local 新（元组逐位比较，短的一侧补 0）"""
+    """remote 是否比 local 新（元组逐位比较，短的一侧补 0）
+
+    任一侧解析不出来时一律返回 False —— 宁可"这次不提示更新"，
+    也不要因为解析失败就每次都弹一个假更新窗。
+    """
     r, l = parse_version(remote), parse_version(local)
-    if not r:
+    if not r or not l:
         return False
     n = max(len(r), len(l))
     r = r + (0,) * (n - len(r))
@@ -145,6 +166,22 @@ def pick_asset(assets, prefer=("KARDS.zip",)):
     return None
 
 
+def _safe_progress(progress, done, total):
+    """调用进度回调，**吞掉回调自身的异常**。
+
+    ⚠ 这里必须自己 try：download() 外面那层 `except Exception` 是拿来换镜像的，
+    如果调用方的进度回调写错了（比如签名少个参数），异常会被当成"下载失败"，
+    于是白白把所有镜像再重试一遍，还报一个牛头不对马嘴的错误。
+    下载本身没问题，就不该因为 UI 回调崩掉而失败。
+    """
+    if not progress:
+        return
+    try:
+        progress(done, total)
+    except Exception:                                # noqa: BLE001
+        pass
+
+
 def download(asset, dest, progress=None, timeout=TIMEOUT_DL):
     """下载资产到 dest。progress(done, total) 会被周期性调用。
 
@@ -168,8 +205,7 @@ def download(asset, dest, progress=None, timeout=TIMEOUT_DL):
                             break
                         f.write(chunk)
                         done += len(chunk)
-                        if progress:
-                            progress(done, length)
+                        _safe_progress(progress, done, length)
             if length and done != length:
                 raise OSError(f"下载不完整：{done}/{length} 字节")
             os.replace(tmp, dest)
@@ -193,6 +229,7 @@ def extract_zip(zip_path, target_dir, strip_root=None, progress=None):
 
     strip_root=None 时自动判断：若 zip 内顶层只有一个目录（如 KARDS/），
     就剥掉它 —— 发行包就是这么打的（安装器同款逻辑）。
+    也可以显式传 'KARDS' 或 'KARDS/'，两种写法都接受（见下）。
     """
     with zipfile.ZipFile(zip_path) as zf:
         names = [n for n in zf.namelist() if n and not n.endswith("/")]
@@ -202,9 +239,24 @@ def extract_zip(zip_path, target_dir, strip_root=None, progress=None):
                 strip_root = tops.pop() + "/"
             else:
                 strip_root = ""
+        elif strip_root:
+            # ⚠ 必须归一化成「带结尾斜杠」再当前缀剥。
+            #   传 'KARDS'（不带斜杠）时，'KARDS/x.exe'.startswith('KARDS') 会命中，
+            #   剥完得到 '/x.exe' —— 这在 Windows 上是**绝对路径**，
+            #   os.path.join 会直接丢掉 target_dir，于是被 zip-slip 守卫全部拦下，
+            #   结果是「一个文件都没解压，却返回成功」。自更新走到这里 =
+            #   把用户的游戏目录清成空目录，是最坏的一种失败。
+            if not strip_root.endswith("/"):
+                strip_root += "/"
         os.makedirs(target_dir, exist_ok=True)
         base = os.path.abspath(target_dir)
-        for i, info in enumerate(zf.infolist()):
+
+        # 第一步：先规划出「真正要写的文件」清单。
+        # ⚠ 必须先规划再写，否则进度分母没有正确来源：
+        #   - 用 infolist() 的长度当分母 → 含目录项、含被 zip-slip 拦掉的条目，
+        #     进度永远到不了 100%（实测卡在 83%）。
+        plan = []
+        for info in zf.infolist():
             if info.is_dir():
                 continue
             rel = info.filename
@@ -216,11 +268,21 @@ def extract_zip(zip_path, target_dir, strip_root=None, progress=None):
             out = os.path.abspath(os.path.join(target_dir, rel))
             if not (out == base or out.startswith(base + os.sep)):
                 continue
+            plan.append((info, out))
+
+        # 第二步：按计划写盘
+        total = len(plan) or 1
+        for i, (info, out) in enumerate(plan):
             os.makedirs(os.path.dirname(out), exist_ok=True)
             with zf.open(info) as src, open(out, "wb") as dst:
                 shutil.copyfileobj(src, dst)
-            if progress:
-                progress(i + 1, len(names))
+            _safe_progress(progress, i + 1, total)
+
+    # ⚠ 兜底哨兵：包里有文件、我们却一个都没写出来 —— 一定是前缀/路径逻辑出了问题。
+    #   宁可报错让更新中止，也绝不能"成功"地装上一个空目录。
+    if names and not plan:
+        return False, (f"解压结果为空：包内有 {len(names)} 个文件，但一个都没能写出"
+                       f"（strip_root={strip_root!r}）")
     return True, ""
 
 

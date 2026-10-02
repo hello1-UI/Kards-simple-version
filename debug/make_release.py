@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -106,13 +107,23 @@ def main():
         raise SystemExit(f"查询 Release 失败: {st} {rel}")
 
     # 2. 创建 Release
-    body = (f"KARDS 简化版 {tag}\n\n"
-            "下载 `KARDS_SimpleVersion-Setup.zip` → 解压 → 双击 `KARDS安装器.exe`，"
-            "安装时可自定义安装路径。")
+    #
+    # 正文会被客户端的自动更新窗口直接显示（kards_update.check_latest 取 body 当 notes），
+    # 所以优先用项目根目录的 RELEASE_NOTES.md；没有才退回通用说明。
+    notes_path = os.path.join(ROOT, "RELEASE_NOTES.md")
+    if os.path.isfile(notes_path):
+        with open(notes_path, encoding="utf-8") as f:
+            notes = f.read().strip()
+        print(f"  更新说明: RELEASE_NOTES.md ({len(notes)} 字)")
+    else:
+        notes = (f"KARDS 简化版 {tag}\n\n"
+                 "下载 `KARDS_SimpleVersion-Setup.zip` → 解压 → 双击 `KARDS安装器.exe`，"
+                 "安装时可自定义安装路径。")
+
     st, rel = api("POST", f"{API}/releases", {
         "tag_name": tag,
         "name": f"KARDS 简化版 {tag}",
-        "body": body,
+        "body": notes,
         "draft": False,
         "prerelease": False,
     })
@@ -121,18 +132,36 @@ def main():
     print(f"  创建成功: {rel['html_url']}")
 
     # 3. 上传资产
+    #
+    # ⚠ 本机网络对 GitHub 是间歇性可达的（同一域名几秒内可能一次成功一次超时），
+    #   所以单个资产必须重试。之前没有重试，一次抖动就白白浪费一次发版。
+    #   另外：GitHub 的资产上传端点是 **uploads.github.com**，和 api.github.com
+    #   是两个主机 —— gh_dns 若把 uploads 指错 IP，拿到的会是 404 而不是
+    #   连接错误，看起来像"Release 不存在"，非常容易误判。
     up = rel["upload_url"].split("{")[0]
+    failed = []
     for p in paths:
         name = os.path.basename(p)
-        print(f"  上传 {name} ...", end="", flush=True)
         with open(p, "rb") as f:
             blob = f.read()
-        st, res = api("POST", f"{up}?name={urllib.parse.quote(name)}",
-                      raw=blob, ctype="application/zip", timeout=600)
-        if st in (200, 201):
-            print(f" ✓ {res.get('size', 0)/1048576:.1f} MB")
-        else:
-            print(f" ✗ {st} {res}")
+        done = False
+        for attempt in range(1, 4):
+            print(f"  上传 {name} (第 {attempt} 次, {len(blob)/1048576:.1f} MB) ...",
+                  end="", flush=True)
+            st, res = api("POST", f"{up}?name={urllib.parse.quote(name)}",
+                          raw=blob, ctype="application/zip", timeout=900)
+            if st in (200, 201):
+                print(f" OK {res.get('size', 0)/1048576:.1f} MB")
+                done = True
+                break
+            print(f" 失败 {st} {str(res)[:160]}")
+            time.sleep(3 * attempt)
+        if not done:
+            failed.append(name)
+
+    if failed:
+        raise SystemExit(f"\n=== RELEASE_PARTIAL === 以下资产上传失败: {failed}\n"
+                         f"Release 已创建: {rel['html_url']}（可重跑本脚本重试）")
 
     print(f"\n=== RELEASE_OK === {rel['html_url']}")
 

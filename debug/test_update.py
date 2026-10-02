@@ -57,6 +57,21 @@ def main():
           up.is_newer("v1.2.0.10", "1.2.0.9"))
     check("坏版本号不算新（避免误报）", not up.is_newer("latest", "1.2.0.3"))
 
+    print("2b. 元组入参（KARDS.py 的 VERSION 就是元组，极易顺手传进来）")
+    # ⚠ 回归锁：曾经的 bug 是 str((1,3,0,0)) == "(1, 3, 0, 0)" 在 '(' 处断掉
+    #   → parse_version 返回 () → is_newer 把本地补成 (0,0,0,0)
+    #   → **任何版本都被判成有更新**，每次启动都弹假更新窗。
+    check("parse_version 吃元组", up.parse_version((1, 3, 0, 0)) == (1, 3, 0, 0),
+          up.parse_version((1, 3, 0, 0)))
+    check("parse_version 吃列表", up.parse_version([1, 3, 0, 0]) == (1, 3, 0, 0))
+    check("parse_version 吃 int", up.parse_version(7) == (7,))
+    check("元组入参下同版本不算新", not up.is_newer("v1.3.0.0", (1, 3, 0, 0)))
+    check("元组入参下旧版本不算新", not up.is_newer("v1.2.9.9", (1, 3, 0, 0)))
+    check("元组入参下新版本算新", up.is_newer("v1.3.0.1", (1, 3, 0, 0)))
+    check("本地解析失败时宁可不提示（不误报）",
+          not up.is_newer("v1.3.0.0", "latest"))
+    check("两侧都是元组也正确", up.is_newer((1, 3, 0, 1), (1, 3, 0, 0)))
+
     print("3. 资产挑选")
     assets = [{"name": "KARDS_SimpleVersion-Setup.zip", "url": "u1", "size": 1},
               {"name": "KARDS.zip", "url": "u2", "size": 2},
@@ -95,6 +110,35 @@ def main():
         check("扁平包解压成功", ok, err)
         check("扁平包文件在根", os.path.exists(os.path.join(out2, "KARDS.py")))
 
+        print("5b. 解压：显式 strip_root 的两种写法都要能用")
+        # ⚠ 回归锁：曾经传 'KARDS'（不带结尾斜杠）会命中前缀、剥成 '/x'，
+        #   在 Windows 上是绝对路径 → 被 zip-slip 守卫全拦 → 一个文件都没解压
+        #   却返回成功。自更新走到这里就是把游戏目录清空。
+        for label, root in (("带斜杠 'KARDS/'", "KARDS/"), ("不带斜杠 'KARDS'", "KARDS")):
+            o = os.path.join(tmp, "out_sr_" + root.replace("/", "_"))
+            okx, errx = up.extract_zip(zpath, o, strip_root=root)
+            check(f"显式 strip_root {label} 解压成功", okx, errx)
+            check(f"显式 strip_root {label} 文件到位",
+                  os.path.exists(os.path.join(o, "KARDS.py")))
+        # 前缀对不上时**不该报错**（等价于不剥），只是会多留一层目录 ——
+        # 这是个中性行为，但必须显式钉住，免得以后有人改成"静默丢弃"。
+        o2 = os.path.join(tmp, "out_nomatch")
+        okn, errn = up.extract_zip(zpath, o2, strip_root="不相干的前缀")
+        check("前缀对不上时不报错（等价于不剥）", okn, errn)
+        check("前缀对不上时多留一层目录（文件没丢）",
+              os.path.exists(os.path.join(o2, "KARDS", "KARDS.py")))
+
+        # 空目录哨兵：整包条目都被 zip-slip 拦掉 → 必须报错而不是假装成功。
+        # （这是「装上一个空目录」唯一还会走到的路径，所以值得专门锁住）
+        zbad = os.path.join(tmp, "all_evil.zip")
+        with zipfile.ZipFile(zbad, "w") as zf:
+            zf.writestr("KARDS/../../evil1.txt", "bad")
+            zf.writestr("KARDS/../../evil2.txt", "bad")
+        o3 = os.path.join(tmp, "out_all_evil")
+        okg, errg = up.extract_zip(zbad, o3)
+        check("全部条目越界时报错（不静默装空目录）", not okg, errg)
+        check("报错信息里点明了 strip_root", "strip_root" in (errg or ""), errg)
+
         print("6. 解压：防护 zip slip（../../ 不能越界）")
         zpath3 = os.path.join(tmp, "evil.zip")
         with zipfile.ZipFile(zpath3, "w") as zf:
@@ -115,6 +159,77 @@ def main():
         check("失败原因非空", bool(err), err)
         check("失败后不留下 .part 残留",
               not any(n.endswith(".part") for n in os.listdir(tmp)), os.listdir(tmp))
+
+        print("7b. 进度回调写错签名时，下载本身不能被拖垮")
+        # ⚠ 回归锁：download() 外层那个 `except Exception` 是拿来换镜像的，
+        #   一开始没给回调单独 try，于是「回调签名写错」被误判成「网络失败」，
+        #   白白把所有镜像重试一遍、耗时多几十秒，最后报一个和真因无关的错误。
+        import http.server
+        import threading
+
+        srv_dir = os.path.join(tmp, "srv")
+        os.makedirs(srv_dir, exist_ok=True)
+        payload = b"K" * 300000
+        with open(os.path.join(srv_dir, "KARDS.zip"), "wb") as f:
+            f.write(payload)
+
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def __init__(self, *a, **kw):
+                super().__init__(*a, directory=srv_dir, **kw)
+
+        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Quiet)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        port = httpd.server_address[1]
+        try:
+            good = {"name": "KARDS.zip",
+                    "url": f"http://127.0.0.1:{port}/KARDS.zip",
+                    "size": len(payload)}
+            # 1) 正常回调：能收到进度，且分母正确
+            seen = []
+            okp, errp = up.download(good, os.path.join(tmp, "dl_ok.zip"),
+                                    progress=lambda d, t: seen.append((d, t)),
+                                    timeout=10)
+            check("正常回调下下载成功", okp, errp)
+            check("进度回调被调用过", len(seen) > 0, f"{len(seen)} 次")
+            check("进度分母是总长度（不是 0）",
+                  bool(seen) and seen[-1][1] == len(payload),
+                  seen[-1] if seen else "无")
+
+            # 2) 坏回调（签名少一个参数）：下载仍须成功
+            def bad_cb(done):                     # noqa: ARG001
+                raise AssertionError("签名不对")
+
+            okb, errb = up.download(good, os.path.join(tmp, "dl_bad.zip"),
+                                    progress=bad_cb, timeout=10)
+            check("回调抛异常时下载仍然成功", okb, errb)
+            check("坏回调下文件完整",
+                  os.path.isfile(os.path.join(tmp, "dl_bad.zip"))
+                  and os.path.getsize(os.path.join(tmp, "dl_bad.zip")) == len(payload))
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+        print("7c. 解压进度不会冲过 100%")
+        # infolist() 含目录项、还会跳过 zip-slip 与空名项，
+        # 早先用 infolist 下标当分子会让进度条超过 1.0。
+        zpath4 = os.path.join(tmp, "prog.zip")
+        with zipfile.ZipFile(zpath4, "w") as zf:
+            zf.writestr("KARDS/", "")                    # 目录项
+            for i in range(5):
+                zf.writestr(f"KARDS/f{i}.txt", "x" * 10)
+            zf.writestr("KARDS/../../../skip.txt", "nope")   # 会被跳过
+        frac = []
+        ok4, err4 = up.extract_zip(zpath4, os.path.join(tmp, "out4"),
+                                   progress=lambda d, t: frac.append(d / t))
+        check("解压成功", ok4, err4)
+        check("有进度回调", len(frac) > 0, f"{len(frac)} 次")
+        check("进度全程不超过 100%", bool(frac) and max(frac) <= 1.0,
+              f"max={max(frac):.3f}" if frac else "无")
+        check("进度最终收敛到 100%", bool(frac) and abs(frac[-1] - 1.0) < 1e-9,
+              f"last={frac[-1]:.3f}" if frac else "无")
 
         print("8. bat 生成（Windows 免锁替换用）")
         bat = up.write_update_bat(pid=999999, exe=sys.executable, args=[])
