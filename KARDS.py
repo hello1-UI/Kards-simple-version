@@ -20,9 +20,13 @@ KARDS 简化版 - 图形界面（tkinter，纯标准库）
 """
 
 import math
+import os
 import queue
 import random
+import subprocess
 import sys
+import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 
@@ -31,6 +35,8 @@ import kards_engine as core
 import kards_i18n as i18n
 import kards_net as net
 import kards_account as account
+import kards_host
+import kards_update as net_update
 
 # ---------------------------------------------------------------- 主题配色
 
@@ -56,7 +62,7 @@ APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 # a: 重要修复(1位数)  b: 卡牌更新(2位数)  c: 赛季更新(2位数)  d: 补丁修复(3位数)
 # 升位规则: 某位 +1 后, 其右侧所有位清零（如卡牌更新 1.01.00.000）
 # 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
-VERSION = (1, 2, 0, 3)
+VERSION = (1, 3, 0, 0)
 
 FONT = ("Microsoft YaHei UI", 12)
 FONT_S = ("Microsoft YaHei UI", 10)
@@ -245,40 +251,159 @@ class App(tk.Tk):
         self._last_drag_src = None # 最近一次拖拽起点坐标（部署入场动画的来源）
         self._anim_tokens = set()  # 存活的动画令牌（退出对局时清理）
         self._anim_count = {"entry": 0, "move": 0, "attack": 0}  # 自测统计
-        # ---- 联机状态 ----
-        self.mp_link = None        # net.NetLink（联机时非 None）
+        # ---- 联机状态（服务器中转模式）----
+        self.mp_link = None        # net.ServerLink（连上服务器后非 None）
         self.mp_role = None        # "host" / "client"
         self.mp_mode = False       # 组卡界面是否处于联机流程
-        self.mp_acceptor = None    # 主机等待中的 Acceptor
-        self.mp_join = None        # 加入方的 holder dict
         self.mp_opp = None         # 对手 hello 信息 {nation, deck}
         self.mp_my_deck = None     # 我方有序卡名列表
         self._mp_game_over = False
         self._lobby_active = False
+        # 服务器 / 大厅
+        self.mp_server_addr = net.DEFAULT_SERVER   # 记住上次填的服务器地址
+        self.mp_user = None        # 服务器账号名（未登录为 None）
+        self.mp_matching = False   # 快速匹配等待中
+        self.mp_room_code = None   # 自己开的邀请码房间
+        self.mp_opp_name = None    # 匹配到的对手名
+        self.mp_room_id = None     # 服务器分配的房间号
+        self.mp_lobby_players = [] # 最近一次大厅快照
+        self.mp_lobby_log = []     # 大厅日志（重建界面时回填）
+        self._srv_poll = None      # net.ServerPoller（连接中）
+        self._srv_addr = ""        # 当前连接的地址
+        self._srv_error = ""       # 最近一次连接失败原因
+        self._srv_ready = False    # 是否曾经连接成功过
+        self._lobby_track = set()  # 上一份大厅名单（用于算进出）
+        self._lobby_rows = {}
+        # 具名定时器（统一取消 + 代号防串台，见 _schedule 注释）
+        self._timer_gen = {}
+        self._timers = {}
+        self._t_lobby = None
+        self._t_hello = None
+        self._t_net = None
+        self._t_prep = None
         self.db = core.card_database()
-        # ---- 本地账号 ----
+        # ---- 账号 / 游客 ----
+        # 产品规则：未登录即「游客」——能打人机，不能联机。
+        # 游客是临时会话（不落盘），所以这里只设个内存标志，不建目录、不写文件。
         self.account = account.current()
         if self.account:
             core.set_decks_dir(account.deck_dir(self.account))
+        else:
+            account.start_guest()
+            self.account = None
+            # 游客卡组放临时目录，退出即弃（不污染用户数据目录）
+            core.set_decks_dir(account.guest_decks_dir())
         self.bind_all("<Escape>", self.on_esc)
         self.bind_all("<F1>", self.on_f1)
         self._build_start()
         if not self.account and self.anim_enabled:
             self.after(300, self._account_dialog)
+        # 启动后静默检查更新（后台线程，不阻塞界面；没更新就自己消失）
+        self._update_win = None
+        self._update_task = None
+        if self.anim_enabled and "--no-update-check" not in sys.argv:
+            self.after(1500, lambda: self.open_update_dialog(auto=True))
 
     def destroy(self):
         """退出前关闭联机连接"""
+        # 更新任务在后台线程（下载/解压）。这里只置取消标志，不 join ——
+        # 解压到一半就强杀反而会留下半个文件；让它自然结束更安全。
+        if getattr(self, "_update_task", None) is not None:
+            self._update_task.cancel()
         if self.mp_link is not None:
             self.mp_link.close()
             self.mp_link = None
+        account.set_remote(None)
+        # ⚠ 必须取消所有 after 定时器。tkinter 的 after 回调注册在解释器级别，
+        # 窗口销毁后**定时器仍会触发**，于是控制台刷屏
+        # `invalid command name "..._lobby_poll"`，且回调里可能访问已销毁控件。
+        self._cancel_timers()
+        self._close_update_dialog()
+        # 如果服务器是本机用「建立服务器」拉起来的，退出时一并收掉；
+        # 不是我们拉的不动（可能是别人开的、或玩家自己想留着）。
+        try:
+            kards_host.stop()
+        except Exception:                        # noqa: BLE001
+            pass
         tk.Tk.destroy(self)
+
+    def _cancel_timers(self):
+        """取消本窗口登记的全部 after 定时器（幂等，可在任意阶段调用）"""
+        for key in ("_t_lobby", "_t_hello", "_t_net", "_t_prep"):
+            tid = getattr(self, key, None)
+            if tid:
+                try:
+                    self.after_cancel(tid)
+                except (tk.TclError, ValueError):
+                    pass
+                setattr(self, key, None)
+
+    def _schedule(self, key, delay, fn, _gen=None):
+        """登记一个具名定时器，便于统一取消（同一 key 重复调度会顶掉旧的）。
+
+        `_gen` 是「代号」：调用方传入 `self._timer_gen[key]`。回调真正执行时
+        先比对代号，不一致就直接放弃 —— 防止**正在执行**的那次轮询在
+        链路已被重建（例如中途重连服务器）之后，把陈旧定时器又挂回去，
+        导致轮询彻底停摆（实测踩过的死循环：定时器永远丢失，事件堆在队列里）。
+        """
+        self._cancel_timer(key)
+        gen = self._timer_gen.get(key, 0) if _gen is None else _gen
+        timer = {"id": None, "gen": gen, "fn": fn}
+
+        def fire(k=key, t=timer):
+            cur = self._timer_gen.get(k, 0)
+            if t["gen"] != cur:
+                return                     # 链路已重建，本次调度作废
+            setattr(self, k, None)
+            t["fn"]()
+
+        try:
+            timer["id"] = self.after(delay, fire)
+        except tk.TclError:
+            timer["id"] = None
+            return
+        self._timers[key] = timer
+        setattr(self, key, timer["id"])
+
+    def _cancel_timer(self, key):
+        """取消具名定时器 —— 并且**让在途的那一次作废**。
+
+        ⚠ 只 after_cancel 是不够的：如果此刻回调**正在执行**（比如
+        `_lobby_poll` 刚取到包、正要走最后的 `_schedule`），after_cancel
+        无法阻止它在返回前把定时器重新挂上，于是「停不掉」。所以这里
+        同时把代号 +1，在途回调尾部的 `_schedule` 会因代号不符被丢弃。
+        """
+        self._bump_timer_gen(key)
+        timer = self._timers.pop(key, None)
+        if timer and timer.get("id"):
+            try:
+                self.after_cancel(timer["id"])
+            except (tk.TclError, ValueError):
+                pass
+        setattr(self, key, None)
+
+    def _bump_timer_gen(self, key):
+        """代号 +1：让所有在途的旧调度作废（重连时调用）"""
+        self._timer_gen[key] = self._timer_gen.get(key, 0) + 1
 
     # ---------------- 日志 ----------------
     def add_log(self, msg):
-        self.logbox.configure(state="normal")
-        self.logbox.insert("end", msg + "\n")
-        self.logbox.see("end")
-        self.logbox.configure(state="disabled")
+        """对局日志。
+
+        ⚠ self.logbox 只在 _build_main()（对局界面）里创建，因此**主菜单 /
+        大厅 / 组卡阶段调用本方法时它并不存在** —— 直接 configure 会抛
+        AttributeError。大厅有自己的日志框（_lobby_log），这里的规则是：
+        对局中写对局框；不在对局中则回落到大厅日志框；都没有就静默丢弃。
+        """
+        box = getattr(self, "logbox", None)
+        if box is None or not box.winfo_exists():
+            if self._lobby_active:
+                self._lobby_log(msg, echo=False)
+            return
+        box.configure(state="normal")
+        box.insert("end", msg + "\n")
+        box.see("end")
+        box.configure(state="disabled")
 
     # ---------------- 开始界面：战斗 / 练习 ----------------
     def _build_start(self):
@@ -304,11 +429,18 @@ class App(tk.Tk):
         tk.Label(self.start_frame, text="v" + ".".join(map(str, VERSION)),
                  bg=BG, fg=DIM, font=FONT_S).pack(side="bottom", pady=(0, 14))
         # 左上角：账号入口
-        self.account_btn = tk.Button(self.start_frame, text=self._account_btn_text(),
+        # 游客规则（产品指定）：未登录即游客 —— 能打人机，不能联机。
+        # 界面上显式写出「游客」并给出「登录」按钮，避免用户不知道自己在什么状态。
+        box = tk.Frame(self.start_frame, bg=BG)
+        box.pack(anchor="nw", padx=16)
+        self.account_btn = tk.Button(box, text=self._account_btn_text(),
                                      bg="#4a4f5a", fg=TEXT, font=FONT_S, bd=0,
                                      padx=12, pady=6, cursor="hand2",
                                      command=self._account_dialog)
-        self.account_btn.pack(anchor="nw", padx=16)
+        self.account_btn.pack(side="left")
+        self.guest_hint = tk.Label(box, text="", bg=BG, fg=DIM, font=FONT_S)
+        self.guest_hint.pack(side="left", padx=8)
+        self._refresh_account_btn()
 
     # ---------------- 账号管理 ----------------
     def _account_btn_text(self):
@@ -316,11 +448,30 @@ class App(tk.Tk):
             s = account.get_stats(self.account)
             return i18n.t("account_btn", name=self.account,
                           w=s["win"], l=s["lose"], d=s["draw"])
+        # 未登录 → 游客
         return i18n.t("account_nouser")
 
     def _refresh_account_btn(self):
-        if getattr(self, "account_btn", None) and self.account_btn.winfo_exists():
-            self.account_btn.configure(text=self._account_btn_text())
+        """刷新账号按钮文字 + 游客提示。
+
+        ⚠ 必须同时判 winfo_exists() 并吞掉 TclError：账号按钮只在主菜单里
+        创建，窗口销毁后这个控件引用会变成"幽灵"——此时调 winfo_exists()
+        会抛 `can't invoke "winfo" command: application has been destroyed`
+        （实测踩过）。销毁后刷新账号按钮本身是合法操作，不该让程序崩。
+        """
+        btn = getattr(self, "account_btn", None)
+        if btn is None:
+            return
+        try:
+            if not btn.winfo_exists():
+                return
+            btn.configure(text=self._account_btn_text())
+            hint = getattr(self, "guest_hint", None)
+            if hint is not None and hint.winfo_exists():
+                # 游客时给一行说明，登录后清空
+                hint.configure(text="" if self.account else i18n.t("guest_note"))
+        except tk.TclError:
+            pass
 
     def _apply_account(self, name):
         """登录/注册成功后应用账号（卡组目录 + 按钮）"""
@@ -328,7 +479,7 @@ class App(tk.Tk):
         core.set_decks_dir(account.deck_dir(name))
         self._refresh_account_btn()
 
-    def _account_dialog(self):
+    def _account_dialog(self, for_server=False):
         # 单实例：反复点击（或启动定时器与手动点击撞车）时不再叠开多个窗口
         for w in self.winfo_children():
             if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "account":
@@ -349,6 +500,13 @@ class App(tk.Tk):
                  font=FONT_XL).pack(pady=(18, 8))
         info = tk.Label(win, text="", bg=BG, fg=RED, font=FONT_S)
         info.pack()
+        if for_server and self.mp_link is not None:
+            tk.Label(win, text=i18n.t("srv_connected_nouser", addr=self._srv_addr),
+                     bg=BG, fg=GOLD, font=FONT_S).pack(pady=(2, 0))
+        if not self.account:
+            # 游客说明：让人一眼看懂"现在能干什么、不能干什么"
+            tk.Label(win, text=i18n.t("guest_note"), bg=BG, fg=DIM,
+                     font=FONT_S).pack(pady=(2, 0))
 
         if self.account:
             s = account.get_stats(self.account)
@@ -356,11 +514,17 @@ class App(tk.Tk):
                      bg=BG, fg=GOLD, font=FONT).pack(pady=10)
 
             def do_logout():
+                # account.logout() 会把身份切回游客（游客不落盘，所以不丢数据）
                 account.logout()
                 self.account = None
-                core.set_decks_dir(None)
+                self.mp_user = None
+                core.set_decks_dir(account.guest_decks_dir())
                 self._refresh_account_btn()
                 win.destroy()
+                # 在大厅里退出登录：刷新按钮可用性，让用户重新登录
+                if self._lobby_active:
+                    self._lobby_sync()
+                    self.after(200, lambda: self._account_dialog(for_server=True))
 
             row = tk.Frame(win, bg=BG)
             row.pack(pady=14)
@@ -383,9 +547,23 @@ class App(tk.Tk):
 
         def done(ok, err):
             if ok:
-                self._apply_account(account.current())
+                name = account.current()
+                self._apply_account(name)
                 win.destroy()
-                self.add_log(f"账号已登录: {self.account}")
+                # 注意用 _lobby_log 而不是 add_log：此时多半还没进对局，
+                # self.logbox 不存在（add_log 已做兜底，这里显式走大厅日志更清晰）
+                if self._lobby_active:
+                    self._lobby_log(f"账号已登录: {name}", echo=False)
+                if self.mp_link is not None:
+                    # 服务器模式下把登录结果同步到大厅，并主动拉一次在线名单
+                    self.mp_user = name
+                    self.mp_lobby_players = []
+                    self._lobby_track = set()
+                    self._srv_send({"m": "lobby"})
+                    if self._lobby_active:
+                        self._lobby_log(i18n.t("srv_connected", addr=self._srv_addr,
+                                               name=name))
+                        self._lobby_sync()
             else:
                 info.configure(text=err)
 
@@ -436,11 +614,276 @@ class App(tk.Tk):
                 win.destroy()
                 self.destroy()
 
-        for text, cmd, color in ((i18n.t("btn_help"), show_help, "#3a5a80"),
+        def check_update():
+            win.destroy()
+            self.open_update_dialog()
+
+        for text, cmd, color in ((i18n.t("btn_check_update"), check_update, "#4a7a5a"),
+                                 (i18n.t("btn_help"), show_help, "#3a5a80"),
                                  (i18n.t("btn_keywords"), show_keywords, "#4a6b8a"),
                                  (i18n.t("btn_quit"), quit_app, "#4a4f5a")):
             tk.Button(win, text=text, bg=color, fg=TEXT, font=FONT_B, bd=0,
                       padx=18, pady=8, cursor="hand2", command=cmd).pack(pady=6)
+
+    # ---------------- 自动更新 ----------------
+
+    def open_update_dialog(self, auto=False):
+        """检查更新窗口。
+
+        auto=True 表示这是**启动时静默检查**发现的更新，只提示不打扰
+        （用户可以选择稍后）。检查与下载都在后台线程，界面靠 after 轮询刷新，
+        绝不阻塞主线程 —— 否则窗口会在下载期间假死。
+        """
+        if getattr(self, "_update_win", None) is not None:
+            try:
+                self._update_win.deiconify()
+                self._update_win.lift()
+                return
+            except tk.TclError:
+                self._update_win = None
+
+        win = tk.Toplevel(self)
+        self._update_win = win
+        win.role = "update"
+        win.title(i18n.t("update_title"))
+        win.configure(bg=BG)
+        win.geometry("440x400")
+        win.transient(self)
+        win.protocol("WM_DELETE_WINDOW", lambda: self._close_update_dialog())
+
+        tk.Label(win, text=i18n.t("update_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(pady=(16, 4))
+        cur = net_update.version_str(VERSION)
+        tk.Label(win, text=f"v{cur}", bg=BG, fg=DIM, font=FONT_S).pack()
+
+        status = tk.Label(win, text="", bg=BG, fg=GOLD, font=FONT,
+                          wraplength=390, justify="left")
+        status.pack(pady=(10, 4), padx=16)
+
+        bar_holder = tk.Frame(win, bg=BG)
+        bar_holder.pack(fill="x", padx=16)
+        bar = tk.Frame(bar_holder, bg="#2a2f38", height=10)
+        bar.pack(fill="x")
+        bar_fill = tk.Frame(bar, bg="#2e6b46", height=10)
+        bar_fill.place(x=0, y=0, relwidth=0.0, relheight=1.0)
+
+        notes_box = tk.Text(win, height=7, bg=PANEL, fg=DIM, font=FONT_S,
+                            relief="flat", wrap="word")
+        notes_box.pack(fill="both", expand=True, padx=16, pady=(8, 4))
+        notes_box.configure(state="disabled")
+
+        btns = tk.Frame(win, bg=BG)
+        btns.pack(pady=10)
+
+        task = net_update.UpdateTask(VERSION, auto_install=False)
+        self._update_task = task
+        # ⚠ 必须自己记 after id 并在关窗时 after_cancel：
+        # tkinter 的 after 挂在**解释器**上，窗口销毁后仍会触发，回调里
+        # 访问已销毁控件 → `invalid command name "...poll"` 刷屏（实测）。
+        state = {"polling": True, "installed": False, "aid": None}
+
+        def stop_poll():
+            state["polling"] = False
+            for key in ("aid", "aid2"):
+                aid = state.get(key)
+                if aid:
+                    try:
+                        self.after_cancel(aid)
+                    except (tk.TclError, ValueError):
+                        pass
+                    state[key] = None
+
+        self._update_stop_poll = stop_poll
+
+        def set_status(text, fg=GOLD):
+            if state["polling"]:
+                try:
+                    status.configure(text=text, fg=fg)
+                except tk.TclError:
+                    state["polling"] = False
+
+        def rebuild_buttons():
+            for w in btns.winfo_children():
+                w.destroy()
+
+        def do_download():
+            rebuild_buttons()
+            task.auto_install = True
+            task.state = "downloading"
+            task.progress = 0.0
+            threading.Thread(target=lambda: task._download_and_install(task.asset),
+                             daemon=True).start()
+
+        def do_restart():
+            self._restart_after_update()
+
+        def open_page():
+            url = (task.info or {}).get("page")
+            if url:
+                try:
+                    import webbrowser
+                    webbrowser.open(url)
+                except Exception:                # noqa: BLE001
+                    pass
+
+        def close():
+            self._close_update_dialog()
+
+        def poll():
+            state["aid"] = None
+            if not state["polling"]:
+                return
+            try:
+                if not win.winfo_exists():
+                    stop_poll()
+                    return
+            except tk.TclError:
+                stop_poll()
+                return
+
+            st = task.state
+            if st == "checking":
+                set_status(i18n.t("update_checking"))
+            elif st in ("found", "no_update", "error", "done", "downloading", "extracting"):
+                pass
+
+            if st == "found":
+                info = task.info or {}
+                set_status(i18n.t("update_new", ver=info.get("version", "?"),
+                                  cur=net_update.version_str(VERSION)))
+                try:
+                    notes_box.configure(state="normal")
+                    notes_box.delete("1.0", "end")
+                    notes_box.insert("1.0", (info.get("notes") or "").strip()[:4000])
+                    notes_box.configure(state="disabled")
+                except tk.TclError:
+                    pass
+                rebuild_buttons()
+                tk.Button(btns, text=i18n.t("update_btn_do"), bg="#2e6b46", fg=TEXT,
+                          font=FONT_B, bd=0, padx=16, pady=7, cursor="hand2",
+                          command=do_download).pack(side="left", padx=5)
+                tk.Button(btns, text=i18n.t("update_btn_open_page"), bg="#3a5a80",
+                          fg=TEXT, font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
+                          command=open_page).pack(side="left", padx=5)
+                tk.Button(btns, text=i18n.t("update_later_btn"), bg="#4a4f5a", fg=TEXT,
+                          font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
+                          command=close).pack(side="left", padx=5)
+                state["phase"] = "found"
+            elif st == "no_update":
+                set_status(i18n.t("update_none", cur=net_update.version_str(VERSION)), GREEN)
+                if state.get("phase") != "no_update":
+                    state["phase"] = "no_update"
+                    rebuild_buttons()
+                    tk.Button(btns, text=i18n.t("btn_close"), bg="#4a4f5a", fg=TEXT,
+                              font=FONT_B, bd=0, padx=16, pady=7, cursor="hand2",
+                              command=close).pack()
+            elif st == "error":
+                set_status(i18n.t("update_fail", err=task.message), RED)
+                if state.get("phase") != "error":
+                    state["phase"] = "error"
+                    rebuild_buttons()
+                    tk.Button(btns, text=i18n.t("btn_close"), bg="#4a4f5a", fg=TEXT,
+                              font=FONT_B, bd=0, padx=16, pady=7, cursor="hand2",
+                              command=close).pack()
+            elif st in ("downloading", "extracting"):
+                pct = int(task.progress * 100)
+                key = "update_downloading" if st == "downloading" else "update_extracting"
+                set_status(i18n.t(key, done=pct))
+                try:
+                    bar_fill.place_configure(relwidth=max(0.0, min(1.0, task.progress)))
+                except tk.TclError:
+                    pass
+                if state.get("phase") != "busy":
+                    state["phase"] = "busy"
+                    rebuild_buttons()
+                    tk.Button(btns, text=i18n.t("update_btn_cancel"), bg="#4a4f5a",
+                              fg=TEXT, font=FONT_S, bd=0, padx=12, pady=7,
+                              cursor="hand2", command=close).pack()
+            elif st == "done":
+                set_status(i18n.t("update_ready", ver=net_update.version_str(VERSION)), GREEN)
+                if not state.get("installed"):
+                    state["installed"] = True
+                    rebuild_buttons()
+                    tk.Button(btns, text=i18n.t("update_restart_btn"), bg="#2e6b46",
+                              fg=TEXT, font=FONT_B, bd=0, padx=16, pady=7,
+                              cursor="hand2", command=do_restart).pack(side="left", padx=5)
+                    tk.Button(btns, text=i18n.t("update_later_btn"), bg="#4a4f5a",
+                              fg=TEXT, font=FONT_S, bd=0, padx=12, pady=7,
+                              cursor="hand2", command=close).pack(side="left", padx=5)
+
+            try:
+                state["aid"] = win.after(120, poll)
+            except tk.TclError:
+                stop_poll()
+
+        task.start()
+        if auto:
+            # 静默检查：查完发现没有新版本就自己关掉，不打扰用户。
+            # 有新版（state == "found"）就留着让用户决定；出错也静默关掉
+            # （启动时弹「检查更新失败」很烦人，用户想查可手动点）。
+            def auto_close_if_nothing():
+                if not state["polling"]:
+                    return
+                if task.state == "found":
+                    return                       # 有更新 → 停在这里等用户操作
+                if task.state in ("no_update", "error"):
+                    self._close_update_dialog()
+                    return
+                try:
+                    state["aid2"] = win.after(150, auto_close_if_nothing)
+                except tk.TclError:
+                    stop_poll()
+            try:
+                state["aid2"] = win.after(200, auto_close_if_nothing)
+            except tk.TclError:
+                stop_poll()
+        try:
+            state["aid"] = win.after(120, poll)
+        except tk.TclError:
+            stop_poll()
+
+    def _close_update_dialog(self):
+        """关掉更新窗（幂等；窗口已销毁/未创建都安全）"""
+        stopper = getattr(self, "_update_stop_poll", None)
+        if stopper is not None:
+            try:
+                stopper()
+            except Exception:                    # noqa: BLE001
+                pass
+            self._update_stop_poll = None
+        win = getattr(self, "_update_win", None)
+        self._update_win = None
+        if win is None:
+            return
+        try:
+            win.destroy()
+        except tk.TclError:
+            pass
+
+    def _restart_after_update(self):
+        """重启游戏以应用更新。
+
+        打包成 exe 时，更新可能覆盖了正在运行的 exe —— Windows 会锁文件，
+        所以这里用一个小 bat ：「等本进程退出 → 再启动」。源码运行直接重启即可。
+        """
+        if not messagebox.askyesno(i18n.t("update_title"), i18n.t("update_restart_needed")):
+            return
+        exe = sys.executable
+        args = [a for a in sys.argv[1:] if not a.startswith("--debug")]
+        if getattr(sys, "frozen", False):
+            bat = net_update.write_update_bat(pid=os.getpid(), exe=exe, args=args)
+            if bat:
+                try:
+                    os.startfile(bat)            # noqa: S606 — Windows 专用
+                except (OSError, AttributeError):
+                    pass
+        else:
+            # 源码运行：解压出来的文件已经就位，直接重启进程
+            try:
+                subprocess.Popen([exe] + sys.argv, cwd=os.getcwd())
+            except OSError:
+                pass
+        self.destroy()
 
     def open_keyword_guide(self):
         """关键词说明：分组列出全部关键词与规则术语，可滚动。"""
@@ -521,138 +964,551 @@ class App(tk.Tk):
     def on_battle(self):
         self._build_lobby()
 
-    # ---------------- 联机大厅 ----------------
+    # ---------------- 联机大厅（服务器模式） ----------------
     def _build_lobby(self):
+        """大厅：① 连服务器 ② 在线玩家 ③ 出击（快速匹配 / 邀请码房间）
+
+        轮询由 `_lobby_poll` 统一驱动，所有服务器事件走 `ServerLink.inbox`。
+        这里只负责把「连上服务器 + 已登录」之后才该出现的东西置灰/激活。
+        """
         self.start_frame.destroy()
         self.start_frame = tk.Frame(self, bg=BG)
         self.start_frame.pack(expand=True, fill="both")
         self._lobby_active = True
-        tk.Label(self.start_frame, text=i18n.t("lobby_title"), bg=BG, fg=TEXT,
-                 font=FONT_XL).pack(pady=(70, 4))
-        tk.Label(self.start_frame, text=i18n.t("lobby_sub"),
-                 bg=BG, fg=DIM, font=FONT).pack(pady=(0, 26))
 
+        tk.Label(self.start_frame, text=i18n.t("lobby_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(pady=(18, 2))
+        tk.Label(self.start_frame, text=i18n.t("lobby_sub"),
+                 bg=BG, fg=DIM, font=FONT_S).pack(pady=(0, 8))
         tk.Button(self.start_frame, text=i18n.t("btn_back"), bg="#4a4f5a", fg=TEXT,
                   font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
-                  command=self._lobby_back).pack(anchor="ne", padx=18)
+                  command=self._lobby_back).place(relx=1.0, rely=0.0,
+                                                  anchor="ne", x=-16, y=10)
 
-        box = tk.Frame(self.start_frame, bg=PANEL, bd=1, relief="solid")
-        box.pack(pady=8, ipadx=30, ipady=16, fill="x", padx=180)
-        tk.Label(box, text=i18n.t("host_title"), bg=PANEL, fg=TEXT,
-                 font=FONT_B).pack(anchor="w", padx=16)
-        row1 = tk.Frame(box, bg=PANEL)
-        row1.pack(anchor="w", padx=16, pady=6)
-        tk.Label(row1, text=i18n.t("label_port"), bg=PANEL, fg=DIM, font=FONT_S).pack(side="left")
-        self.host_port_var = tk.StringVar(value="5555")
-        tk.Entry(row1, textvariable=self.host_port_var, width=8,
-                 bg="#1a1d24", fg=TEXT, insertbackground=TEXT,
-                 relief="flat").pack(side="left", padx=(4, 14))
-        self.host_btn = tk.Button(row1, text=i18n.t("btn_start_wait"), bg="#2e6b46", fg=TEXT,
-                                  font=FONT_S, bd=0, padx=14, pady=6,
-                                  cursor="hand2", command=self._mp_begin_host)
-        self.host_btn.pack(side="left")
-        self.host_status = tk.Label(box, text="", bg=PANEL, fg=GOLD,
-                                    font=FONT_S, anchor="w", justify="left")
-        self.host_status.pack(anchor="w", padx=16)
+        cols = tk.Frame(self.start_frame, bg=BG)
+        cols.pack(fill="both", expand=True, padx=22)
+        left = tk.Frame(cols, bg=BG)
+        left.pack(side="left", fill="both", expand=True)
+        right = tk.Frame(cols, bg=BG)
+        right.pack(side="left", fill="both", expand=True, padx=(14, 0))
 
-        box2 = tk.Frame(self.start_frame, bg=PANEL, bd=1, relief="solid")
-        box2.pack(pady=8, ipadx=30, ipady=16, fill="x", padx=180)
-        tk.Label(box2, text=i18n.t("join_title"), bg=PANEL, fg=TEXT,
-                 font=FONT_B).pack(anchor="w", padx=16)
-        row2 = tk.Frame(box2, bg=PANEL)
-        row2.pack(anchor="w", padx=16, pady=6)
-        tk.Label(row2, text=i18n.t("label_host_ip"), bg=PANEL, fg=DIM, font=FONT_S).pack(side="left")
-        self.join_ip_var = tk.StringVar(value="192.168.1.")
-        tk.Entry(row2, textvariable=self.join_ip_var, width=14,
-                 bg="#1a1d24", fg=TEXT, insertbackground=TEXT,
-                 relief="flat").pack(side="left", padx=(4, 10))
-        tk.Label(row2, text=i18n.t("label_port"), bg=PANEL, fg=DIM, font=FONT_S).pack(side="left")
-        self.join_port_var = tk.StringVar(value="5555")
-        tk.Entry(row2, textvariable=self.join_port_var, width=8,
-                 bg="#1a1d24", fg=TEXT, insertbackground=TEXT,
-                 relief="flat").pack(side="left", padx=(4, 14))
-        self.join_btn = tk.Button(row2, text=i18n.t("btn_connect"), bg="#3a5a80", fg=TEXT,
-                                  font=FONT_S, bd=0, padx=14, pady=6,
-                                  cursor="hand2", command=self._mp_begin_join)
-        self.join_btn.pack(side="left")
-        self.join_status = tk.Label(box2, text="", bg=PANEL, fg=GOLD,
-                                    font=FONT_S, anchor="w")
-        self.join_status.pack(anchor="w", padx=16)
+        self._lobby_build_server(left)
+        self._lobby_build_players(left)
+        self._lobby_build_battle(right)
+        self._lobby_build_log(right)
 
-        ips = "\n".join("  · " + ip for ip in net.get_local_ips())
-        tk.Label(self.start_frame, text=f"本机 IP（主机把下面的地址告诉好友）：\n{ips}",
-                 bg=BG, fg=DIM, font=FONT_S, justify="left").pack(pady=(14, 0))
-        self.after(120, self._lobby_poll)
+        self._lobby_sync()
+        self._lobby_track = set()
+        # 连上服务器（若已有连接则直接复用，不再重复连）
+        if self._srv_link_obj() is None and self._srv_poll is None:
+            self._lobby_connect()
+        else:
+            self._schedule("_t_lobby", 120, self._lobby_poll)
 
-    def _lobby_back(self):
-        if self.mp_acceptor is not None:
-            self.mp_acceptor.cancel()
-            self.mp_acceptor = None
-        self.mp_join = None
-        self._lobby_active = False
-        self.start_frame.destroy()
-        self._build_start()
+    # ---- ① 服务器连接 ----
+
+    def _lobby_build_server(self, parent):
+        box = tk.Frame(parent, bg=PANEL, bd=1, relief="solid")
+        box.pack(fill="x")
+        tk.Label(box, text=i18n.t("srv_title"), bg=PANEL, fg=TEXT,
+                 font=FONT_B).pack(anchor="w", padx=14, pady=(10, 4))
+        row = tk.Frame(box, bg=PANEL)
+        row.pack(anchor="w", padx=14)
+        tk.Label(row, text=i18n.t("label_server"), bg=PANEL, fg=DIM,
+                 font=FONT_S).pack(side="left")
+        self.srv_addr_var = tk.StringVar(value=self.mp_server_addr)
+        self.srv_addr_entry = tk.Entry(row, textvariable=self.srv_addr_var, width=18,
+                                       bg="#1a1d24", fg=TEXT, insertbackground=TEXT,
+                                       relief="flat")
+        self.srv_addr_entry.pack(side="left", padx=(4, 10), ipady=3)
+        self.srv_btn = tk.Button(row, text=i18n.t("btn_srv_connect"), bg="#2e6b46",
+                                 fg=TEXT, font=FONT_S, bd=0, padx=14, pady=5,
+                                 cursor="hand2", command=self._lobby_connect)
+        self.srv_btn.pack(side="left")
+        # 「建立服务器」：本机一键起一个服务器（不用命令行）。
+        # 只在具备条件时出现：有 kards_server.py 且没有被别的东西占用端口。
+        self.srv_host_btn = tk.Button(row, text=i18n.t("btn_host_server"),
+                                      bg="#6b5a2a", fg=TEXT, font=FONT_S, bd=0,
+                                      padx=10, pady=5, cursor="hand2",
+                                      command=self._lobby_host_server)
+        if kards_host.can_host():
+            self.srv_host_btn.pack(side="left", padx=(6, 0))
+        tk.Label(box, text=i18n.t("srv_default_hint", addr=net.DEFAULT_SERVER),
+                 bg=PANEL, fg=DIM, font=FONT_S).pack(anchor="w", padx=14, pady=(4, 0))
+        self.srv_status = tk.Label(box, text="", bg=PANEL, fg=GOLD, font=FONT_S,
+                                   anchor="w", justify="left", wraplength=290)
+        self.srv_status.pack(anchor="w", padx=14, pady=(2, 4))
+        # 游客（未登录）时给一个显眼的登录入口：联机按钮此时是灰的，
+        # 光靠状态栏一行小字用户找不到出路（产品规则：游客不能联机）
+        self.srv_login_btn = tk.Button(box, text=i18n.t("btn_login_or_reg"),
+                                       bg="#3a5a80", fg=TEXT, font=FONT_S, bd=0,
+                                       padx=14, pady=5, cursor="hand2",
+                                       command=lambda: self._account_dialog(for_server=True))
+        self.srv_login_btn.pack(anchor="w", padx=14, pady=(0, 10))
+
+    # ---- ② 在线玩家 ----
+
+    def _lobby_build_players(self, parent):
+        box = tk.Frame(parent, bg=PANEL, bd=1, relief="solid")
+        box.pack(fill="both", expand=True, pady=(10, 0))
+        head = tk.Frame(box, bg=PANEL)
+        head.pack(fill="x", padx=14, pady=(10, 2))
+        tk.Label(head, text=i18n.t("lobby_players"), bg=PANEL, fg=TEXT,
+                 font=FONT_B).pack(side="left")
+        self.lobby_count_lbl = tk.Label(head, text="", bg=PANEL, fg=DIM, font=FONT_S)
+        self.lobby_count_lbl.pack(side="right")
+        # 玩家列表：滚动 Canvas（人数多时也不挤爆布局）
+        cv = tk.Canvas(box, bg=PANEL, highlightthickness=0, height=150)
+        sb = tk.Scrollbar(box, orient="vertical", command=cv.yview)
+        cv.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y", pady=(0, 10))
+        cv.pack(fill="both", expand=True, padx=(14, 0), pady=(0, 10))
+        inner = tk.Frame(cv, bg=PANEL)
+        cv.create_window((0, 0), window=inner, anchor="nw", tags="inner")
+        inner.bind("<Configure>",
+                   lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind("<Configure>",
+                lambda e: cv.itemconfigure("inner", width=e.width))
+        self.lobby_players_box = inner
+        self._lobby_players_canvas = cv
+        self._lobby_rows = {}
+        # 首屏占位（首次收到 lobby 快照后会重建）
+        self.lobby_empty_lbl = tk.Label(inner, text=i18n.t("lobby_no_players"),
+                                        bg=PANEL, fg=DIM, font=FONT_S, anchor="w")
+        self.lobby_empty_lbl.pack(fill="x", pady=6)
+
+    # ---- ③ 出击 ----
+
+    def _lobby_build_battle(self, parent):
+        box = tk.Frame(parent, bg=PANEL, bd=1, relief="solid")
+        box.pack(fill="x")
+        tk.Label(box, text=i18n.t("match_title"), bg=PANEL, fg=TEXT,
+                 font=FONT_B).pack(anchor="w", padx=14, pady=(10, 6))
+        self.match_btn = tk.Button(box, text=i18n.t("btn_quick_match"), bg="#2e6b46",
+                                   fg=TEXT, font=FONT_B, bd=0, padx=16, pady=8,
+                                   cursor="hand2", command=self._mp_quick_match)
+        self.match_btn.pack(anchor="w", padx=14)
+        self.room_btn = tk.Button(box, text=i18n.t("btn_create_room"), bg="#3a5a80",
+                                  fg=TEXT, font=FONT_S, bd=0, padx=14, pady=6,
+                                  cursor="hand2", command=self._mp_toggle_room)
+        self.room_btn.pack(anchor="w", padx=14, pady=(8, 2))
+        self.room_lbl = tk.Label(box, text=i18n.t("room_none"), bg=PANEL, fg=DIM,
+                                 font=FONT_S, anchor="w", justify="left",
+                                 wraplength=290)
+        self.room_lbl.pack(anchor="w", padx=14)
+        sep = tk.Frame(box, bg="#3a3f4a", height=1)
+        sep.pack(fill="x", padx=14, pady=8)
+        row = tk.Frame(box, bg=PANEL)
+        row.pack(anchor="w", padx=14, pady=(0, 12))
+        tk.Label(row, text=i18n.t("label_join_code"), bg=PANEL, fg=DIM,
+                 font=FONT_S).pack(side="left")
+        self.join_code_var = tk.StringVar(value="")
+        e = tk.Entry(row, textvariable=self.join_code_var, width=10,
+                     bg="#1a1d24", fg=TEXT, insertbackground=TEXT, relief="flat")
+        e.pack(side="left", padx=(4, 8), ipady=3)
+        e.bind("<Return>", lambda ev: self._mp_join_by_code())
+        self.join_code_btn = tk.Button(row, text=i18n.t("btn_join_code"), bg="#4a4f5a",
+                                       fg=TEXT, font=FONT_S, bd=0, padx=12, pady=5,
+                                       cursor="hand2", command=self._mp_join_by_code)
+        self.join_code_btn.pack(side="left")
+
+    # ---- 日志 ----
+
+    def _lobby_build_log(self, parent):
+        box = tk.Frame(parent, bg=PANEL, bd=1, relief="solid")
+        box.pack(fill="both", expand=True, pady=(10, 0))
+        tk.Label(box, text=i18n.t("lobby_log"), bg=PANEL, fg=TEXT,
+                 font=FONT_B).pack(anchor="w", padx=14, pady=(10, 2))
+        self.lobby_logbox = tk.Text(box, height=6, bg="#1a1d24", fg=TEXT,
+                                    font=FONT_S, bd=0, highlightthickness=0,
+                                    wrap="word", state="disabled")
+        self.lobby_logbox.pack(fill="both", expand=True, padx=14, pady=(0, 10))
+        for line in self.mp_lobby_log[-40:]:
+            self._lobby_log(line, echo=False)
+
+    def _lobby_log(self, text, echo=True):
+        """大厅日志：写进右侧日志框，同时记入 mp_lobby_log 以便重建界面时恢复"""
+        if echo:
+            self.mp_lobby_log.append(text)
+            del self.mp_lobby_log[:-80]
+        box = getattr(self, "lobby_logbox", None)
+        if box is None or not box.winfo_exists():
+            return
+        box.configure(state="normal")
+        box.insert("end", text + "\n")
+        box.see("end")
+        box.configure(state="disabled")
+
+    # ---- 界面状态同步（连上/未连上、匹配中/空闲） ----
+
+    def _srv_link_obj(self):
+        return self.mp_link
+
+    def _lobby_sync(self):
+        """根据「连接 / 登录 / 匹配」状态刷新按钮可用性"""
+        link = self._srv_link_obj()
+        online = link is not None and getattr(link, "alive", False)
+        logged = bool(self.mp_user)
+        busy = self.mp_matching or self.mp_room_code
+        can_play = online and logged and not busy
+
+        def set_btn(btn, state):
+            if btn is not None and btn.winfo_exists():
+                btn.configure(state=state)
+
+        set_btn(self.srv_btn, "normal" if not self._srv_poll else "disabled")
+        set_btn(self.match_btn, "normal" if can_play else "disabled")
+        set_btn(self.room_btn, "normal" if (can_play or self.mp_room_code) else "disabled")
+        set_btn(self.join_code_btn, "normal" if can_play else "disabled")
+        if self.match_btn is not None and self.match_btn.winfo_exists():
+            self.match_btn.configure(
+                text=i18n.t("btn_cancel_match") if self.mp_matching
+                else i18n.t("btn_quick_match"),
+                bg="#8a3a3a" if self.mp_matching else "#2e6b46")
+        if self.room_btn is not None and self.room_btn.winfo_exists():
+            self.room_btn.configure(
+                text=i18n.t("btn_leave_room") if self.mp_room_code
+                else i18n.t("btn_create_room"),
+                bg="#8a3a3a" if self.mp_room_code else "#3a5a80")
+        if self.room_lbl is not None and self.room_lbl.winfo_exists():
+            if self.mp_room_code:
+                self.room_lbl.configure(text=i18n.t("room_code", code=self.mp_room_code),
+                                        fg=GOLD)
+            else:
+                self.room_lbl.configure(text=i18n.t("room_none"), fg=DIM)
+        if self.srv_status is not None and self.srv_status.winfo_exists():
+            if not online:
+                if self._srv_error:
+                    self.srv_status.configure(
+                        text=i18n.t("srv_fail", err=self._srv_error), fg=RED)
+                else:
+                    self.srv_status.configure(text="", fg=GOLD)
+            elif logged:
+                self.srv_status.configure(
+                    text=i18n.t("srv_connected", addr=self._srv_addr, name=self.mp_user),
+                    fg=GREEN)
+            else:
+                # 连上了但没登录 = 游客：明确写出「游客不能联机」，
+                # 否则用户会以为按钮坏了（按钮确实是 disabled 的）
+                self.srv_status.configure(
+                    text=i18n.t("srv_connected_nouser", addr=self._srv_addr), fg=GOLD)
+        # 登录入口：仅在「已连接但未登录」时出现（登录后没意义，未连接时点了也没用）
+        lb = getattr(self, "srv_login_btn", None)
+        if lb is not None and lb.winfo_exists():
+            if online and not logged:
+                lb.pack(anchor="w", padx=14, pady=(0, 10))
+            else:
+                lb.pack_forget()
+
+    # ---- 本机开服 ----
+
+    def _lobby_host_server(self):
+        """在大厅里一键把服务器拉起来（本机当主机）。
+
+        玩家机器上通常只有这个 exe，不会去开命令行，所以「建立服务器」
+        必须是按钮级操作：起进程 → 等端口起来 → 自动连上 → 把本机
+        局域网地址填进输入框（好念给同屋的人）。
+        """
+        port = net.DEFAULT_SERVER.split(":")[-1]
+        if not kards_host.running() and kards_host.port_in_use(
+                port=int(port) if port.isdigit() else 6000):
+            # 端口已被占用：多半是别人（或上一次）已经开好了，直接连上去
+            self._lobby_log(i18n.t("host_already"))
+        elif not kards_host.running():
+            ok, err = kards_host.start(int(port) if port.isdigit() else 6000)
+            if not ok:
+                messagebox.showerror(i18n.t("host_fail_title"),
+                                     i18n.t("host_fail", err=err))
+                return
+            self._lobby_log(i18n.t("host_started"))
+        else:
+            self._lobby_log(i18n.t("host_running"))
+
+        addr = kards_host.local_addr(int(port) if port.isdigit() else 6000)
+        if getattr(self, "srv_addr_var", None) is not None:
+            self.srv_addr_var.set(addr)
+        # 局域网的其他人要连过来，得知道这个地址；顺带提醒防火墙
+        self._lobby_log(i18n.t("host_firewall_hint"))
+        # 服务器进程刚起来时端口可能还没 listen 完，等一拍再连
+        self.after(700, self._lobby_connect)
+
+    def _lobby_connect(self):
+        parsed = net.parse_addr(self.srv_addr_var.get()
+                                if getattr(self, "srv_addr_var", None) else self.mp_server_addr)
+        if parsed is None:
+            messagebox.showwarning(i18n.t("srv_warn_addr_title"), i18n.t("srv_warn_addr"))
+            return
+        host, port = parsed
+        addr = f"{host}:{port}"
+        self._close_server_link()
+        self.mp_server_addr = addr
+        self._srv_addr = addr
+        self._srv_error = ""
+        # 链路重建 → 旧代号作废，避免在途的旧轮询把定时器挂回来
+        self._bump_timer_gen("_t_lobby")
+        self._srv_poll = net.ServerPoller(addr)
+        if self.srv_status is not None and self.srv_status.winfo_exists():
+            self.srv_status.configure(text=i18n.t("srv_connecting"), fg=GOLD)
+        self.mp_lobby_players = []
+        self._lobby_sync()
+        self._schedule("_t_lobby", 80, self._lobby_poll)
+
+    def _close_server_link(self):
+        """断开并复位所有联机状态（回主菜单 / 重连前调用）"""
+        link = self.mp_link
+        self.mp_link = None
+        if link is not None:
+            try:
+                link.close()
+            except Exception:
+                pass
+        account.set_remote(None)
+        self.mp_user = None
+        self.mp_matching = False
+        self.mp_room_code = None
+        self.mp_lobby_players = []
+        self._srv_ready = False
+
+    # ---- 轮询：连接结果 + 服务器事件 ----
 
     def _lobby_poll(self):
-        """轮询主机/加入结果（后台线程只写结果，GUI 线程消费）"""
+        self._t_lobby = None
         if not self._lobby_active:
             return
-        if self.mp_acceptor is not None and self.mp_acceptor.result is not None:
-            res = self.mp_acceptor.result
-            self.mp_acceptor = None
-            if res[0] == "err":
-                self.host_status.configure(text=i18n.t("host_fail", err=res[1]))
-                self.host_btn.configure(state="normal")
-            else:
-                self.mp_link, self.mp_role = res[0], "host"
-                self._lobby_active = False
-                self.host_status.configure(text=i18n.t("host_connected"))
-                self.after(400, lambda: self._build_nation_select(mp=True))
+        # 1) 连接结果
+        if self._srv_poll is not None and self._srv_poll.ready:
+            res = self._srv_poll.take()
+            self._srv_poll = None
+            if res and res[0] == "err":
+                self._srv_error = res[1]
+                self._lobby_sync()
+                messagebox.showerror(i18n.t("srv_fail_hint").split("\n")[0],
+                                     i18n.t("srv_fail_hint", err=res[1]))
+            elif res:
+                self.mp_link = res[0]
+                self.mp_link.on_event = None
+                self._srv_ready = True
+                link = self.mp_link
+                # 账号代理到服务器：能免密 resume 就直接进大厅
+                account.set_remote(link, self._srv_addr)
+                ok, who = account.connect()
+                if ok:
+                    self.mp_user = who
+                    self._apply_account(who)
+                    self._lobby_log(i18n.t("srv_connected", addr=self._srv_addr,
+                                           name=who))
+                    self._srv_send({"m": "lobby"})
+                else:
+                    self.mp_user = None
+                    self._lobby_sync()
+                    self.after(300, self._lobby_login_dialog)
+                self._schedule("_t_lobby", 120, self._lobby_poll)
                 return
-        if self.mp_join is not None and self.mp_join.get("result") is not None:
-            res = self.mp_join["result"]
-            self.mp_join = None
-            if res[0] == "err":
-                self.join_status.configure(text=i18n.t("join_fail", err=res[1]))
-                self.join_btn.configure(state="normal")
+        # 2) 服务器事件
+        self._lobby_drain_events()
+        # ⚠ 这一步必须**重新判断**：`_lobby_drain_events()` 里收到 matched
+        # 会把 `_lobby_active` 置 False（匹配成功=已离开大厅），此时若还
+        # 无条件 reschedule，大厅轮询就永远停不下来 —— 之后它会以 120ms
+        # 的频率去碰已被销毁的大厅控件（实测：`a._t_lobby` 一直非 None，
+        # 且控制台刷屏 invalid command name）。
+        if not self._lobby_active:
+            return
+        self._schedule("_t_lobby", 120, self._lobby_poll)
+
+    def _lobby_drain_events(self, limit=200):
+        """把服务器推来的事件全部消费掉。
+
+        单独成方法是为了让「实时轮询」和「对局中/准备阶段的兜底轮询」
+        共用同一套消费逻辑 —— 匹配成功那一刻大厅轮询会停掉，如果完全
+        没人再消费 inbox，开局后服务器送来的 seed / act 就会一直躺在
+        队列里（必须在 `_mp_poll_hello` / `_mp_poll_net` 里兜底调用本方法）。
+        """
+        link = self.mp_link
+        if link is None:
+            return
+        n = 0
+        while n < limit:
+            try:
+                msg = link.inbox.get_nowait()
+            except queue.Empty:
+                break
+            n += 1
+            if not isinstance(msg, dict):
+                continue
+            if self.game is not None:
+                self._mp_handle(msg)         # 对局中：交给对局处理
             else:
-                self.mp_link, self.mp_role = res[0], "client"
-                self._lobby_active = False
-                self.join_status.configure(text=i18n.t("join_connected"))
-                self.after(400, lambda: self._build_nation_select(mp=True))
-                return
-        self.after(120, self._lobby_poll)
+                self._lobby_handle_event(msg)
+        # 连接断了：复位大厅状态
+        if not getattr(link, "alive", False) and self._srv_ready:
+            self._srv_ready = False
+            self.mp_link = None
+            self.mp_matching = False
+            self.mp_room_code = None
+            self.mp_lobby_players = []
+            self._lobby_log(i18n.t("log_srv_down"))
+            if self.game is not None:
+                self._mp_teardown_game()
+            self._lobby_sync()
 
-    def _mp_begin_host(self):
-        try:
-            port = int(self.host_port_var.get().strip() or "5555")
-            assert 1 <= port <= 65535
-        except (ValueError, AssertionError):
-            messagebox.showwarning(i18n.t("warn_port_title"), i18n.t("warn_port_range"))
-            return
-        try:
-            self.mp_acceptor = net.Acceptor(port)
-        except OSError as e:
-            messagebox.showerror(i18n.t("host_fail_title"),
-                                 i18n.t("host_fail_msg", port=port, err=e))
-            return
-        self.host_btn.configure(state="disabled")
-        self.host_status.configure(text=i18n.t("host_waiting", port=port))
+    def _srv_send(self, obj):
+        link = self.mp_link
+        if link is None or not getattr(link, "alive", False):
+            return False
+        return link.send(obj)
 
-    def _mp_begin_join(self):
-        ip = self.join_ip_var.get().strip()
-        try:
-            port = int(self.join_port_var.get().strip() or "5555")
-        except ValueError:
-            messagebox.showwarning(i18n.t("warn_port_title"), i18n.t("warn_port_num"))
+    def _lobby_handle_event(self, msg):
+        """处理大厅里的服务器推送"""
+        m = msg.get("m")
+        if m == "lobby":
+            self._lobby_set_players(msg.get("players") or [])
+        elif m == "matched":
+            self.mp_matching = False
+            self.mp_room_code = None
+            self.mp_role = "host" if msg.get("role") == "host" else "client"
+            self.mp_opp_name = msg.get("opp")
+            self.mp_room_id = msg.get("room")
+            self._lobby_log(i18n.t("matched", opp=msg.get("opp") or "?"))
+            self._lobby_sync()
+            self._lobby_active = False
+            # ⚠ 匹配成功就等于**离开大厅**了，必须停掉大厅轮询：否则它会继续
+            # 以 120ms 的频率访问已被 _build_nation_select 销毁的控件
+            # （实测会刷 invalid command name），而且它只在开头判断
+            # _lobby_active，一旦本次回调是"在途"的，就会把定时器又挂回来。
+            self._cancel_timer("_t_lobby")
+            self.after(500, lambda: self._build_nation_select(mp=True))
+        elif m == "matching":
+            self.mp_matching = True
+            self._lobby_log(i18n.t("matching"))
+            self._lobby_sync()
+        elif m == "match_cancelled":
+            self.mp_matching = False
+            self._lobby_log(i18n.t("match_cancelled"))
+            self._lobby_sync()
+        elif m == "room_created":
+            self.mp_room_code = msg.get("code")
+            self._lobby_log(i18n.t("room_created", code=self.mp_room_code))
+            self._lobby_sync()
+        elif m == "join_err":
+            self._lobby_log("⚠ " + str(msg.get("err") or "join_err"))
+        elif m == "peer_left":
+            self._lobby_log(i18n.t("log_peer_left"))
+        elif m == "kick":
+            self._lobby_log(i18n.t("log_kicked"))
+        elif m == "err":
+            self._lobby_log("⚠ " + str(msg.get("err") or "err"))
+        elif m in ("act", "seed", "ready", "concede", "chat", "ping"):
+            # 对局中的中转消息：直接交给对局处理
+            self._mp_route_in_game(msg)
+
+    def _lobby_set_players(self, players):
+        """重建在线玩家列表（同时把进出大厅的人写进日志）"""
+        names = {p.get("name") for p in players if p.get("name")}
+        for n in sorted(names - self._lobby_track):
+            self._lobby_log(i18n.t("log_lobby_in", name=n))
+        for n in sorted(self._lobby_track - names):
+            self._lobby_log(i18n.t("log_lobby_out", name=n))
+        self._lobby_track = names
+        self.mp_lobby_players = players
+        box = getattr(self, "lobby_players_box", None)
+        if box is None or not box.winfo_exists():
             return
-        if not ip:
-            messagebox.showwarning(i18n.t("warn_ip_title"), i18n.t("warn_ip"))
+        for w in box.winfo_children():
+            w.destroy()
+        if self.lobby_count_lbl is not None and self.lobby_count_lbl.winfo_exists():
+            self.lobby_count_lbl.configure(text=i18n.t("lobby_count", n=len(players)))
+        if not players:
+            tk.Label(box, text=i18n.t("lobby_no_players"), bg=PANEL, fg=DIM,
+                     font=FONT_S, anchor="w").pack(fill="x", pady=6)
             return
-        self.join_btn.configure(state="disabled")
-        self.join_status.configure(text=i18n.t("connecting", ip=ip, port=port))
-        self.mp_join = {}
-        net.connect_async(ip, port, self.mp_join)
+        for p in players:
+            row = tk.Frame(box, bg=PANEL)
+            row.pack(fill="x", pady=1)
+            name = p.get("name") or "?"
+            me = (name == self.mp_user)
+            st = p.get("stats") or {}
+            tk.Label(row, text=("⭐ " if me else "· ") + name, bg=PANEL,
+                     fg=GOLD if me else TEXT, font=FONT_S, anchor="w"
+                     ).pack(side="left")
+            tk.Label(row, text=(i18n.t("player_ingame") if p.get("in_game")
+                                else i18n.t("player_idle")), bg=PANEL, fg=DIM,
+                     font=FONT_S).pack(side="right")
+            tk.Label(row, text=i18n.t("player_stats", w=st.get("win", 0),
+                                      l=st.get("lose", 0), d=st.get("draw", 0)),
+                     bg=PANEL, fg=DIM, font=FONT_S).pack(side="right", padx=10)
+
+    def _lobby_login_dialog(self):
+        """连上服务器但还没登录：把服务器账号登录框弹出来（沿用账号窗逻辑）"""
+        if not self._lobby_active or self.mp_link is None:
+            return
+        self._account_dialog(for_server=True)
+        self._lobby_sync()
+
+    # ---- ② → 出击：快速匹配 / 邀请码房间 ----
+
+    def _mp_require_login(self):
+        """联机门禁：必须「已连服务器 + 已登录正式账号」。
+
+        游客（未登录）**不能联机** —— 这是产品明确规则。此时给出提示并
+        直接把登录窗弹出来，用户登录完就能接着点原来那个按钮。
+        """
+        if self.mp_link is None or not getattr(self.mp_link, "alive", False):
+            messagebox.showwarning(i18n.t("srv_offline_title"), i18n.t("srv_offline"))
+            return False
+        if not self.mp_user:
+            messagebox.showwarning(i18n.t("srv_need_login_title"), i18n.t("srv_need_login"))
+            self._account_dialog(for_server=True)
+            return False
+        return True
+
+    def _mp_quick_match(self):
+        if self.mp_matching:
+            self._srv_send({"m": "cancel_match"})
+            self.mp_matching = False
+            self._lobby_sync()
+            return
+        if not self._mp_require_login():
+            return
+        if not self._srv_send({"m": "match"}):
+            self._lobby_log(i18n.t("log_srv_down"))
+            return
+        self.mp_matching = True
+        self._lobby_log(i18n.t("matching"))
+        self._lobby_sync()
+
+    def _mp_toggle_room(self):
+        if self.mp_room_code:
+            self._srv_send({"m": "leave_room"})
+            self.mp_room_code = None
+            self._lobby_log(i18n.t("match_cancelled"))
+            self._lobby_sync()
+            return
+        if not self._mp_require_login():
+            return
+        if not self._srv_send({"m": "create_room"}):
+            self._lobby_log(i18n.t("log_srv_down"))
+
+    def _mp_join_by_code(self):
+        code = (self.join_code_var.get() or "").strip().upper()
+        if not code:
+            messagebox.showwarning(i18n.t("warn_code_title"), i18n.t("warn_code"))
+            return
+        if not self._mp_require_login():
+            return
+        if not self._srv_send({"m": "join_room", "code": code}):
+            self._lobby_log(i18n.t("log_srv_down"))
+            return
+        self.mp_matching = True          # 等 matched
+        self._lobby_sync()
+
+    def _lobby_back(self):
+        self._lobby_active = False
+        self.mp_matching = False
+        self.mp_room_code = None
+        self.mp_opp_name = None
+        self._cancel_timer("_t_lobby")       # 停掉大厅轮询，避免访问已销毁控件
+        self.start_frame.destroy()
+        self._build_start()
 
     # ---------------- 练习：选择主国 ----------------
     def _build_nation_select(self, mp=False):
@@ -673,6 +1529,34 @@ class App(tk.Tk):
                        cost=None, color=NATION_COLOR[nation], big=True,
                        on_click=lambda n=nation: self._build_deck_builder(n, mp=self.mp_mode)).pack(
                 side="left", padx=8, ipady=8)
+        # ⚠ 联机时从「匹配成功」到「双方都点开始」之间可能停留很久（组卡很慢）。
+        # 这段时间大厅轮询已经停了，如果对手掉线 / 服务器断开，界面会一直停在
+        # 这里没有任何反馈，直到用户点了开始才发现（实测如此）。所以这里起一个
+        # 轻量看门狗，只负责"发现链路死了就把界面退回主菜单并提示"。
+        if mp:
+            self._schedule("_t_prep", 500, self._mp_prep_watch)
+
+    def _mp_prep_watch(self):
+        """准备阶段的看门狗：只关心「连接是否还在」。
+
+        真正的 seed / ready 交换由 `_mp_poll_hello`（点了开始之后）负责，
+        所以本方法**必须**让步：一旦 _t_hello 起来了就自己停掉，避免
+        两条轮询同时抢占 inbox（会互相抢走对方的包）。
+        """
+        self._t_prep = None
+        if self.game is not None or self._t_hello is not None:
+            return                                  # 已进对局 / 已交给 hello 轮询
+        link = self.mp_link
+        if link is None:
+            return
+        self._lobby_drain_events()                  # 兜底消费，顺带更新链路状态
+        if self.game is not None or self._t_hello is not None:
+            return
+        if self.mp_link is None or not self.mp_link.alive:
+            messagebox.showerror(i18n.t("mp_title"), i18n.t("mp_peer_left_prep"))
+            self._mp_cleanup_to_menu()
+            return
+        self._schedule("_t_prep", 500, self._mp_prep_watch)
 
     # ---------------- 组卡界面 ----------------
     def _build_deck_builder(self, nation, mp=False):
@@ -942,7 +1826,12 @@ class App(tk.Tk):
             row.bind("<Button-1>", lambda e, n=nm: do_load(n))
 
     def _start_mp(self):
-        """联机：校验卡组 → 发 hello → 等双方就绪 → 主机发种子开局"""
+        """联机：校验卡组 → 发 ready（带国家与卡组）→ 等双方就绪 → 主机发种子开局
+
+        ⚠ 协议约定：信封字段一律用 "m"（见 kards_net 模块头注释）。
+        "t" 在行动指令里表示「目标槽位」，用 "t" 做信封会被 unpack 覆盖，
+        导致攻击指令丢失目标而静默失效 —— 历史 bug，此处及以下全部用 "m"。
+        """
         if self.mp_link is None:
             messagebox.showerror(i18n.t("mp_title"), i18n.t("mp_disconnected"))
             return
@@ -954,12 +1843,19 @@ class App(tk.Tk):
         random.shuffle(deck)
         self.mp_my_deck = [c.name for c in deck]
         self.mp_opp = None
-        self.mp_link.send({"t": "hello", "nation": self.deck_nation,
+        self.mp_link.send({"m": "ready", "nation": self.deck_nation,
                            "deck": self.mp_my_deck})
         self.start_btn.configure(state="disabled", text=i18n.t("waiting_opponent"))
-        self.after(200, self._mp_poll_hello)
+        self._cancel_timer("_t_prep")       # 交给 hello 轮询，看门狗退场
+        self._schedule("_t_hello", 200, self._mp_poll_hello)
 
     def _mp_poll_hello(self):
+        self._t_hello = None
+        if self.game is not None or self.mp_link is None:
+            return
+        # ⚠ 兜底消费：匹配成功那一刻大厅轮询会停掉，此后 seed / ready 只能
+        # 靠这里收 —— 否则双方会一直卡在"等待对手准备"（实测踩过）。
+        self._lobby_drain_events()
         if self.game is not None or self.mp_link is None:
             return
         if not self.mp_link.alive:
@@ -969,22 +1865,30 @@ class App(tk.Tk):
         try:
             while True:
                 m = self.mp_link.inbox.get_nowait()
-                if m.get("t") == "hello":
+                if m.get("m") == "ready":
                     self.mp_opp = m
-                elif m.get("t") == "start" and self.mp_role == "client":
+                elif m.get("m") == "seed" and self.mp_role == "client":
                     self._mp_launch(m["seed"])
                     return
-                elif m.get("t") == "concede":
+                elif m.get("m") == "peer_left":
+                    messagebox.showerror(i18n.t("mp_title"), i18n.t("mp_peer_left_prep"))
+                    self._mp_cleanup_to_menu()
+                    return
+                elif m.get("m") == "concede":
+                    self._mp_cleanup_to_menu()
+                    return
+                elif m.get("m") == "kick":
+                    messagebox.showerror(i18n.t("mp_title"), i18n.t("log_kicked"))
                     self._mp_cleanup_to_menu()
                     return
         except queue.Empty:
             pass
         if self.mp_role == "host" and self.mp_opp is not None:
             seed = random.SystemRandom().randrange(10 ** 9)
-            self.mp_link.send({"t": "start", "seed": seed})
+            self.mp_link.send({"m": "seed", "seed": seed})
             self._mp_launch(seed)
             return
-        self.after(200, self._mp_poll_hello)
+        self._schedule("_t_hello", 200, self._mp_poll_hello)
 
     def _mp_launch(self, seed):
         """双方用同一种子同步开局：先手随机、发牌一致"""
@@ -1002,8 +1906,9 @@ class App(tk.Tk):
             self._mp_cleanup_to_menu()
             return
         random.seed(seed)
+        foe_name = self.mp_opp_name or f"对手·{opp.get('nation', '?')}"
         me = core.Player("你", self.deck_nation, my_deck)
-        foe = core.Player(f"对手·{opp.get('nation', '?')}", opp.get("nation", "德国"), opp_deck)
+        foe = core.Player(foe_name, opp.get("nation", "德国"), opp_deck)
         self.game = GUIGame(me, foe, self.add_log, self.on_game_event)
         for attr in ("start_frame", "builder_frame"):
             fr = getattr(self, attr, None)
@@ -1019,12 +1924,13 @@ class App(tk.Tk):
         self.game.draw_cards(second, 1)                   # 后手多抽一张
         if not i_am_first:
             self.game.current = foe                       # 对手先手：回合归属交给对手
-        self.add_log(f"联机对战：你({self.deck_nation}) vs {foe.name}({opp.get('nation')})")
+        self.add_log(f"联机对战：你({self.deck_nation}) vs {foe.name}"
+                     f"({opp.get('nation')})")
         self.add_log(f"先手：{'你' if i_am_first else '对手'}。祝你好运，指挥官！")
         self.busy = not i_am_first
         self.game.start_turn()      # 第 1 回合准备（双方对称各执行一次）
         self.refresh()
-        self.after(80, self._mp_poll_net)
+        self._schedule("_t_net", 80, self._mp_poll_net)
         if i_am_first:
             self.show_banner("你的回合", GREEN, 900)
         else:
@@ -1032,12 +1938,22 @@ class App(tk.Tk):
 
     # ---------------- 联机：网络轮询与行动应用 ----------------
     def _mp_send_act(self, act):
+        """发一条行动指令。
+
+        ⚠ 这里**只能**用 {"m": "act", ...}。曾经写成 {"t": "act", **act}，
+        但 act 里 "t" 是目标槽位（攻击指令），dict 字面量展开顺序会让
+        后面的 "t" 覆盖掉 "act" → 服务器看不懂信封 → 攻击指令静默失效。
+        """
         if self.mp_link is not None:
-            self.mp_link.send({"t": "act", **act})
+            self.mp_link.send({"m": "act", **act})
 
     def _mp_poll_net(self):
+        self._t_net = None
         link = self.mp_link
         if self.game is None or link is None:
+            return
+        self._lobby_drain_events()      # 兜底 + 感知服务器断线
+        if self.game is None or self.mp_link is None:
             return
         try:
             while True:
@@ -1050,18 +1966,28 @@ class App(tk.Tk):
         if not link.alive:
             self._mp_disconnected()
             return
-        self.after(80, self._mp_poll_net)
+        self._schedule("_t_net", 80, self._mp_poll_net)
+
+    def _mp_route_in_game(self, msg):
+        """对局中的中转消息：交给 _mp_handle；准备阶段交给 hello 轮询"""
+        if self.game is not None:
+            self._mp_handle(msg)
 
     def _mp_handle(self, msg):
         g = self.game
         if g is None:
             return
-        t = msg.get("t")
-        if t == "concede":
+        m = msg.get("m")
+        if m in ("peer_left", "kick"):
+            self.add_log("  ⚠ 对手已断线！")
+            self._mp_game_over = True
+            self.finish(winner=g.players[0])
+            return
+        if m == "concede":
             self.add_log("  🏳 对手选择了投降！")
             self.finish(winner=g.players[0])
             return
-        if t != "act":
+        if m != "act":
             return
         foe = g.players[1]
         k = msg.get("k")
@@ -1122,26 +2048,48 @@ class App(tk.Tk):
         self.busy = False
 
     def _mp_disconnected(self):
+        """服务器连接断开：对局中判负回菜单，否则只提示"""
         link = self.mp_link
         self.mp_link = None
         if link is not None:
-            link.close()
+            try:
+                link.close()
+            except Exception:
+                pass
+        account.set_remote(None)
+        self._srv_ready = False
+        self.mp_user = None
+        self.mp_matching = False
+        self.mp_room_code = None
         if self.game is not None:
-            self.add_log("  ⚠ 对手已断线！")
+            self.add_log("  ⚠ 与服务器的连接已断开！")
             self._mp_game_over = True
             self.finish(winner=self.game.players[0])
         else:
-            messagebox.showinfo(i18n.t("mp_title"), i18n.t("mp_lost"))
+            messagebox.showinfo(i18n.t("mp_title"), i18n.t("log_srv_down"))
+
+    def _mp_teardown_game(self):
+        """服务器掉线时清掉对局界面（不弹窗，由调用方负责提示）"""
+        self._mp_game_over = True
+        if self.game is not None:
+            try:
+                self.finish(winner=self.game.players[0])
+            except Exception:
+                self.game = None
+                self.back_to_menu()
 
     def _mp_cleanup_to_menu(self):
         """准备阶段出错：断开连接回主菜单"""
-        if self.mp_link is not None:
-            self.mp_link.close()
-            self.mp_link = None
+        self._close_server_link()
         self.mp_role = None
         self.mp_opp = None
+        self.mp_opp_name = None
         self.mp_my_deck = None
-        self.start_frame.destroy()
+        self._lobby_active = False
+        for attr in ("start_frame", "builder_frame"):
+            fr = getattr(self, attr, None)
+            if fr is not None and fr.winfo_exists():
+                fr.destroy()
         self._build_start()
 
     def _start_custom(self):
@@ -2251,7 +3199,7 @@ class App(tk.Tk):
                 win.destroy()
                 self.add_log(i18n.t("log_surrender"))
                 if self.mp_link is not None:
-                    self.mp_link.send({"t": "concede"})
+                    self.mp_link.send({"m": "concede"})
                 self.finish(winner=self.game.players[1] if self.game else None)
 
         def to_menu():
@@ -2291,17 +3239,23 @@ class App(tk.Tk):
             pass
 
     def back_to_menu(self):
-        """安全回到主菜单（放弃当前对局）"""
+        """安全回到主菜单（放弃当前对局）。
+
+        ⚠ 注意：这里是**回主菜单**，不是断服务器 —— 服务器连接要保留，
+        否则用户每打一局都得重连 + 重新登录。
+        """
         self._finishing = False
         if self.mp_link is not None:
             if self.game is not None and not self._mp_game_over:
-                self.mp_link.send({"t": "concede"})   # 中途退出 = 投降
-            self.mp_link.close()
-            self.mp_link = None
+                self.mp_link.send({"m": "concede"})   # 中途退出 = 投降
+                self.mp_link.send({"m": "leave_room"})
         self._mp_game_over = False
         self.mp_role = None
         self.mp_opp = None
+        self.mp_opp_name = None
         self.mp_my_deck = None
+        self.mp_matching = False
+        self.mp_room_code = None
         self.game = None
         self.busy = False
         self.selected = None
@@ -2657,17 +3611,33 @@ class App(tk.Tk):
         self.refresh()
 
 
-def run_debug_net(port=5555):
-    """--debug-on-net：本机双开自战（一个进程跑两个窗口，自动互联）
-    用于在一台电脑上体验/调试联机流程：主机窗（德国）vs 客户窗（苏联）"""
+def run_debug_net(addr=None):
+    """--debug-on-net：本机双开自战（一个进程跑两个窗口，自动连同一服务器）
+
+    用于在一台电脑上体验/调试**服务器中转**联机流程：
+    两个窗口各注册一个临时账号 → 自动匹配 → 各自组卡 → 开局对打。
+    前提：先启动 `python kards_server.py`（默认 6000 端口）。
+
+    地址也可从命令行给：`python KARDS.py --debug-on-net 127.0.0.1:6001`
+    （自动化测试就是这么带着随机端口起服务器的）。
+    """
     import time as _time
     core.setup_error_log()
-    print("[调试自战] 正在启动两个窗口：主机(德国) vs 客户端(苏联)…")
+    if addr is None:
+        # 找 --debug-on-net 后面那个「长得像 host:port」的参数
+        for arg in sys.argv[1:]:
+            if arg.startswith("--"):
+                continue
+            if net.parse_addr(arg) is not None:
+                addr = arg
+                break
+    addr = addr or net.DEFAULT_SERVER
+    print(f"[调试自战] 正在启动两个窗口，服务器 {addr} …")
     a = App()
-    a.title("KARDS 联机调试 · 主机（德国）")
+    a.title("KARDS 联机调试 · 窗口A")
     a.geometry("+60+60")
     b = App()
-    b.title("KARDS 联机调试 · 客户端（苏联）")
+    b.title("KARDS 联机调试 · 窗口B")
     b.geometry("+780+60")
 
     def pump(n=1):
@@ -2684,18 +3654,61 @@ def run_debug_net(port=5555):
     a.on_battle()
     b.on_battle()
     pump(3)
-    a.host_port_var.set(str(port))
-    a._mp_begin_host()
-    b.join_ip_var.set("127.0.0.1")
-    b.join_port_var.set(str(port))
-    b._mp_begin_join()
-
-    # 等待互联（_lobby_poll 自动进入选阵营）
+    # ⚠ kards_account 的会话缓存(session.json)是**模块级全局**。两个窗口
+    # 同进程自战，如果不作废缓存：窗口B 连上后 `_lobby_poll` 会用窗口A
+    # 刚拿到的令牌自动 resume，服务器判「同账号异地登录」把 A 踢下线
+    # → A 的 mp_link.alive 变 False → 匹配静默失败（探针已实证）。
+    # 真实游戏一个进程只有一个窗口，不会遇到；自战模式必须手动处理。
+    for app in (a, b):
+        account._drop_session()
+        app.srv_addr_var.set(addr)
+        app._lobby_connect()
+        # 等到「连上并且自动 resume 判定结束」再动下一个窗口，
+        # 否则两个窗口的 resume 会互相踩
+        t0 = _time.time()
+        while app.mp_link is None and _time.time() - t0 < 8:
+            if not pump(1):
+                return
+    # 等两个窗口都连上服务器
     t0 = _time.time()
-    while (a.mp_link is None or b.mp_link is None) and _time.time() - t0 < 15:
+    while (a.mp_link is None or b.mp_link is None) and _time.time() - t0 < 12:
         if not pump(1):
             return
-    pump(45)   # 等 after(400ms) 调度选阵营界面
+    if a.mp_link is None or b.mp_link is None:
+        print("[调试自战] 连不上服务器，请先运行 python kards_server.py")
+        return
+
+    # 两个窗口各自注册临时账号（登录框会自动弹出，这里直接走账号模块）
+    for app, who in ((a, "DebugA"), (b, "DebugB")):
+        account.set_remote(app.mp_link, addr)
+        pw = "debug1234"
+        ok, err = account.login(who, pw)
+        if not ok:
+            ok, err = account.register(who, pw)
+        if not ok:
+            print(f"[调试自战] {who} 账号失败：{err}")
+            return
+        app.mp_user = account.current()
+        app._apply_account(app.mp_user)
+        app._srv_send({"m": "lobby"})
+    # 关掉可能弹出的账号窗（避免挡住调试视线）
+    pump(20)
+    for app in (a, b):
+        for w in app.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "account":
+                w.destroy()
+    pump(3)
+
+    a._mp_quick_match()
+    pump(2)
+    b._mp_quick_match()
+
+    # 等匹配成功（_lobby_poll 收到 matched 后自动进入选阵营）
+    t0 = _time.time()
+    while (a.mp_role is None or b.mp_role is None) and _time.time() - t0 < 15:
+        if not pump(1):
+            return
+    pump(60)   # 等 after(500ms) 调度选阵营界面
 
     for app, nation in ((a, "德国"), (b, "苏联")):
         app._build_deck_builder(nation, mp=True)
@@ -2738,8 +3751,201 @@ def _another_instance_running():
     return True
 
 
+def _server_default_db(srvmod):
+    """服务器模式的默认数据库路径。
+
+    优先级：
+      1. `KARDS_DATA_DIR`（测试/便携用，最高优先）
+      2. 打包运行 → 用户数据目录（安装目录常在 Program Files，只读）
+      3. 源码运行 → 项目根目录的 kards_server.db（与 kards_server.py 一致）
+
+    ⚠ 第 2、3 步顺序不能反：frozen 下 `__file__` 指向 _internal 里的
+    数据文件，那个目录属于程序安装目录，不能当数据库目录。
+    """
+    env_dir = os.environ.get("KARDS_DATA_DIR")
+    if env_dir:
+        try:
+            os.makedirs(env_dir, exist_ok=True)
+        except OSError:
+            pass
+        return os.path.join(env_dir, "kards_server.db")
+    if getattr(sys, "frozen", False):
+        return srvmod.user_data_db()
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "kards_server.db")
+
+
+def run_server_entry(argv):
+    """`KARDS.exe --server [--port N]` → 就地变成联机服务器。
+
+    为什么让主程序兼任服务器入口：玩家手上只有这一个 exe，
+    没有 Python、也不会开命令行。大厅里的「建立服务器」按钮就是
+    用这个入口把自己拉起来的（见 kards_host.py）。
+
+    ⚠ 必须在**创建 Tk 窗口之前**分流，否则会先弹出游戏主界面。
+    ⚠ 这是无界面程序（console=False），所以错误只能弹窗 + 写日志。
+    """
+    import argparse
+    ap = argparse.ArgumentParser(prog="KARDS --server", add_help=False)
+    ap.add_argument("--server", action="store_true")
+    ap.add_argument("--port", type=int, default=None)
+    ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--db", default=None)
+    args, _unknown = ap.parse_known_args(argv[1:])
+
+    rc = 1
+    try:
+        import kards_server as srvmod
+    except Exception as e:                       # noqa: BLE001
+        _server_fatal(f"无法加载服务器模块：{type(e).__name__}: {e}")
+        return 1
+
+    db_path = args.db or _server_default_db(srvmod)
+    port = args.port or srvmod.DEFAULT_PORT
+    try:
+        srvmod.DB = srvmod.Store(db_path)
+        server = srvmod.Server((args.host, port), srvmod.ClientHandler)
+    except OSError as e:
+        _server_fatal(f"端口 {port} 无法监听（可能已被占用）：\n{e}")
+        return 1
+    except Exception as e:                       # noqa: BLE001
+        _server_fatal(f"服务器启动失败：{type(e).__name__}: {e}")
+        return 1
+
+    try:
+        server.serve_forever()
+        rc = 0
+    except KeyboardInterrupt:
+        rc = 0
+    except Exception as e:                       # noqa: BLE001
+        _server_fatal(f"服务器异常退出：{type(e).__name__}: {e}")
+    finally:
+        try:
+            server.server_close()
+        except Exception:                        # noqa: BLE001
+            pass
+    return rc
+
+
+def _server_fatal(msg, silent=None):
+    """服务器模式下的致命错误提示（无控制台，只能弹窗 + 写日志）。
+
+    ⚠ 弹窗是**模态**的：如果调用方（比如自动化测试）不点它，进程会一直挂着。
+    所以只要带 `--silent-server-errors` 就跳过弹窗，只写日志。
+    默认规则：有控制台的（源码调试）不弹，无控制台的（打包 exe）才弹 ——
+    打包后用户看不到任何输出，不弹窗就完全不知道为什么没反应。
+    """
+    try:
+        core.setup_error_log()
+        with open(os.path.join(core.LOGS_DIR, "error.log"), "a", encoding="utf-8") as f:
+            f.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} [服务器] =====\n{msg}\n")
+    except Exception:                            # noqa: BLE001
+        pass
+    if silent is None:
+        silent = "--silent-server-errors" in sys.argv
+        if not silent:
+            # console 属性由 PyInstaller 注入；源码运行时不存在 → 视为有控制台
+            silent = not getattr(sys, "frozen", False)
+    if silent:
+        try:
+            print(f"[服务器] {msg}")
+        except Exception:                        # noqa: BLE001
+            pass
+        return
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(
+            None, f"{msg}\n\n（端口被占用时可换一个端口重试）",
+            f"{APP_TITLE} · 服务器", 0x30)       # MB_ICONWARNING
+    except Exception:                            # noqa: BLE001
+        pass
+
+
+def host_selftest():
+    """`KARDS.exe --host-selftest`：验证本机开服这条路走得通。
+
+    打包后最容易坏的就是「资源在 _internal、exe 在上一层」这种布局
+    （kards_host.resource_dir() 找错地方 → 找不到 kards_server.py →
+    大厅的「建立服务器」按钮直接不显示）。这个自检把整条链路走一遍：
+    定位脚本 → 起进程 → 等端口 → 连上 → 注册 → 收尾。
+    """
+    import socket
+    import tempfile
+    import time as _t
+    print(f"[自检] frozen={getattr(sys, 'frozen', False)} "
+          f"_MEIPASS={getattr(sys, '_MEIPASS', None)}")
+    print(f"[自检] resource_dir = {kards_host.resource_dir()}")
+    print(f"[自检] server_script = {kards_host.server_script()}")
+    print(f"[自检] can_host = {kards_host.can_host()}")
+    if not kards_host.can_host():
+        print("SELFTEST FAIL: 找不到 kards_server.py，打包不完整")
+        return 1
+    # 用随机端口，避免撞上开发机上已有的 6000
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+
+    tmp = tempfile.mkdtemp(prefix="kards_selftest_")
+    old = os.environ.get("KARDS_DATA_DIR")
+    os.environ["KARDS_DATA_DIR"] = tmp
+    ok, err = kards_host.start(port=port)
+    print(f"[自检] start() -> {ok} {err}")
+    if not ok:
+        print("SELFTEST FAIL: 服务器进程起不来")
+        return 1
+    try:
+        up = False
+        for _ in range(80):
+            if kards_host.port_in_use(port=port):
+                up = True
+                break
+            _t.sleep(0.1)
+        print(f"[自检] 端口 {port} 已监听 = {up}")
+        if not up:
+            print("SELFTEST FAIL: 服务器没监听端口")
+            return 1
+        import kards_net
+        sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+        link = kards_net.ServerLink(sock, ("127.0.0.1", port))
+        name = "SelfTest" + str(int(_t.time()) % 10000)
+        link.send({"m": "register", "user": name, "pw": "pw123456"})
+        got = None
+        deadline = _t.time() + 6
+        while _t.time() < deadline:
+            try:
+                msg = link.inbox.get(timeout=0.3)
+            except Exception:                     # noqa: BLE001
+                continue
+            if isinstance(msg, dict) and msg.get("m") in ("auth_ok", "auth_err"):
+                got = msg
+                break
+        link.close()
+        print(f"[自检] 注册应答 = {got}")
+        if not (got and got.get("m") == "auth_ok"):
+            print("SELFTEST FAIL: 服务器没能注册账号")
+            return 1
+        print(f"[自检] 数据库目录 = {tmp}（含 db="
+              f"{os.path.isfile(os.path.join(tmp, 'kards_server.db'))}）")
+    finally:
+        kards_host.stop()
+        if old is None:
+            os.environ.pop("KARDS_DATA_DIR", None)
+        else:
+            os.environ["KARDS_DATA_DIR"] = old
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+    print("SELFTEST OK: 开服链路完整")
+    return 0
+
+
 def main():
     core.setup_error_log()
+    if "--server" in sys.argv:
+        sys.exit(run_server_entry(sys.argv))
+    if "--host-selftest" in sys.argv:
+        # 打包后自检：确认「建立服务器」这条路在安装目录里真的走得通
+        # （资源定位、脚本存在、能起进程、端口能连）
+        sys.exit(host_selftest())
     if "--debug-on-net" in sys.argv:
         run_debug_net()
         return
