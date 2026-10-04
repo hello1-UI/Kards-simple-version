@@ -2408,23 +2408,7 @@ class App(tk.Tk):
         return (self.game is not None and not self.busy
                 and self.game.current is self.game.players[0])
 
-    # ---- 拖拽画布：覆盖整个窗口，让卡能"拖出"手牌区 ----
-    def _drag_layer(self):
-        """返回覆盖全窗口的拖拽层（懒创建）。
-
-        关键：卡要能拖出原容器（手牌区/牌桌）之外，所以幽灵卡不能放进
-        原容器里（会被父容器裁剪），必须挂在一个铺满整个窗口的层上，
-        并用 place() 以绝对坐标定位。
-        """
-        layer = getattr(self, "_drag_layer_w", None)
-        if layer is not None and layer.winfo_exists():
-            return layer
-        layer = tk.Frame(self, bg=BG, bd=0, highlightthickness=0)
-        layer.place(x=0, y=0, relwidth=1, relheight=1)
-        layer.lift()
-        self._drag_layer_w = layer
-        return layer
-
+    # ---- 拖拽：幽灵卡直接挂主窗口 ----
     def _drop_zones(self):
         """返回 [(widget, 类型)] —— 拖拽时可以落下的区域。
 
@@ -2554,7 +2538,13 @@ class App(tk.Tk):
                 self.drag = None
                 self._drag_cancel()
                 return
-            ghost = tk.Label(self._drag_layer(), text=txt, bg=color,
+            # 幽灵卡的父级必须是主窗口（self），**不能**放原容器里
+            # （会被手牌区裁剪），也**不能**套一层铺满窗口的遮罩 Frame ——
+            # 那样会把整个界面盖成黑屏并吃掉所有点击（v1.3.0.2 前的
+            # 「拖卡黑屏」事故）。place() 的绝对坐标以父容器为基准，
+            # 挂在主窗口上就等于全窗口自由定位，且 lift() 后压在所有
+            # 兄弟控件之上，无需任何中间层。
+            ghost = tk.Label(self, text=txt, bg=color,
                              fg="#15171c", font=FONT_B, bd=0, padx=12, pady=7)
             ghost.place(x=-500, y=-500)
             ghost.lift()

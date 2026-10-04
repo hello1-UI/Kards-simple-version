@@ -159,9 +159,9 @@ def main():
         gh = app.drag["ghost"] if app.drag else None
         check("幽灵卡已创建", gh is not None and gh.winfo_exists())
         if gh is not None and gh.winfo_exists():
-            # 幽灵卡的父级必须是拖拽层（不是 hand_frame）
-            check("幽灵卡父级是拖拽层（可拖出原容器）",
-                  gh.master is app._drag_layer_w,
+            # 幽灵卡的父级必须是主窗口（不是 hand_frame，也不是遮罩层）
+            check("幽灵卡父级是主窗口（可拖出原容器）",
+                  gh.master is app,
                   f"父级={gh.master}")
             # 拖到左上角时幽灵卡应仍然可见（被收拢进窗口内）
             gx, gy = gh.winfo_x(), gh.winfo_y()
@@ -180,6 +180,21 @@ def main():
         check("拖拽状态已清空", app.drag is None)
         check("抬起效果已还原", not getattr(app, "_lift_saved", {}))
         check("高亮已清理", not getattr(app, "_hl_saved", {}))
+        # 黑屏回归（v1.3.0.2 前的事故）：拖拽层是铺满窗口的不透明 Frame，
+        # 松手后没人销毁 → 整个界面被盖住、点哪都没反应。
+        # 用 winfo_containing 验证：松手后手牌中心的最顶层控件仍是手牌本身，
+        # 而不是任何全窗口遮罩。
+        hx = hand_w.winfo_rootx() + hand_w.winfo_width() // 2
+        hy = hand_w.winfo_rooty() + hand_w.winfo_height() // 2
+        top = app.winfo_containing(hx, hy)
+        # 顶层控件沿父链应能走回手牌卡（卡内部有子件，命中其孙级也算）
+        chain, w = [], top
+        while w is not None and w is not app:
+            chain.append(w)
+            w = getattr(w, "master", None)
+        check("松手后无全窗口遮罩挡住界面（黑屏回归）",
+              top is not None and hand_w in chain,
+              f"顶层控件={top} 父链长={len(chain)}")
 
         print("\n=== 3. 合法性判定：单位只能部署到支援阵线 ===")
         me.kredits = 99                      # 保证费用足够
