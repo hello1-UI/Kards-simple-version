@@ -204,10 +204,13 @@ def _try_resume():
         rep = _rpc({"m": "resume", "token": tok}, key="resume")
     except Exception:
         return None
-    if isinstance(rep, dict) and rep.get("m") == "auth_ok":
-        _TOKEN = tok
-        return rep.get("user") or rep.get("name") or d.get("name")
-    _drop_session()
+    if isinstance(rep, dict):
+        # 服务器**明确拒绝**才清会话缓存；网络原因（rep is None，超时/断线）
+        # 不动缓存 —— 否则一次抖动就把 30 天令牌抹了，下次还得重输密码。
+        _drop_session()
+        if rep.get("m") == "auth_ok":
+            _TOKEN = tok
+            return rep.get("user") or rep.get("name") or d.get("name")
     return None
 
 
@@ -251,6 +254,60 @@ def _remote_login(name, pw):
         _accept_token(rep, name)
         return True, ""
     return False, _err_text(rep, "用户名或密码错误")
+
+
+def local_verify(name, pw):
+    """校验「用户名 + 明文密码」是否与本地账号库匹配（不碰服务器）。
+
+    用于账号迁移：联机登录被服务器拒绝、但本地存在同名同密码账号时，
+    说明这是个只在本地注册过的账号 —— 用输入的明文密码先过本地哈希
+    校验确认身份，再把它自动注册到服务器（见 _migrate_to_server）。
+    """
+    name = (name or "").strip()
+    u = _load()["users"].get(name)
+    if not u:
+        return False
+    return u["pw"] == _hash(u["salt"], pw or "")
+
+
+def _local_stats(name):
+    u = _load()["users"].get(name) or {}
+    s = u.get("stats") or {}
+    return {"win": s.get("win", 0), "lose": s.get("lose", 0), "draw": s.get("draw", 0)}
+
+
+def _seed_stats(name):
+    """本地有战绩且当前在服务器模式 → 把战绩搬上服务器（幂等，失败静默）"""
+    st = _local_stats(name)
+    if any(st.values()):
+        _rpc({"m": "stats_seed", "win": st["win"], "lose": st["lose"],
+              "draw": st["draw"]}, key="stats_seed")
+
+
+def _migrate_to_server(name, pw):
+    """把本地账号迁移到服务器（登录被拒 + 本地密码核对通过时调用）。
+
+    服务器 register 成功即视为迁移完成（token 已在 _remote_register
+    里收下）；本地战绩非零则顺手 seed 上去（服务器只认全 0 的新账号）。
+
+    返回：
+        None          连接不可用 → 交回调用方走本地回退
+        (True, "")    迁移成功，已登录
+        (False, err)  迁移失败（多半是服务器已有同名账号但密码不同）
+    """
+    # ⚠ 必须走 _remote_register：成功后它会 _accept_token 把令牌
+    #   写进会话缓存 —— 直接用裸 _rpc 会让迁移"登录了却没登录"。
+    rep = _remote_register(name, pw)
+    if rep is None:
+        return None
+    if not rep[0]:
+        err = rep[1]
+        if "已被注册" in err:
+            err = ("服务器上已有同名账号，但密码与本地记录不同。"
+                   "请输入该账号在服务器上注册时用的密码。")
+        return False, err
+    _seed_stats(name)
+    return True, ""
 
 
 def _accept_token(rep, fallback_name=None):
@@ -321,6 +378,9 @@ def register(name, pw):
             if rep[0]:
                 _mkdir_decks(name)
                 _leave_guest()
+                # 本地若有同名账号（老玩家换机器/重装后重新注册），
+                # 把本地战绩一并搬上去
+                _seed_stats(name)
             return rep
         # 服务器掉线 → 回退本地
     db = _load()
@@ -341,7 +401,12 @@ def register(name, pw):
 
 
 def login(name, pw):
-    """登录。返回 (ok, 错误信息)"""
+    """登录。返回 (ok, 错误信息)
+
+    服务器模式下登录被拒时，若本地存在「同名 + 同密码」的账号，
+    会自动把该账号迁移上服务器（register + 战绩 seed）再登录 ——
+    本地注册过的玩家进联机不该被要求换一套账号（2026-10-04 修）。
+    """
     name = (name or "").strip()
     if _BACKEND == "server":
         rep = _remote_login(name, pw)
@@ -349,7 +414,19 @@ def login(name, pw):
             if rep[0]:
                 _mkdir_decks(name)
                 _leave_guest()
+                return rep
+            # 服务器明确拒绝：先看是不是「只在本地注册过」的账号
+            if local_verify(name, pw):
+                mig = _migrate_to_server(name, pw)
+                if mig is None:
+                    return rep              # 连接其实已断 → 走本地回退
+                if mig[0]:
+                    _mkdir_decks(name)
+                    _leave_guest()
+                    return True, ""
+                return mig                  # 服务器同名但密码不同等情况
             return rep
+        # 服务器掉线 → 回退本地
     u = _load()["users"].get(name)
     if not u or u["pw"] != _hash(u["salt"], pw or ""):
         return False, "用户名或密码错误"

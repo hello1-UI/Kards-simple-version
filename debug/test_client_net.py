@@ -67,8 +67,9 @@ class Client:
 
     ⚠ 两条必须遵守的协议事实（踩过坑）：
     1. **握手必须是第一条消息**。服务器的 handshake() 读第一条消息，不是
-       login/register/resume 就直接 auth_err 并断开。所以不能在连接时就
-       发 lobby —— 必须先认证。
+       login/register/resume 就直接 auth_err（协议级垃圾才断开；
+       2026-10-04 起认证失败保留连接允许重试，见 kards_server.handshake）。
+       所以不能在连接时就发 lobby —— 必须先认证。
     2. ServerLink.inbox 是单一队列，`request(key=...)` 的应答等待者可能
       截走同类型的推送事件。这里统一改成「应答也只走 inbox + 按类型过滤」，
        测试语义更清晰，也顺便覆盖了 GUI 用的就是这条路。
@@ -261,8 +262,8 @@ def run_tests(port):
     a.drain()
 
     print("2. 密码 / 重名校验")
-    # 每次认证都用**独立连接**：握手失败后服务器会关闭连接，
-    # 复用同一个 socket 再发消息是收不到任何回复的（踩过坑）
+    # 每次认证都用**独立连接**（历史习惯保留）：现在认证失败后服务器
+    # 保留连接允许重试，但独立连接的写法对本测试更干净、互不干扰
     b = Client(port)
     rep = b.auth("register", user="alice", pw="other")
     check("重复注册被拒", rep and rep.get("m") == "auth_err", rep)
@@ -462,7 +463,7 @@ def c_auth_fail(port, msg):
     elif m == "resume":
         rep = cli.auth("resume", token=msg.get("token"))
     else:
-        # 非握手消息：服务器会回 auth_err 并断开
+        # 非握手消息（协议级垃圾）：服务器回 auth_err 并断开
         cli.sock.sendall((json.dumps(msg, ensure_ascii=False) + "\n").encode("utf-8"))
         rep = cli._read_until(("auth_err", "err"), timeout=5)
     cli.close()

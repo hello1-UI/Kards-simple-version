@@ -507,6 +507,12 @@ class App(tk.Tk):
             # 游客说明：让人一眼看懂"现在能干什么、不能干什么"
             tk.Label(win, text=i18n.t("guest_note"), bg=BG, fg=DIM,
                      font=FONT_S).pack(pady=(2, 0))
+        elif for_server:
+            # 本地已登录 + 联机要求登录 → 说明「同名密码可直接迁移」，
+            # 用户不会误以为要换一套新账号（2026-10-04 账号分裂修复）
+            tk.Label(win, text=i18n.t("srv_migrate_hint", name=self.account),
+                     bg=BG, fg=DIM, font=FONT_S,
+                     wraplength=340, justify="left").pack(pady=(4, 0), padx=8)
 
         if self.account:
             s = account.get_stats(self.account)
@@ -539,6 +545,9 @@ class App(tk.Tk):
         e_user = tk.Entry(win, font=FONT, width=22, bg=PANEL, fg=TEXT,
                           insertbackground=TEXT, relief="flat")
         e_user.pack(pady=2)
+        if self.account:
+            # 已有本地账号（联机场景）→ 预填用户名，只输密码即可
+            e_user.insert(0, self.account)
         tk.Label(win, text=i18n.t("account_pw"), bg=BG, fg=DIM,
                  font=FONT_S).pack(pady=(8, 2))
         e_pw = tk.Entry(win, font=FONT, width=22, show="*", bg=PANEL, fg=TEXT,
@@ -547,7 +556,9 @@ class App(tk.Tk):
 
         def done(ok, err):
             if ok:
-                name = account.current()
+                # 服务器链路已断时会走本地回退，此时 current()（读服务器
+                # 会话）可能拿不到名字 —— 用输入框里的用户名兜底
+                name = account.current() or (e_user.get() or "").strip() or None
                 self._apply_account(name)
                 win.destroy()
                 # 注意用 _lobby_log 而不是 add_log：此时多半还没进对局，
@@ -1298,6 +1309,17 @@ class App(tk.Tk):
                     self._lobby_log(i18n.t("srv_connected", addr=self._srv_addr,
                                            name=who))
                     self._srv_send({"m": "lobby"})
+                elif not link.alive:
+                    # resume 被服务器拒绝 → 协议上服务器会**切断连接**。
+                    # 必须重连一条新链路供登录对话框使用：否则之后所有
+                    # login/register rpc 都会在 _rpc 开头因 alive=False
+                    # 静默返回 None，掉进本地回退，用户还是被判成游客。
+                    # （重连后 session 缓存已被 resume 失败清掉，不会再死循环）
+                    self.mp_user = None
+                    self._srv_ready = False
+                    self.mp_link = None
+                    account.set_remote(None)
+                    self._srv_poll = net.ServerPoller(self._srv_addr)
                 else:
                     self.mp_user = None
                     self._lobby_sync()

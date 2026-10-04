@@ -20,6 +20,8 @@ KARDS 简化版 —— 联机服务器（纯标准库，单文件，零依赖）
      游戏内的行动指令里有 "t" 表示目标槽位，用 "t" 做信封会被覆盖。
      首条消息必须是 {"m":"login"/"register"/"resume", ...}，
      之后服务器回 {"m":"auth_ok"}/{"m":"auth_err"}。
+     认证失败回 auth_err 后**连接保留**，可在同一连接上重试
+     （客户端的本地账号迁移依赖这一点）；协议级垃圾才直接断开。
 """
 
 import argparse
@@ -175,6 +177,16 @@ class Store:
             return
         self.x(f"UPDATE users SET {result}={result}+1 WHERE name=?", (name,))
 
+    def stats_seed(self, name, win, lose, draw):
+        """一次性写入初始战绩（本地账号迁移上云用）。
+
+        ⚠ 只在账号当前战绩全 0 时生效：防止有人对已有战绩的账号
+        反复 seed 灌水。迁移场景下服务器账号是刚注册的，必然全 0。
+        """
+        self.x("UPDATE users SET win=?, lose=?, draw=?"
+               " WHERE name=? AND win=0 AND lose=0 AND draw=0",
+               (max(0, int(win)), max(0, int(lose)), max(0, int(draw)), name))
+
     def exists(self, name):
         return bool(self.q("SELECT 1 FROM users WHERE name=?", (name,)))
 
@@ -312,9 +324,18 @@ class ClientHandler(socketserver.BaseRequestHandler):
     def handle(self):
         log(f"连接来自 {self.client_address[0]}:{self.client_address[1]}")
         try:
-            # 第一步：登录握手
-            if not self.handshake():
-                return
+            # 第一步：登录握手。
+            # ⚠ 认证失败（密码错 / 令牌失效 / 重名）**不断开连接**：
+            #   客户端的「本地账号自动迁移」要在登录被拒后紧接着用
+            #   同一条连接发 register；断开会让重试和迁移全部哑火，
+            #   用户改个密码重输也得重连一次。只有协议垃圾 / 超时 /
+            #   空报文才直接关闭（那种多半不是我们的客户端）。
+            while True:
+                state = self.handshake()
+                if state == "ok":
+                    break
+                if state == "close":
+                    return
             while self.alive:
                 try:
                     msg = self.recv_obj()
@@ -335,21 +356,25 @@ class ClientHandler(socketserver.BaseRequestHandler):
     # ---------- 握手 ----------
 
     def handshake(self):
-        """登录/注册/续期。失败回错误并关闭。"""
+        """登录/注册/续期。
+
+        返回 "ok"（认证通过）/ "retry"（认证被拒，连接保留，等下一条
+        握手消息）/ "close"（协议垃圾 / 超时 / 断开，直接关连接）。
+        """
         try:
             msg = self.recv_obj()
         except socket.timeout:
             log(f"握手超时({self.client_address[0]})")
-            return False
+            return "close"
         except OSError as e:
             log(f"握手读失败({self.client_address[0]}): {e!r}")
-            return False
+            return "close"
         if msg is None:
             log(f"握手前连接关闭({self.client_address[0]})")
-            return False
+            return "close"
         if not msg:
             self.send({"m": "auth_err", "err": "协议错误：首条消息必须是 login/register/resume"})
-            return False
+            return "close"
         t = msg.get("m")
         log(f"握手请求({self.client_address[0]}): t={t} user={msg.get('user')!r}")
 
@@ -357,41 +382,41 @@ class ClientHandler(socketserver.BaseRequestHandler):
             name, err = norm_name(msg.get("user"))
             if err:
                 self.send({"m": "auth_err", "err": err})
-                return False
+                return "retry"
             err = norm_pw(msg.get("pw"))
             if err:
                 self.send({"m": "auth_err", "err": err})
-                return False
+                return "retry"
             with DB_LOCK:
                 tok, err = DB.register(name, msg["pw"])
             if err:
                 self.send({"m": "auth_err", "err": err})
-                return False
+                return "retry"
         elif t == "login":
             name, err = norm_name(msg.get("user"))
             if err:
                 self.send({"m": "auth_err", "err": err})
-                return False
+                return "retry"
             with DB_LOCK:
                 tok, err = DB.login(name, msg.get("pw") or "")
             if err:
                 self.send({"m": "auth_err", "err": err})
-                return False
+                return "retry"
         elif t == "resume":
             name = DB.who(msg.get("token"))
             if not name:
                 self.send({"m": "auth_err", "err": "会话已失效，请重新登录"})
-                return False
+                return "retry"
             tok = msg["token"]
         else:
             self.send({"m": "auth_err", "err": "协议错误：首条消息必须是 login/register/resume"})
-            return False
+            return "close"
 
         tok, err = self.bind_name(name, tok)
         if err:
             self.send({"m": "auth_err", "err": err})
-            return False
-        return True
+            return "retry"
+        return "ok"
 
     def bind_name(self, name, tok):
         """把连接与账号绑定；同一账号重复登录会踢掉旧连接。
@@ -450,6 +475,10 @@ class ClientHandler(socketserver.BaseRequestHandler):
             self.send({"m": "stats", "stats": DB.stats(self.name)})
         elif t == "stats_add":
             DB.stats_add(self.name, msg.get("result"))
+            self.send({"m": "stats", "stats": DB.stats(self.name)})
+        elif t == "stats_seed":
+            DB.stats_seed(self.name, msg.get("win", 0),
+                          msg.get("lose", 0), msg.get("draw", 0))
             self.send({"m": "stats", "stats": DB.stats(self.name)})
         elif t == "deck_save":
             DB.deck_save(self.name, msg.get("nation", ""), msg.get("title", ""),

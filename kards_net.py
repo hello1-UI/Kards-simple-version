@@ -334,6 +334,10 @@ _REPLY_MAP = {
     "create_room":  _m_is("room_created", "err"),
     "join_room":    _m_is("matched", "join_err", "err"),
     "cancel_match": _m_is("match_cancelled", "err"),
+    # 战绩类（stats_add / stats_seed 的应答也是 "stats"）
+    "stats":        _m_is("stats", "err"),
+    "stats_add":    _m_is("stats", "err"),
+    "stats_seed":   _m_is("stats", "err"),
 }
 
 
