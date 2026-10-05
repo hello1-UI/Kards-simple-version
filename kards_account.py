@@ -189,6 +189,20 @@ def _drop_session():
     _save_session({})
 
 
+def _same_server(a, b):
+    """两台服务器是否是同一台（容错 127.0.0.1 / localhost / 本机局域网 IP）。
+
+    这里**只能**用 kards_net 的判定：本机开服时地址写法会从 127.0.0.1:6000
+    变成 192.168.x.x:6000，字符串不等但就是同一台。旧代码直接比字符串，
+    导致点「建立服务器」后免密令牌被判无效、玩家被打回登录框（用户报）。
+    """
+    try:
+        import kards_net
+        return kards_net.same_server(a, b)
+    except Exception:                        # noqa: BLE001
+        return a == b
+
+
 def _try_resume():
     """用缓存令牌尝试免密登录。成功返回用户名，失败返回 None。"""
     global _TOKEN
@@ -198,7 +212,7 @@ def _try_resume():
     tok = d.get("token")
     if not tok:
         return None
-    if d.get("server") and _SERVER and d["server"] != _SERVER:
+    if d.get("server") and _SERVER and not _same_server(d["server"], _SERVER):
         return None                      # 换了服务器，旧令牌无效
     try:
         rep = _rpc({"m": "resume", "token": tok}, key="resume")

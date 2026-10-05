@@ -3,10 +3,11 @@ __pycache__/
 *.py[cod]
 
 # ---- PyInstaller 产物（全部收拢在 pyinst/ 下）----
-# pyinst/*.spec 是源文件、要入库；下面四个是生成物，不入库
+# pyinst/*.spec 是源文件、要入库；下面这些是生成物，不入库
 pyinst/build/
-pyinst/build_tools/
+pyinst/build_*/
 pyinst/dist/
+pyinst/dist_*/
 pyinst/dist_tools/
 
 # 分发包（本地打包后自行上传 Release）
@@ -27,3 +28,4 @@ decks_*/
 
 # ---- 工作区元数据 ----
 .workbuddy/
+debug/shots/

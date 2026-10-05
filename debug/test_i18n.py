@@ -6,6 +6,7 @@
 
 用法: python debug/test_i18n.py
 """
+import ast
 import os
 import re
 import sys
@@ -80,6 +81,59 @@ def main():
         check(f"{lang} 有 settings_language",
               "settings_language" in ks[lang],
               L[lang].get("settings_language", "<缺失>"))
+
+    print("\n=== 6. 代码里引用的键必须已定义 ===")
+    # 历史事故：KARDS.py 里写了 i18n.t("host_keep_session")，
+    # 但三套语言包都没这个键 → t() 静默回退成键名，界面上直接显示
+    # "host_keep_session" 这种英文串。第 1 段只查"三语之间齐不齐"，
+    # 查不出"代码用了但谁都没定义"，所以在这里补一道。
+    #
+    # 用 ast 而不是正则：正则会把注释和文档字符串里的 t("key") 示例
+    # 也算成引用（kards_i18n.py 头部注释里就有一个），全是误报。
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    used = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        # 跳过生成物与大目录
+        dirnames[:] = [d for d in dirnames
+                       if d not in ("pyinst", "__pycache__", ".git",
+                                    "dist", "build", "logs", "decks")]
+        for fn in filenames:
+            if not fn.endswith(".py"):
+                continue
+            fp = os.path.join(dirpath, fn)
+            try:
+                with open(fp, "r", encoding="utf-8") as f:
+                    tree = ast.parse(f.read(), filename=fp)
+            except (OSError, SyntaxError):
+                continue
+            rel = os.path.relpath(fp, root).replace("\\", "/")
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                fn_node = node.func
+                is_t = ((isinstance(fn_node, ast.Name) and fn_node.id == "t")
+                        or (isinstance(fn_node, ast.Attribute)
+                            and fn_node.attr == "t"))
+                if not is_t or not node.args:
+                    continue
+                arg = node.args[0]
+                if not isinstance(arg, ast.Constant) or not isinstance(arg.value, str):
+                    continue
+                key = arg.value
+                if key.startswith("__") and key.endswith("__"):
+                    continue          # dunder = 测试夹具，不是真文案键
+                used.setdefault(key, []).append(rel)
+
+    check("扫描到足够多的键引用（防扫描器失效）", len(used) > 80,
+          f"共引用 {len(used)} 个键")
+    undef = sorted(k for k in used if k not in allk)
+    check("代码引用的键都已定义", not undef,
+          (f"未定义 {len(undef)} 个: "
+           + ", ".join(f"{k}({used[k][0]})" for k in undef[:6])) if undef else "")
+    # 只缺 en/ja 的也要报出来（第 1 段已覆盖，这里给出精确调用点便于定位）
+    partial = sorted(k for k in used
+                     if k in allk and any(k not in ks[l] for l in L))
+    check("引用的键三语言齐备", not partial, str(partial[:6]))
 
     print("\n" + "=" * 56)
     print(f"通过 {len(PASS)} 项 / 失败 {len(FAIL)} 项")

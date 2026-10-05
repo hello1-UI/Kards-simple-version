@@ -2,7 +2,7 @@
 """拖拽逻辑测试（不依赖鼠标，直接驱动 _drag_* 内部方法）
 
 验证重点：
-  1. 幽灵卡挂在覆盖全窗口的拖拽层上（能拖出手牌区之外）
+  1. 幽灵卡直挂主窗口（能拖出手牌区之外，且不残留任何遮罩层）
   2. 合法性判定 _valid_drop：单位只能部署到我方支援阵线
   3. 落点高亮 / 抬起效果 / 拖拽取消后的清理
   4. 拖到牌桌外不会误出牌，只记一条日志
@@ -16,6 +16,9 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
+
+# 本测试覆盖的是 tkinter 经典对战界面（pygame 棋盘见 debug/test_board.py）
+sys.argv.append("--legacy-board")
 
 import tkinter as tk  # noqa: E402
 
@@ -180,21 +183,40 @@ def main():
         check("拖拽状态已清空", app.drag is None)
         check("抬起效果已还原", not getattr(app, "_lift_saved", {}))
         check("高亮已清理", not getattr(app, "_hl_saved", {}))
-        # 黑屏回归（v1.3.0.2 前的事故）：拖拽层是铺满窗口的不透明 Frame，
-        # 松手后没人销毁 → 整个界面被盖住、点哪都没反应。
-        # 用 winfo_containing 验证：松手后手牌中心的最顶层控件仍是手牌本身，
-        # 而不是任何全窗口遮罩。
+        # 黑屏回归（v1.3.0.2 前的事故）：拖拽层曾是铺满窗口、BG 色不透明的
+        # Frame，松手后没人销毁 → 整个界面被盖住、点哪都没反应。
+        #
+        # 断言用**结构检查**（确定性，不依赖窗口系统支不支持命中测试）：
+        #   1) 主窗口不得存在 place(relwidth=1, relheight=1) 的子件 ——
+        #      这正是旧拖拽层的形态（对局界面各容器都走 pack，不会是它）
+        #   2) 旧的 _drag_layer_w 必须已不存在/已失效
+        # 系统支持 winfo_containing 时再补一条真实命中测试。
+        overlays = [w for w in app.winfo_children()
+                    if w.winfo_manager() == "place"
+                    and w.place_info().get("relwidth") == "1"
+                    and w.place_info().get("relheight") == "1"]
+        check("主窗口不存在铺满全窗口的遮盖层（黑屏回归）",
+              not overlays, f"可疑子件={overlays}")
+
+        layer = getattr(app, "_drag_layer_w", None)
+        check("旧拖拽层已彻底移除（再无代码创建它）",
+              layer is None or not layer.winfo_exists(), f"layer={layer}")
+
         hx = hand_w.winfo_rootx() + hand_w.winfo_width() // 2
         hy = hand_w.winfo_rooty() + hand_w.winfo_height() // 2
         top = app.winfo_containing(hx, hy)
-        # 顶层控件沿父链应能走回手牌卡（卡内部有子件，命中其孙级也算）
-        chain, w = [], top
-        while w is not None and w is not app:
-            chain.append(w)
-            w = getattr(w, "master", None)
-        check("松手后无全窗口遮罩挡住界面（黑屏回归）",
-              top is not None and hand_w in chain,
-              f"顶层控件={top} 父链长={len(chain)}")
+        if top is None:
+            # 远程/无头会话下 Tk 拿不到命中信息（连窗口原点都返回 None）
+            print("  [--] 本机 winfo_containing 不可用，"
+                  "黑屏回归已由上面两条结构检查覆盖")
+        else:
+            # 顶层控件沿父链应能走回手牌卡（卡内部有子件，命中其孙级也算）
+            chain, w = [], top
+            while w is not None and w is not app:
+                chain.append(w)
+                w = getattr(w, "master", None)
+            check("松手后无全窗口遮罩挡住界面（黑屏回归）",
+                  hand_w in chain, f"顶层控件={top} 父链长={len(chain)}")
 
         print("\n=== 3. 合法性判定：单位只能部署到支援阵线 ===")
         me.kredits = 99                      # 保证费用足够

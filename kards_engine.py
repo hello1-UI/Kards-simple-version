@@ -101,9 +101,9 @@ TERM_GUIDE = [
     ("支援阵线", "自己后方的一排。新部署的单位默认进入这里。"),
     ("步兵", "每回合「移动」与「攻击」二选一；要上前线才能打敌方单位。"),
     ("坦克", "同一回合内可以既移动又攻击。"),
-    ("炮兵", "在支援阵线即可攻击，但只能打敌方前线单位与总部；无视[警卫]。"),
-    ("战斗机", "在支援阵线即可攻击；轰炸机攻击时必须优先打它，且能拦截轰炸机。"),
-    ("轰炸机", "在支援阵线即可攻击；攻击总部 +2 伤害；无视[警卫]；自身不进行反击。"),
+    ("炮兵", "可攻击任意阵线的敌人（不必上前线）；攻击不吃反击；无视[警卫]。"),
+    ("战斗机", "可攻击任意阵线的敌人（不必上前线）；能拦截敌方轰炸机。"),
+    ("轰炸机", "可攻击任意阵线的敌人（不必上前线）；攻击总部 +2 伤害；无视[警卫]；自身不进行反击。"),
     ("研发", "总部卡自带的被动，每个主国各不相同。"),
     ("Kredits", "每回合的资源，等于当前回合数（上限 12），用来支付卡牌费用。"),
     ("疲劳", "牌库抽空后每回合受到的递增伤害。"),
@@ -216,12 +216,12 @@ KEYWORD_DESC_I18N = {
              "ja": "毎ターン移動か攻撃のどちらか。前線に出ないとユニットと戦えない。"},
     "坦克": {"en": "Can move and attack in the same turn.",
              "ja": "同じターンに移動と攻撃の両方ができる。"},
-    "炮兵": {"en": "Attacks from the support line, but only enemy frontline units and HQ. Ignores Guard.",
-             "ja": "支援ラインから攻撃可。ただし敵前線ユニットと本部のみ。護衛を無視。"},
-    "战斗机": {"en": "Attacks from the support line; bombers must target it first and it can intercept them.",
-               "ja": "支援ラインから攻撃可。爆撃機はこれを優先攻撃し、迎撃もできる。"},
-    "轰炸机": {"en": "Attacks from the support line; +2 damage vs HQ; ignores Guard; never counterattacks.",
-               "ja": "支援ラインから攻撃可。本部に +2 ダメージ。護衛を無視。反撃しない。"},
+    "炮兵": {"en": "Attacks targets in any line (no need to reach the frontline). Ignores Guard.",
+             "ja": "任意の戦線を攻撃できる（前線に出る必要なし）。護衛を無視。"},
+    "战斗机": {"en": "Attacks targets in any line (no need to reach the frontline). Can intercept bombers.",
+               "ja": "任意の戦線を攻撃できる（前線に出る必要なし）。爆撃機を迎撃できる。"},
+    "轰炸机": {"en": "Attacks targets in any line (no need to reach the frontline); +2 damage vs HQ; ignores Guard; never counterattacks.",
+               "ja": "任意の戦線を攻撃できる（前線に出る必要なし）。本部に +2。護衛を無視。反撃しない。"},
     "研发": {"en": "A passive built into the HQ card, different for each main nation.",
              "ja": "本部カード固有のパッシブ。主要国ごとに異なる。"},
     "Kredits": {"en": "Per-turn resource equal to the turn number (max 12), used to pay card costs.",
@@ -330,7 +330,7 @@ RULES_TEXT = [
     "部署: 新单位进入支援线; 移动与攻击都消耗行动费(⚡)",
     "无[闪击]的单位部署当回合不能移动或攻击",
     "步兵每回合移动/攻击二选一; 坦克可以移动并攻击",
-    "空军(战斗机/轰炸机)与炮兵在支援线即可攻击(仅限敌方前线单位与总部)",
+    "空军(战斗机/轰炸机)与炮兵可攻击任意阵线的敌人(不必上前线)",
     "炮兵/轰炸机无视[警卫]; 轰炸机必须优先攻击敌方战斗机, 且会被战斗机拦截",
     "炮兵/轰炸机攻击不吃反击; 轰炸机不反击(打它不吃反击); 轰炸机打总部+2",
     "[伏击]被攻击时先出手；[奋战]每回合攻击两次；[装甲]战斗伤害-1（[装甲2]-2、[装甲3]-3）",
@@ -1803,21 +1803,35 @@ class Game:
 
     # ---------------- 攻击 ----------------
     def attack_targets(self, attacker):
-        """可攻击的敌方单位。
-        - 前线单位可攻击敌方全场；后方只有空军/炮兵能攻击（仅限敌方前线单位）
+        """可攻击的敌方单位（射程对齐原版 KARDS）。
+
+        原版规则（kards.com / 官方帮助中心 / 卡牌 wiki 一致）：
+          - 战斗机「可以攻击任意战线的敌人」
+          - 炮兵、轰炸机「可以攻击任意战线的敌人」
+          - 步兵、坦克「只能攻击相邻战线的敌人」→ 必须先移动到前线，
+            在前线才能打到敌方前线与敌方支援阵线；留在支援线则无从下手
+
+        ⚠ 历史 bug：这里曾把空军/炮兵也限制成"只能打敌方前线单位"，
+        于是战斗机（明明也是空军）打不到敌方支援阵线，与"可攻击任意战线"
+        的原版规则相悖（用户报障「战斗机也是空军」）。
+
+        另外：
         - 炮兵/轰炸机无视[警卫]
-        - 轰炸机：敌方前线有战斗机时必须优先攻击战斗机"""
+        - 轰炸机：目标所在阵线有战斗机时，只能先攻击那架战斗机
+          （原版：战斗机阻止敌方轰炸机攻击**同一战线**中的其他目标）
+        """
         enemy = self.opponent_of(attacker.owner)
-        if attacker.position == "前线":
-            pool = list(enemy.board)
+        if attacker.position == "前线" or attacker.unit_type in RANGED_TYPES:
+            pool = list(enemy.board)     # 空军与炮兵：任意阵线
         else:
-            if attacker.unit_type not in RANGED_TYPES:
-                return []
-            pool = [u for u in enemy.board if u.position == "前线"]
+            return []                    # 后方的步兵/坦克：先上前线再说
         if attacker.unit_type == "轰炸机":
-            fighters = [u for u in pool if u.unit_type == "战斗机"]
-            if fighters:
-                return fighters          # 必须优先打战斗机
+            fs = [u for u in pool if u.unit_type == "战斗机"]
+            if fs:
+                lines = {u.position for u in fs}
+                # 同线的其他目标被战斗机掩护；异线目标不受影响
+                return [u for u in pool
+                        if u.unit_type == "战斗机" or u.position not in lines]
         if attacker.unit_type in ("炮兵", "轰炸机"):
             return pool                  # 无视警卫
         guards = [u for u in pool if u.has("警卫")]

@@ -81,7 +81,11 @@ tank = place(g, "二号坦克 C 型", me, "后方", kredits=10)
 g.move_unit(tank, "前线")
 check("坦克移动后仍可攻击", g.unit_ready(tank) is True)
 
-# ---- 4. 支援线攻击资格 ----
+# ---- 4. 攻击射程（对齐原版：空军与炮兵可攻击任意阵线） ----
+# ⚠ 这条以前是反的：曾断言「炮兵支援线打不到敌方支援线」，
+#   那是照着当时的实现写的，与原版规则不符（原版：战斗机/炮兵/轰炸机
+#   「可攻击任意战线的敌人」；步兵/坦克才必须先上前线）。
+#   用户报障「战斗机也是空军」，指的就是这个。
 g = new_game()
 me, foe = g.players
 art = place(g, "Pak36反坦克炮", me, "后方")        # 炮兵
@@ -90,11 +94,46 @@ f2 = place(g, "T-70", foe, "前线", slot=2)
 rear_foe = place(g, "步兵班", foe, "后方", slot=5)
 tg = g.attack_targets(art)
 check("炮兵支援线可攻击敌方前线", f1 in tg and f2 in tg)
-check("炮兵支援线打不到敌方支援线", rear_foe not in tg)
+check("炮兵可攻击敌方支援阵线（任意阵线）", rear_foe in tg)
 inf_r = place(g, "殖民步兵", me, "后方")
 check("步兵在支援线不能攻击(无目标)", g.attack_targets(inf_r) == [])
 check("步兵在支援线不能打总部", g.can_hit_hq(inf_r)[0] is False)
 check("炮兵支援线可以打总部", g.can_hit_hq(art)[0] is True)
+
+# 战斗机：同为空军，待遇必须与炮兵/轰炸机一致（用户报的这个）
+g = new_game()
+me, foe = g.players
+ftr = place(g, "喷火战斗机", me, "后方")           # 战斗机
+ef = place(g, "步兵班", foe, "前线", slot=1)
+er = place(g, "步兵班", foe, "后方", slot=5)
+tg = g.attack_targets(ftr)
+check("战斗机支援线可攻击敌方前线", ef in tg)
+check("战斗机可攻击敌方支援阵线（任意阵线）", er in tg)
+check("战斗机支援线可以打总部", g.can_hit_hq(ftr)[0] is True)
+
+# 轰炸机：同样任意阵线；但同线的战斗机掩护同线目标
+g = new_game()
+me, foe = g.players
+bmb = place(g, "斯图卡 B2", me, "后方")            # 轰炸机
+ef = place(g, "步兵班", foe, "前线", slot=1)
+er = place(g, "步兵班", foe, "后方", slot=5)
+tg = g.attack_targets(bmb)
+check("轰炸机可攻击敌方前线", ef in tg)
+check("轰炸机可攻击敌方支援阵线", er in tg)
+front_fi = place(g, "雅克-7", foe, "前线", slot=2)  # 前线的战斗机
+tg = g.attack_targets(bmb)
+check("同线战斗机掩护同线目标", ef not in tg and front_fi in tg)
+check("异线目标仍可攻击（战斗机只在同线拦截）", er in tg)
+rear_fi = place(g, "雅克-3", foe, "后方", slot=4)   # 支援线的战斗机
+tg = g.attack_targets(bmb)
+check("支援线战斗机掩护支援线目标", er not in tg and rear_fi in tg)
+
+# 步兵上前线后才打得到敌方支援阵线
+g = new_game()
+me, foe = g.players
+inf_f = place(g, "殖民步兵", me, "前线", slot=1)
+er2 = place(g, "步兵班", foe, "后方", slot=5)
+check("步兵在前线可攻击敌方支援阵线", er2 in g.attack_targets(inf_f))
 
 # ---- 5. 炮兵/轰炸机无视警卫 ----
 g = new_game()

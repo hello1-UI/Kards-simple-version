@@ -15,6 +15,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+# 本测试验证的是 tkinter 侧窗口（对战界面走经典引擎，避免 pygame 主循环阻塞）
+sys.argv.append("--legacy-board")
+
 import kards_i18n as i18n          # noqa: E402
 import KARDS as gui                # noqa: E402
 

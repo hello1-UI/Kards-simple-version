@@ -23,7 +23,12 @@ a = Analysis(
         # PyInstaller 的依赖分析看不见它 —— 必须当数据文件带进包，
         # 否则联机模式在大厅里根本起不来服务器。
         (os.path.join(ROOT, 'kards_server.py'), '.'),
-    ],
+    ] + ([
+        # 卡面 / 总部 / 音效资产（可选）：assets/cards/<卡名>.png、
+        # assets/hq/<国家>.png、assets/sfx/<名>.wav|ogg。
+        # 缺失时 kards_board 会过程式绘制兜底，所以目录不存在也不报错。
+        (os.path.join(ROOT, 'assets'), 'assets'),
+    ] if os.path.isdir(os.path.join(ROOT, 'assets')) else []),
     hiddenimports=[
         # 这几个是同目录的兄弟模块，正常 import 能被分析到；显式列出是为了
         # 防止将来有人把 import 挪进函数体（延迟导入）导致漏打。
@@ -32,6 +37,10 @@ a = Analysis(
         # 但那是在一个分支里延迟导入的，分析器可能看不到。
         'kards_engine', 'kards_i18n', 'kards_net', 'kards_account',
         'kards_host', 'kards_update', 'kards_server',
+        # 增强对战界面：kards_board 在 _activate_pyboard() 里延迟导入，
+        # pygame 又在 kards_board 里导入 —— 全部显式声明，防止漏打。
+        # （pygame 的 DLL 由 PyInstaller 自带的 hook-pygame 收集）
+        'kards_board', 'pygame',
     ],
     hookspath=[],
     hooksconfig={},

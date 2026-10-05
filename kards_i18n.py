@@ -87,7 +87,7 @@ LANGS = {
             "· 拖到「我方前线」行上前线，拖回支援阵线撤后\n"
             "· 移动与攻击都消耗行动费(⚡)；无[闪击]部署当回合不能移动/攻击\n"
             "· 步兵每回合移动/攻击二选一；坦克可以移动并攻击\n"
-            "· 空军/炮兵在支援线即可攻击（敌方前线单位与总部）\n"
+            "· 空军（战斗机/轰炸机）与炮兵可攻击任意阵线的敌人，不必上前线\n"
             "· 炮兵/轰炸机无视[警卫]；轰炸机必须优先打战斗机且会被战斗机拦截\n"
             "· 炮兵/轰炸机攻击不吃反击；轰炸机不反击（打它不吃反击）\n"
             "· 卡牌上不认识的关键词 → 设置里的「🔑 关键词说明」\n"
@@ -133,6 +133,8 @@ LANGS = {
         "host_fail": "启动本机服务器失败：\n{err}",
         "host_firewall_hint": "同一局域网的玩家请把上面地址发给他们；"
                               "首次启动时系统可能弹出防火墙提示，需要选「允许访问」。",
+        "host_keep_session": "服务器已在运行，保持当前登录状态（{name}）。",
+        "srv_reconnecting": "连接似乎断了，正在自动重连…",
         # ---- 大厅：在线玩家 ----
         "lobby_players": "② 在线玩家",
         "lobby_no_players": "（还没有其他人在线）",
@@ -257,6 +259,12 @@ LANGS = {
         "btn_surrender": "🏳 投降",
         "btn_to_menu": "🏠 返回主菜单",
         "log_surrender": "  你选择了投降。",
+        "log_need_frontline": "  后方的步兵/坦克无法攻击，请先移动到前线"
+                              "（空军与炮兵可攻击任意阵线，不受此限制）。",
+        "log_guard_blocked": "  该目标被相邻位置的[警卫]保护，必须先攻击警卫！",
+        "log_drop_cancel": "  已取消（把卡拖到支援阵线即可部署）。",
+        "log_unit_only_rear": "  新单位只能部署在我方支援阵线（绿色高亮处）。",
+        "log_bad_drop": "  该落点无法使用这张牌。",
         "surrender_title": "投降",
         "surrender_confirm": "确定投降吗？本局将判负。",
         "to_menu_title": "返回主菜单",
@@ -284,6 +292,15 @@ LANGS = {
         # ---- AI 投降 ----
         "ai_concede_log": "  🏳 AI 认为已无胜算，选择投降！",
         "ai_concede_reason": "  （{reason}）",
+        # ---- pygame 对战界面 ----
+        "renderer_label": "对战界面",
+        "renderer_py": "增强（pygame）",
+        "renderer_tk": "经典（tkinter）",
+        "renderer_note": "增强界面动画更流畅、支持图片卡面；切换后下一局生效。",
+        "btn_board_menu": "☰ 菜单",
+        "pause_title": "已暂停",
+        "btn_resume": "继续游戏",
+        "confirm_again": "再点一次确认",
     },
     "en": {
         "app_title": "KARDS Lite",
@@ -331,7 +348,7 @@ LANGS = {
             "· Drag to 'My Frontline' to advance; drag back to retreat\n"
             "· Moving and attacking both cost Operation (⚡); without Blitz a unit cannot move/attack the turn it deploys\n"
             "· Infantry: move OR attack each turn; tanks may move and attack\n"
-            "· Air & artillery can attack from the support line (enemy frontline & HQ)\n"
+            "· Air (fighters/bombers) & artillery can attack targets in any line — no need to reach the frontline\n"
             "· Artillery & bombers ignore Guard; bombers must target fighters and can be intercepted\n"
             "· Artillery & bombers take no counterattack; bombers never counterattack\n"
             "· Don't know a keyword on a card? Settings -> '🔑 Keywords'\n"
@@ -376,6 +393,8 @@ LANGS = {
         "host_fail": "Failed to start the local server:\n{err}",
         "host_firewall_hint": "Send the address above to players on your LAN; "
                               "the firewall prompt on first launch must be allowed.",
+        "host_keep_session": "Server is already running — staying signed in as {name}.",
+        "srv_reconnecting": "Connection seems lost — reconnecting automatically…",
         # ---- Lobby: players ----
         "lobby_players": "② Players online",
         "lobby_no_players": "(nobody else online yet)",
@@ -496,6 +515,15 @@ LANGS = {
         "btn_surrender": "🏳 Surrender",
         "btn_to_menu": "🏠 Main Menu",
         "log_surrender": "  You chose to surrender.",
+        "log_need_frontline": "  Infantry/tanks cannot attack from the support line — "
+                              "move them to the frontline first (air and artillery "
+                              "can attack any line).",
+        "log_guard_blocked": "  That target is protected by an adjacent [Guard] — "
+                             "attack the Guard first!",
+        "log_drop_cancel": "  Cancelled (drop the card on the support line to deploy).",
+        "log_unit_only_rear": "  New units can only be deployed to your support line "
+                              "(the green highlight).",
+        "log_bad_drop": "  This card cannot be used there.",
         "surrender_title": "Surrender",
         "surrender_confirm": "Surrender? You will lose this game.",
         "to_menu_title": "Main Menu",
@@ -521,6 +549,14 @@ LANGS = {
         "click_hint": "▼ Click anywhere to return to the lobby ▼",
         "ai_concede_log": "  🏳 The AI sees no way to win and surrenders!",
         "ai_concede_reason": "  ({reason})",
+        "renderer_label": "Battle UI",
+        "renderer_py": "Enhanced (pygame)",
+        "renderer_tk": "Classic (tkinter)",
+        "renderer_note": "Enhanced UI: smoother animations and image card faces. Takes effect next battle.",
+        "btn_board_menu": "☰ Menu",
+        "pause_title": "Paused",
+        "btn_resume": "Resume",
+        "confirm_again": "Click again to confirm",
     },
     "ja": {
         "app_title": "KARDS 簡易版",
@@ -568,7 +604,7 @@ LANGS = {
             "· 「味方前線」へドラッグで前進、支援ラインへ戻すと後退\n"
             "· 移動と攻撃は両方行動コスト(⚡)を消費；電撃なしの配置ターンは移動/攻撃不可\n"
             "· 歩兵は毎ターン移動か攻撃のどちらか；戦車は移動して攻撃も可\n"
-            "· 空軍・砲兵は支援ラインから攻撃可（敵前線ユニットと本部）\n"
+            "· 空軍（戦闘機・爆撃機）と砲兵は任意の戦線を攻撃できる（前線に出る必要なし）\n"
             "· 砲兵・爆撃機は護衛を無視；爆撃機は戦闘機を優先攻撃し、迎撃される\n"
             "· 砲兵・爆撃機の攻撃は反撃を受けない；爆撃機は反撃しない\n"
             "· カードの用語が分からない → 設定の「🔑 キーワード説明」\n"
@@ -613,6 +649,8 @@ LANGS = {
         "host_fail": "ローカルサーバーの起動に失敗しました：\n{err}",
         "host_firewall_hint": "同じ LAN のプレイヤーに上のアドレスを伝えてください。"
                               "初回起動時のファイアウォール確認は「許可」を選んでください。",
+        "host_keep_session": "サーバーは起動済みです。現在のログイン状態（{name}）を維持します。",
+        "srv_reconnecting": "接続が切れたようです。自動で再接続しています…",
         # ---- ロビー：プレイヤー ----
         "lobby_players": "② オンラインプレイヤー",
         "lobby_no_players": "（まだ他の人はいません）",
@@ -733,6 +771,12 @@ LANGS = {
         "btn_surrender": "🏳 降伏",
         "btn_to_menu": "🏠 メインメニュー",
         "log_surrender": "  降伏を選択しました。",
+        "log_need_frontline": "  後方の歩兵・戦車は攻撃できません。先に前線へ移動してください"
+                              "（空軍と砲兵は任意の戦線を攻撃できます）。",
+        "log_guard_blocked": "  その目標は隣接する[護衛]に守られています。先に護衛を攻撃してください！",
+        "log_drop_cancel": "  キャンセルしました（支援ラインにドロップで配置）。",
+        "log_unit_only_rear": "  新規ユニットは味方支援ライン（緑のハイライト）にのみ配置できます。",
+        "log_bad_drop": "  その場所にはこのカードを使えません。",
         "surrender_title": "降伏",
         "surrender_confirm": "降伏しますか？この試合は負けとなります。",
         "to_menu_title": "メインメニュー",
@@ -758,6 +802,14 @@ LANGS = {
         "click_hint": "▼ 画面をクリックしてロビーへ ▼",
         "ai_concede_log": "  🏳 AI は勝ち目がないと判断し、降伏しました！",
         "ai_concede_reason": "  （{reason}）",
+        "renderer_label": "対戦画面",
+        "renderer_py": "拡張（pygame）",
+        "renderer_tk": "クラシック（tkinter）",
+        "renderer_note": "拡張画面はアニメーションが滑らかで、画像カードに対応。次の対戦から有効。",
+        "btn_board_menu": "☰ メニュー",
+        "pause_title": "一時停止",
+        "btn_resume": "再開",
+        "confirm_again": "もう一度クリックで確定",
     },
 }
 
@@ -801,6 +853,32 @@ def set_lang(code):
     _current["lang"] = code
     save()
     return True
+
+
+def get_pref(key, default=None):
+    """读 settings.json 里的通用偏好项（语言以外的设置也走这里）"""
+    try:
+        with open(_SETTINGS_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+        v = data.get(key, default)
+        return v if v is not None else default
+    except (OSError, ValueError):
+        return default
+
+
+def set_pref(key, value):
+    """写 settings.json 里的通用偏好项（保留其它已有键）"""
+    try:
+        try:
+            with open(_SETTINGS_PATH, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            data = {}
+        data[key] = value
+        with open(_SETTINGS_PATH, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
 
 
 def t(key, **kw):

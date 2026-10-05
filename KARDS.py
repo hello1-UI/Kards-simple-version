@@ -251,6 +251,7 @@ class App(tk.Tk):
         self._last_drag_src = None # 最近一次拖拽起点坐标（部署入场动画的来源）
         self._anim_tokens = set()  # 存活的动画令牌（退出对局时清理）
         self._anim_count = {"entry": 0, "move": 0, "attack": 0}  # 自测统计
+        self._pyboard = None       # pygame 对战视图（非 None 时接管视图方法）
         # ---- 联机状态（服务器中转模式）----
         self.mp_link = None        # net.ServerLink（连上服务器后非 None）
         self.mp_role = None        # "host" / "client"
@@ -614,6 +615,21 @@ class App(tk.Tk):
 
         self._lang_buttons(win, on_change=apply_lang)
 
+        def toggle_renderer():
+            # 对战界面渲染引擎：pygame（增强）↔ tkinter（经典），下局生效
+            cur = i18n.get_pref("renderer", "pygame")
+            i18n.set_pref("renderer", "tk" if cur == "pygame" else "pygame")
+            win.destroy()
+            self.open_start_settings()
+
+        cur_r = i18n.get_pref("renderer", "pygame")
+        tk.Button(win, text=f"{i18n.t('renderer_label')}: "
+                  f"{i18n.t('renderer_py') if cur_r == 'pygame' else i18n.t('renderer_tk')}",
+                  bg="#4a6b8a", fg=TEXT, font=FONT_S, bd=0, padx=14, pady=8,
+                  cursor="hand2", command=toggle_renderer).pack(pady=(16, 4))
+        tk.Label(win, text=i18n.t("renderer_note"), bg=BG, fg=DIM,
+                 font=FONT_S, wraplength=330, justify="left").pack(padx=12)
+
         def show_help():
             messagebox.showinfo(i18n.t("help_title"), i18n.t("help_text"))
 
@@ -956,6 +972,7 @@ class App(tk.Tk):
             canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
         canvas.bind_all("<MouseWheel>", on_wheel)
         win.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        return win
 
     def _lang_buttons(self, win, on_change):
         """设置窗中的语言切换行：三个语言按钮，当前语言置灰不可点"""
@@ -1240,6 +1257,17 @@ class App(tk.Tk):
             self.srv_addr_var.set(addr)
         # 局域网的其他人要连过来，得知道这个地址；顺带提醒防火墙
         self._lobby_log(i18n.t("host_firewall_hint"))
+        # ⚠ 已经连在同一台服务器上（本机开服时通常就是这台）→ **保持现有连接**。
+        # 断链重连会让免密令牌失去意义（地址写法从 127.0.0.1:6000 变成
+        # 192.168.x.x:6000），玩家会被打回登录框 —— 也就是用户报的
+        # 「开服就退登」。同一台服务器、同一个账号，没有任何理由重连。
+        if (self.mp_link is not None
+                and getattr(self.mp_link, "alive", False)
+                and self._srv_ready
+                and net.same_server(self._srv_addr, addr)):
+            self._lobby_log(i18n.t("host_keep_session", name=self.mp_user or ""))
+            self._lobby_sync()
+            return
         # 服务器进程刚起来时端口可能还没 listen 完，等一拍再连
         self.after(700, self._lobby_connect)
 
@@ -1264,12 +1292,35 @@ class App(tk.Tk):
         self._lobby_sync()
         self._schedule("_t_lobby", 80, self._lobby_poll)
 
+    def _try_auto_reconnect(self, force=False):
+        """意外掉线后自动重连一次。
+
+        为什么要有：掉线后只弹「连接已断开」是把问题丢给玩家 —— 明明本地
+        还存着 30 天免密令牌，直接再连一次就能无缝恢复。只在**没有**活跃
+        链路、且仍在大厅时触发；每次掉线最多自动重连一次，避免服务器真挂了
+        时无限重试刷屏。
+        """
+        if not force and getattr(self, "_reconnecting", 0) >= 1:
+            return False
+        if self.mp_link is not None or not self._lobby_active:
+            return False
+        self._reconnecting = getattr(self, "_reconnecting", 0) + 1
+        self._lobby_log(i18n.t("srv_reconnecting"))
+        self.after(1200, self._lobby_connect)
+        return True
+
     def _close_server_link(self):
-        """断开并复位所有联机状态（回主菜单 / 重连前调用）"""
+        """断开并复位所有联机状态（回主菜单 / 重连前调用）
+
+        ⚠ 必须在 close() **之前**给链路打上 intentional 标记：这是我们自己
+        主动断的，不能算「连接已断开」去吓玩家（用户报过「天天说我连接
+        已断开」—— 其中一部分就是重连前主动断开被当成意外掉线）。
+        """
         link = self.mp_link
         self.mp_link = None
         if link is not None:
             try:
+                link.intentional = True
                 link.close()
             except Exception:
                 pass
@@ -1299,6 +1350,7 @@ class App(tk.Tk):
                 self.mp_link = res[0]
                 self.mp_link.on_event = None
                 self._srv_ready = True
+                self._reconnecting = 0        # 连上了 → 下次掉线还能自动重连一次
                 link = self.mp_link
                 # 账号代理到服务器：能免密 resume 就直接进大厅
                 account.set_remote(link, self._srv_addr)
@@ -1361,8 +1413,12 @@ class App(tk.Tk):
                 self._mp_handle(msg)         # 对局中：交给对局处理
             else:
                 self._lobby_handle_event(msg)
-        # 连接断了：复位大厅状态
-        if not getattr(link, "alive", False) and self._srv_ready:
+        # 连接断了：复位大厅状态。
+        # ⚠ 主动 disconnect（intentional）不算掉线 —— 那是我方在重连/回菜单，
+        # 提示"连接已断开"只会误导玩家。
+        if (not getattr(link, "alive", False)
+                and not getattr(link, "intentional", False)
+                and self._srv_ready):
             self._srv_ready = False
             self.mp_link = None
             self.mp_matching = False
@@ -1372,6 +1428,8 @@ class App(tk.Tk):
             if self.game is not None:
                 self._mp_teardown_game()
             self._lobby_sync()
+            # 别只报错：有免密令牌就原地重连一次，玩家不会被平白踢回菜单
+            self._try_auto_reconnect()
 
     def _srv_send(self, obj):
         link = self.mp_link
@@ -1416,6 +1474,11 @@ class App(tk.Tk):
         elif m == "peer_left":
             self._lobby_log(i18n.t("log_peer_left"))
         elif m == "kick":
+            # 被服务器踢掉（同一账号在别处登录）。**不能**自动重连：
+            # 重连会拿同一账号把对面又踢下线，两边互相踢 = 无限刷
+            # 「连接已断开」。这里必须明确停下来让玩家自己处理。
+            self._kicked = True
+            self.mp_user = None
             self._lobby_log(i18n.t("log_kicked"))
         elif m == "err":
             self._lobby_log("⚠ " + str(msg.get("err") or "err"))
@@ -1754,9 +1817,16 @@ class App(tk.Tk):
         return deck
 
     def _auto_fill(self, clear=False):
-        """按推荐思路补满：低费加权，约 33 张单位 + 6 张指令/反制"""
+        """按推荐思路补满：低费加权，约 33 张单位 + 6 张指令/反制
+
+        ⚠ clear=True 必须**清空后就返回**。历史 bug：先 `deck_counts = {}`
+        紧接着又跑下面的 while 填满 → 「清空」点下去等于「推荐卡组」，
+        玩家永远清不掉卡组（用户实测报障）。
+        """
         if clear:
             self.deck_counts = {}
+            self._builder_refresh()
+            return
         pool = core.allowed_cards(self.deck_nation, self.db)
         weights = [core.COST_WEIGHT.get(c.cost, 1) for c in pool]
         guard = 0
@@ -1915,6 +1985,7 @@ class App(tk.Tk):
     def _mp_launch(self, seed):
         """双方用同一种子同步开局：先手随机、发牌一致"""
         opp = self.mp_opp or {}
+        use_py = self._use_pyboard()
         try:
             my_deck = [self.db[n] for n in self.mp_my_deck]
             opp_deck = [self.db[n] for n in opp.get("deck", [])]
@@ -1927,6 +1998,11 @@ class App(tk.Tk):
             messagebox.showerror(i18n.t("mp_title"), i18n.t("mp_bad_deck"))
             self._mp_cleanup_to_menu()
             return
+        if use_py:
+            # ⚠ 必须等上面所有提前 return 走完再激活：否则视图方法已被实例
+            # 覆盖，却没走到 _run_pyboard() 的还原逻辑 → 一直留在 pygame 视图。
+            # 先激活：开局日志要进棋盘日志面板；激活失败则退回 tkinter。
+            use_py = self._activate_pyboard() is not None
         random.seed(seed)
         foe_name = self.mp_opp_name or f"对手·{opp.get('nation', '?')}"
         me = core.Player("你", self.deck_nation, my_deck)
@@ -1936,7 +2012,8 @@ class App(tk.Tk):
             fr = getattr(self, attr, None)
             if fr is not None and fr.winfo_exists():
                 fr.destroy()
-        self._build_main()
+        if not use_py:
+            self._build_main()
         # 先手按 host/client 角色判定：双方同种子 → 角色结果一致，不会都认为自己是先手
         first_role = random.choice(["host", "client"])
         i_am_first = (first_role == self.mp_role)
@@ -1957,6 +2034,9 @@ class App(tk.Tk):
             self.show_banner("你的回合", GREEN, 900)
         else:
             self.show_banner("敌方回合", RED, 900)
+        if use_py:
+            self._run_pyboard()       # 阻塞至对局结束（期间泵 Tk 事件跑网络轮询）
+            return
 
     # ---------------- 联机：网络轮询与行动应用 ----------------
     def _mp_send_act(self, act):
@@ -1986,6 +2066,8 @@ class App(tk.Tk):
         except queue.Empty:
             pass
         if not link.alive:
+            if getattr(link, "intentional", False):
+                return                    # 我方主动断的（重连/回菜单），不是掉线
             self._mp_disconnected()
             return
         self._schedule("_t_net", 80, self._mp_poll_net)
@@ -2070,7 +2152,14 @@ class App(tk.Tk):
         self.busy = False
 
     def _mp_disconnected(self):
-        """服务器连接断开：对局中判负回菜单，否则只提示"""
+        """服务器连接意外断开：对局中判负回菜单，否则只在大厅里提示一次。
+
+        ⚠ 同一局链路只能提示一次（_dead_notified），否则每个轮询 tick 都会
+        弹一个窗，玩家会看到满屏「连接已断开」（用户报过）。
+        """
+        if getattr(self, "_dead_notified", False):
+            return
+        self._dead_notified = True
         link = self.mp_link
         self.mp_link = None
         if link is not None:
@@ -2084,11 +2173,14 @@ class App(tk.Tk):
         self.mp_matching = False
         self.mp_room_code = None
         if self.game is not None:
+            # 对局中掉线：直接写进日志并结算，不再叠一个模态弹窗
+            # （结算画面已经说明了结果，弹窗只会多拦一次点击）
             self.add_log("  ⚠ 与服务器的连接已断开！")
             self._mp_game_over = True
             self.finish(winner=self.game.players[0])
         else:
-            messagebox.showinfo(i18n.t("mp_title"), i18n.t("log_srv_down"))
+            self.add_log("  ⚠ 与服务器的连接已断开！")
+            self._try_auto_reconnect()
 
     def _mp_teardown_game(self):
         """服务器掉线时清掉对局界面（不弹窗，由调用方负责提示）"""
@@ -2127,6 +2219,10 @@ class App(tk.Tk):
     # ---------------- 开新对局（随机匹配 + 随机先手）----------------
     def new_game(self, nation, deck=None):
         ai_nation = random.choice(core.MAIN_NATIONS)  # 随机匹配，可能内战
+        use_py = self._use_pyboard()
+        if use_py:
+            # 先激活：开局日志要进棋盘日志面板；激活失败则退回 tkinter
+            use_py = self._activate_pyboard() is not None
         p1 = core.Player("你", nation, deck if deck is not None else core.build_deck(nation, self.db))
         p2 = core.Player("AI", ai_nation, core.build_deck(ai_nation, self.db))
         self.game = GUIGame(p1, p2, self.add_log, self.on_game_event)
@@ -2134,7 +2230,8 @@ class App(tk.Tk):
             self.start_frame.destroy()
         if hasattr(self, "builder_frame") and self.builder_frame.winfo_exists():
             self.builder_frame.destroy()
-        self._build_main()
+        if not use_py:
+            self._build_main()
 
         self.initiative = random.choice(["你", "AI"])
         second = p2 if self.initiative == "你" else p1
@@ -2154,6 +2251,9 @@ class App(tk.Tk):
         else:
             self.show_banner("你的回合", GREEN, 900)
             self.after(1000, self.begin_human_turn)
+        if use_py:
+            self._run_pyboard()       # 阻塞至对局结束（期间泵 Tk 事件）
+            return
 
     # ---------------- 主界面布局 ----------------
     def _build_main(self):
@@ -2218,7 +2318,13 @@ class App(tk.Tk):
     def toggle_speed(self):
         self.fast_ai = not self.fast_ai
         self.ai_step_ms = 300 if self.fast_ai else 850
-        self.speed_btn.configure(text=i18n.t("btn_fast") if self.fast_ai else i18n.t("btn_slow"))
+        # ⚠ pygame 对战界面下没有 speed_btn 控件（_build_main 不执行），
+        # 直接 configure 会 AttributeError → 点「加速」按钮当场闪退。
+        # pygame 侧每帧从 app.fast_ai 读状态自己画，无需通知。
+        btn = getattr(self, "speed_btn", None)
+        if btn is not None and btn.winfo_exists():
+            btn.configure(text=i18n.t("btn_fast") if self.fast_ai
+                          else i18n.t("btn_slow"))
 
     # ---------------- 渲染 ----------------
     def refresh(self):
@@ -2670,15 +2776,7 @@ class App(tk.Tk):
                 self._drag_cancel()
                 self._shake_widget(hit_widget)
                 return
-            if g.play_card(me, idx) and self.mp_link is not None:
-                self._mp_send_act({"k": "play", "i": idx})
-            self.cleanup_dead()
-            self.check_over()
-            if self.game:
-                self.refresh()
-            # 万岁冲锋：强制结束回合
-            if self.game and self.game.force_end and not self.game.over:
-                self.after(400, self.on_end_turn)
+            self._act_play(idx)      # 与 pygame 意图共用（含联机转发）
             return
         unit = payload[1]
         if unit not in me.board:
@@ -2694,15 +2792,7 @@ class App(tk.Tk):
             return
         if hit_kind in ("front", "deploy"):
             dest = "前线" if hit_kind == "front" else "后方"
-            moved = g.move_unit(unit, dest)
-            if moved and self.mp_link is not None:
-                self._mp_send_act({"k": "move", "s": unit.slot, "p": dest})
-            self.cleanup_dead()
-            if moved and self.anim_enabled:
-                self.busy = True
-                self._anim_move(unit, on_done=self._refresh_unlock)
-            elif self.game:
-                self.refresh()
+            self._act_move(unit, dest)   # 与 pygame 意图共用（含联机转发）
             return
         # 拖回自己的阵线以外 → 取消
         self.add_log("  已取消机动。")
@@ -2746,9 +2836,9 @@ class App(tk.Tk):
             return
         if target not in g.players[1].board or target not in g.attack_targets(attacker):
             if attacker.position == "后方":
-                self.add_log("  支援线只有空军/炮兵能攻击，且仅限敌方前线单位！")
+                self.add_log(i18n.t("log_need_frontline"))
             else:
-                self.add_log("  该目标被相邻位置的[警卫]保护，必须先攻击警卫！")
+                self.add_log(i18n.t("log_guard_blocked"))
             return
         if self.anim_enabled:
             self.busy = True
@@ -2800,6 +2890,162 @@ class App(tk.Tk):
         if self.game:
             self.refresh()
         self.busy = False
+
+    # ---------------- pygame 对战视图（混合架构） ----------------
+    # tkinter 管主菜单/大厅/组卡/账号；对战界面可切换为 pygame 渲染
+    # （kards_board.py）。动画/拖拽走补间主循环，卡面支持图片资产，
+    # 为牌桌特效与音效铺路。经典 tkinter 界面保留为回退。
+
+    _PY_VIEW_ATTRS = ("refresh", "add_log", "show_banner", "float_text",
+                      "flash_widget", "_shake_widget", "_wcenter", "_anim_entry",
+                      "_anim_move", "_anim_attack", "shake", "show_end_animation")
+
+    def _use_pyboard(self):
+        """是否用 pygame 画对战界面（设置项 renderer，--board 强开 / --legacy-board 强关）"""
+        if "--legacy-board" in sys.argv:
+            return False
+        if "--board" in sys.argv:
+            return True
+        if i18n.get_pref("renderer", "pygame") != "pygame":
+            return False
+        # pygame 缺失/装坏时自动降级到经典界面 —— 宁可少点特效，
+        # 也不能因为一个可选依赖让玩家开不了局。
+        try:
+            import pygame  # noqa: F401
+        except Exception:
+            return False
+        return True
+
+    def _activate_pyboard(self):
+        """把视图方法切到 pygame 棋盘（实例属性覆盖类方法，back 时删除即还原）。
+
+        控制器（AI 步进/联机回放/on_game_event）拿到的 unit_widgets /
+        hq_widget 是棋盘的 Ref 替身 —— 有 winfo_exists()，语义与控件一致，
+        所以这些代码零改动。
+
+        返回棋盘对象；**失败返回 None**（调用方须据此退回 tkinter 界面）。
+        """
+        try:
+            import kards_board
+        except Exception as exc:                      # noqa: BLE001
+            self.add_log(f"[界面] 增强渲染不可用，已切回经典界面：{exc}")
+            return None
+        b = kards_board.PygameBoard(self)
+        self._pyboard = b
+        self.refresh = b.refresh
+        # ⚠ add_log 必须也接过去：pygame 模式下 _build_main() 不执行，
+        # self.logbox 不存在，原 add_log 会静默丢弃 → 棋盘日志面板永远空。
+        self.add_log = b.add_log
+        self.show_banner = b.show_banner
+        self.float_text = b.float_text
+        self.flash_widget = b.flash_widget
+        self._shake_widget = b._shake_widget
+        self._wcenter = b.wcenter
+        self._anim_entry = b.anim_entry
+        self._anim_move = b.anim_move
+        self._anim_attack = b.anim_attack
+        self.shake = b.shake_screen
+        self.show_end_animation = b.show_end_animation
+        self.unit_widgets = b.unit_refs
+        self.enemy_widgets = b.enemy_refs
+        self.hq_widget = b.hq_ref
+        self.pending_flash = b.pending_flash
+        return b
+
+    def _deactivate_pyboard(self):
+        b = self._pyboard
+        self._pyboard = None
+        if b is not None:
+            for a in self._PY_VIEW_ATTRS:
+                self.__dict__.pop(a, None)      # 撤掉实例覆盖 → 类方法还原
+            self.unit_widgets = {}
+            self.enemy_widgets = []
+            self.hq_widget = None
+            self.pending_flash = []
+        return b
+
+    def _run_pyboard(self):
+        """阻塞跑 pygame 主循环；每帧泵 Tk 事件让 after 定时器（AI 步进/
+        联机轮询）照常触发。结束后按玩家选择决定是否退出程序。"""
+        b = self._pyboard
+        try:
+            b.run(pump=self.update)
+        finally:
+            self._deactivate_pyboard()
+        if b.result == "quit":
+            self.destroy()
+
+    def pyboard_intent(self, act):
+        """pygame 棋盘 → 控制器意图路由。
+
+        联机语义与 tkinter 拖拽完全一致（同一批 _act_* / _attack_* 方法，
+        _mp_send_act 由它们内部触发）。
+        """
+        g = self.game
+        if g is None or self.busy:
+            return
+        me = g.players[0]
+        k = act.get("k")
+        if k == "play":
+            self._act_play(act.get("idx", -1))
+        elif k == "move":
+            u = next((u for u in me.board if u.slot == act.get("slot")), None)
+            if u is not None:
+                self._act_move(u, act.get("pos", "前线"))
+        elif k == "attack":
+            u = next((u for u in me.board if u.slot == act.get("slot")), None)
+            tgt = next((u for u in g.players[1].board
+                        if u.slot == act.get("tslot")), None)
+            if u is not None and tgt is not None:
+                self._attack_unit(u, tgt)
+        elif k == "hq":
+            u = next((u for u in me.board if u.slot == act.get("slot")), None)
+            if u is not None:
+                self._attack_hq(u)
+        elif k == "end":
+            self.on_end_turn()
+        elif k == "concede":
+            self.add_log(i18n.t("log_surrender"))
+            if self.mp_link is not None:
+                self.mp_link.send({"m": "concede"})
+            self.finish(winner=g.players[1])
+        elif k == "leave":
+            self.back_to_menu()
+        elif k == "speed":
+            self.toggle_speed()
+
+    def _act_play(self, idx):
+        """打出第 idx 张手牌（pygame 意图 / tkinter 拖拽共用；含联机转发）"""
+        g = self.game
+        if g is None or self.busy:
+            return
+        me = g.players[0]
+        if idx < 0 or idx >= len(me.hand):
+            return
+        if g.play_card(me, idx) and self.mp_link is not None:
+            self._mp_send_act({"k": "play", "i": idx})
+        self.cleanup_dead()
+        self.check_over()
+        if self.game:
+            self.refresh()
+        # 万岁冲锋：强制结束回合
+        if self.game and self.game.force_end and not self.game.over:
+            self.after(400, self.on_end_turn)
+
+    def _act_move(self, unit, dest):
+        """机动单位到 前线/后方（pygame 意图 / tkinter 拖拽共用；含联机转发）"""
+        g = self.game
+        if g is None or self.busy or unit not in g.players[0].board:
+            return
+        moved = g.move_unit(unit, dest)
+        if moved and self.mp_link is not None:
+            self._mp_send_act({"k": "move", "s": unit.slot, "p": dest})
+        self.cleanup_dead()
+        if moved and self.anim_enabled:
+            self.busy = True
+            self._anim_move(unit, on_done=self._refresh_unlock)
+        elif self.game:
+            self.refresh()
 
     # ---------------- 动画 ----------------
     def _guard(self):
@@ -3235,7 +3481,15 @@ class App(tk.Tk):
                       padx=18, pady=8, cursor="hand2", command=cmd).pack(pady=5)
 
     def on_esc(self, event=None):
-        """Esc：对局中安全退出到主菜单；主菜单则退出游戏"""
+        """Esc：对局中安全退出到主菜单；主菜单则退出游戏
+
+        ⚠ pygame 对战界面下必须直接放行、交给棋盘自己处理 —— 棋盘用 Esc
+        开关暂停菜单，这里再弹一次 tkinter 确认框就是「一次按键两个反应」
+        （用户报的「按键绑错」），而且确认后会从 pygame 主循环内部把棋盘拆掉，
+        紧接着 _run_pyboard 又去还原视图 → 闪退。
+        """
+        if self._pyboard is not None:
+            return
         if self.game is not None:
             if messagebox.askyesno(i18n.t("leave_title"), i18n.t("leave_confirm")):
                 self.back_to_menu()
@@ -3244,9 +3498,16 @@ class App(tk.Tk):
                 self.destroy()
 
     def on_f1(self, event=None):
-        """F1：随时打开关键词说明（对局中也能查）"""
+        """F1：随时打开关键词说明（对局中也能查）
+
+        pygame 窗口盖在 Tk 之上，弹出来的 Toplevel 必须主动抬到最前，
+        否则玩家按了 F1 看起来"没反应"。
+        """
         try:
-            self.open_keyword_guide()
+            win = self.open_keyword_guide()
+            if win is not None and self._pyboard is not None:
+                win.lift()
+                win.focus_force()
         except Exception:
             pass
 
@@ -3257,6 +3518,8 @@ class App(tk.Tk):
         否则用户每打一局都得重连 + 重新登录。
         """
         self._finishing = False
+        if self._pyboard is not None:
+            self._pyboard.quit()   # 让 pygame 主循环退出；视图方法由 _run_pyboard 还原
         if self.mp_link is not None:
             if self.game is not None and not self._mp_game_over:
                 self.mp_link.send({"m": "concede"})   # 中途退出 = 投降
@@ -3958,6 +4221,11 @@ def main():
         # 打包后自检：确认「建立服务器」这条路在安装目录里真的走得通
         # （资源定位、脚本存在、能起进程、端口能连）
         sys.exit(host_selftest())
+    if "--board-smoke" in sys.argv:
+        # pygame 棋盘自检：dummy 驱动跑若干帧 + 模拟操作（无需 Tk/真窗口）
+        import kards_board
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        sys.exit(0 if kards_board.smoke() else 1)
     if "--debug-on-net" in sys.argv:
         run_debug_net()
         return

@@ -358,6 +358,40 @@ def parse_addr(text, default_port=6000):
     return host, port
 
 
+def _is_self_host(host):
+    """host 是否指本机（回环 / localhost / 本机的局域网 IP）"""
+    if host in ("127.0.0.1", "localhost", "::1", "0.0.0.0", ""):
+        return True
+    try:
+        return host in get_local_ips()
+    except Exception:                        # noqa: BLE001
+        return False
+
+
+def same_server(a, b):
+    """两个 "host:port" 是否指向**同一台服务器**。
+
+    为什么不能直接比字符串：本机开服时大厅会把地址填成局域网地址
+    （192.168.x.x:6000），而玩家之前可能是用 127.0.0.1:6000 登录的 ——
+    字符串不同，其实是同一台机器、同一个端口，也就是同一台服务器。
+
+    旧代码直接比字符串，于是「点『建立服务器』」= 换了服务器 →
+    缓存的免密令牌被判无效 → 已登录的玩家被打回登录框
+    （用户报的「开服就退登」）。
+    """
+    pa, pb = parse_addr(a), parse_addr(b)
+    if not pa or not pb:
+        return False
+    ha, port_a = pa
+    hb, port_b = pb
+    if port_a != port_b:
+        return False
+    if ha == hb:
+        return True
+    # 端口相同、两台主机都指本机 → 同一台（回环地址与局域网地址互通）
+    return _is_self_host(ha) and _is_self_host(hb)
+
+
 def connect_server_async(addr, holder, timeout=6.0):
     """后台连服务器，结果写 holder["result"]。
 
