@@ -492,27 +492,39 @@ class PygameBoard:
 
     EXPLODE_MS = 1500               # 总部爆炸阶段时长（期间不出胜负大字）
 
+    def _hq_blast_spec(self, won):
+        """返回 (要炸的 Ref 列表, 提示文案键)。
+
+        投降要区分：总部没被打掉、是主动认输 → 文案换成「举旗投降」。
+        判断依据是引擎的 g.conceded（finish 里已记好投降方）。
+        """
+        g = self._game_state()
+        conceded = getattr(g, "conceded", None) if g is not None else None
+        me_sur = conceded is not None and conceded is g.players[0]
+        foe_sur = conceded is not None and conceded is g.players[1]
+        if won is True:
+            return ([self.hq_ref],
+                    "hq_fall_foe_surrender" if foe_sur else "hq_fall_foe")
+        if won is False:
+            return ([self.my_hq_ref],
+                    "hq_fall_me_surrender" if me_sur else "hq_fall_me")
+        return ([self.hq_ref, self.my_hq_ref], "hq_fall_both")
+
     def _start_hq_explode(self, won):
         """结算前奏：在总部位置炸开。
 
         哪个总部爆由 won 决定：
           won=True  → 敌方总部（玩家打赢了）
-          won=False → 我方总部（玩家输了）
+          won=False → 我方总部（玩家输了或投降）
           won=None  → 两边一起炸（平局）
         """
+        refs, tip_key = self._hq_blast_spec(won)
+        refs = [r for r in refs if r is not None]
         if not self._anim_on():
             self.end_state["phase"] = "full"
             self.end_state["phase_at"] = self.t_now
             return
-        targets = []
-        if won is True:
-            targets = [("foe", self.hq_ref)]
-        elif won is False:
-            targets = [("me", self.my_hq_ref)]
-        else:
-            targets = [("foe", self.hq_ref), ("me", self.my_hq_ref)]
-        targets = [(side, r) for side, r in targets if r is not None]
-        for side, ref in targets:
+        for ref in refs:
             cx, cy = ref.rect.centerx, ref.rect.centery
             ref.blast_t0 = self.t_now              # 绘制时按 t0 展开冲击波
             ref.flash_tint = (GOLD, self.t_now + 600)
@@ -532,14 +544,8 @@ class PygameBoard:
                                "dur": 620, "color": "#ff9c54"})
         sfx("boom")
         self.shake(times=10, amp=12, interval=38)
-        # 提示条：说明是哪边总部被摧毁
-        if won is True:
-            tip = i18n.t("hq_fall_foe")
-        elif won is False:
-            tip = i18n.t("hq_fall_me")
-        else:
-            tip = i18n.t("hq_fall_both")
-        self._hq_fall_tip = {"text": tip, "until": self.t_now + self.EXPLODE_MS}
+        self._hq_fall_tip = {"text": i18n.t(tip_key),
+                             "until": self.t_now + self.EXPLODE_MS}
         self.end_state["phase"] = "hq"
         self.end_state["phase_at"] = self.t_now
 

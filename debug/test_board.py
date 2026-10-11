@@ -633,6 +633,47 @@ def test_end_screen():
           f"{n_before} → {len(b4.particles)}")
 
 
+def test_surrender_explode():
+    """投降路径：总部没被打掉也要炸，且文案必须是「举旗投降」而非「沦陷」。
+
+    这是真 bug 回归：finish(winner=...) 直传胜者时不会经过 winner_of()，
+    所以 g.conceded 一直没被设置 → 投降文案分支永远走不到。
+    """
+    section("D4 投降结算")
+    g, _ = make_game()
+    app, b = new_board(g)
+    b.sync()
+    # 我方投降：engine 记录投降方 = players[0]
+    g.conceded = g.players[0]
+    b.show_end_animation(False, None, nation="德国")
+    check("我方投降 → 炸我方总部", b.my_hq_ref.blast_t0 is not None)
+    check("我方投降 → 不炸敌方总部", b.hq_ref.blast_t0 is None)
+    check("我方投降文案为「举旗投降」",
+          b._hq_fall_tip["text"] == i18n.t("hq_fall_me_surrender"),
+          b._hq_fall_tip["text"])
+
+    # 对手投降：我方获胜
+    g2, _ = make_game()
+    app2, b2 = new_board(g2)
+    b2.sync()
+    g2.conceded = g2.players[1]
+    b2.show_end_animation(True, None, nation="德国")
+    check("对手投降 → 炸敌方总部", b2.hq_ref.blast_t0 is not None)
+    check("对手投降 → 不炸我方总部", b2.my_hq_ref.blast_t0 is None)
+    check("对手投降文案为「敌方举旗投降」",
+          b2._hq_fall_tip["text"] == i18n.t("hq_fall_foe_surrender"),
+          b2._hq_fall_tip["text"])
+
+    # 未记录投降（正常被打死）→ 用「沦陷」文案
+    g3, _ = make_game()
+    app3, b3 = new_board(g3)
+    b3.sync()
+    b3.show_end_animation(False, None, nation="德国")
+    check("非投降战败用「总部沦陷」文案",
+          b3._hq_fall_tip["text"] == i18n.t("hq_fall_me"),
+          b3._hq_fall_tip["text"])
+
+
 # ---------------------------------------------------------------- E 动画
 
 def test_animations():
@@ -957,7 +998,8 @@ def main():
     print("kards_board（pygame 对战界面）测试")
     print("=" * 60)
     for fn in (test_pure, test_layout_and_sync, test_drop_zones, test_input,
-               test_pause_menu, test_end_screen, test_animations, test_draw,
+               test_pause_menu, test_end_screen, test_surrender_explode,
+               test_animations, test_draw,
                test_main_loop, test_app_hybrid_game, test_app_wiring):
         try:
             fn()

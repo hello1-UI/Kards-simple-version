@@ -2090,6 +2090,8 @@ class App(tk.Tk):
             return
         if m == "concede":
             self.add_log("  🏳 对手选择了投降！")
+            # 记录投降方 = 对手，结算文案走「敌方举旗投降」
+            g.conceded = g.players[1]
             self.finish(winner=g.players[0])
             return
         if m != "act":
@@ -3017,6 +3019,8 @@ class App(tk.Tk):
             self.add_log(i18n.t("log_surrender"))
             if self.mp_link is not None:
                 self.mp_link.send({"m": "concede"})
+            # 记录投降方：结算动画靠它把文案区分为「举旗投降」而非「总部沦陷」
+            g.conceded = g.players[0]
             self.finish(winner=g.players[1])
         elif k == "leave":
             self.back_to_menu()
@@ -3467,7 +3471,12 @@ class App(tk.Tk):
                 self.add_log(i18n.t("log_surrender"))
                 if self.mp_link is not None:
                     self.mp_link.send({"m": "concede"})
-                self.finish(winner=self.game.players[1] if self.game else None)
+                # 记录投降方（结算文案要区分「举旗投降」与「总部沦陷」）
+                if self.game is not None:
+                    self.game.conceded = self.game.players[0]
+                    self.finish(winner=self.game.players[1])
+                else:
+                    self.finish()
 
         def to_menu():
             if messagebox.askyesno(i18n.t("to_menu_title"), i18n.t("to_menu_confirm")):
@@ -3744,11 +3753,21 @@ class App(tk.Tk):
     HQ_EXPLODE_MS = 1400        # 总部爆炸阶段时长
 
     def _hq_targets_for(self, won):
-        """按胜负决定哪个总部爆炸：(控件, 文案键)"""
+        """按胜负决定哪个总部爆炸：(控件, 文案键)
+
+        投降要区分：总部没被打掉、是主动认输 → 文案换成「举旗投降」。
+        判断依据是引擎的 g.conceded（finish 里已记好投降方）。
+        """
+        g = self.game
+        conceded = getattr(g, "conceded", None) if g is not None else None
+        me_sur = conceded is not None and g is not None and conceded is g.players[0]
+        foe_sur = conceded is not None and g is not None and conceded is g.players[1]
         if won is True:
-            return [(self.hq_widget, "hq_fall_foe")]
+            key = "hq_fall_foe_surrender" if foe_sur else "hq_fall_foe"
+            return [(self.hq_widget, key)]
         if won is False:
-            return [(self.my_hq_widget, "hq_fall_me")]
+            key = "hq_fall_me_surrender" if me_sur else "hq_fall_me"
+            return [(self.my_hq_widget, key)]
         return [(self.hq_widget, "hq_fall_both"), (self.my_hq_widget, "hq_fall_both")]
 
     def _play_hq_explode(self, won, on_done):

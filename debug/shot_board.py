@@ -120,6 +120,16 @@ def main():
     b2.draw(surf)
     pygame.image.save(surf, os.path.join(OUT, "07_战败爆炸_我方总部.png"))
     print("  写出 07_战败爆炸_我方总部.png")
+    # 投降：我方总部同样爆炸，但文案是「举旗投降」
+    b3 = B.PygameBoard(app, game=g, on_intent=app.pyboard_intent)
+    b3.anim_enabled = True
+    b3.sync()
+    g.conceded = g.players[0]        # 我方投降
+    b3.show_end_animation(False, None, nation="德国")
+    b3.step(260)
+    b3.draw(surf)
+    pygame.image.save(surf, os.path.join(OUT, "08_投降爆炸_我方总部.png"))
+    print("  写出 08_投降爆炸_我方总部.png")
     print("输出目录:", OUT)
 
 
