@@ -105,9 +105,21 @@ def main():
     b.pause = True
     shot("04_暂停菜单.png")
     b.pause = False
+    # 结算：先炸总部（爆炸阶段），再出胜负大字（full 阶段）
     b.show_end_animation(True, None, nation="德国")
-    b.step(1200)
-    shot("05_结算.png")
+    b.step(260)              # 爆炸中（火球/冲击波最亮的时候）
+    shot("05_结算爆炸.png")
+    b.step(b.EXPLODE_MS)     # 推进到 full 阶段
+    shot("06_结算胜利.png")
+    # 失败：炸我方总部
+    b2 = B.PygameBoard(app, game=g, on_intent=app.pyboard_intent)
+    b2.anim_enabled = True
+    b2.sync()
+    b2.show_end_animation(False, None, nation="德国")
+    b2.step(260)
+    b2.draw(surf)
+    pygame.image.save(surf, os.path.join(OUT, "07_战败爆炸_我方总部.png"))
+    print("  写出 07_战败爆炸_我方总部.png")
     print("输出目录:", OUT)
 
 

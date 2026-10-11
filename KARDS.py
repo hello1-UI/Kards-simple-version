@@ -246,6 +246,7 @@ class App(tk.Tk):
         self.unit_widgets = {}     # id(unit) -> 卡片控件
         self.enemy_widgets = []    # (unit, 卡片控件)，用于拖拽命中检测
         self.hq_widget = None      # 敌方总部控件（拖拽落点）
+        self.my_hq_widget = None   # 我方总部控件（结算爆炸时也要炸）
         self.drag = None           # 当前拖拽状态
         self.pending_flash = []    # 刷新后待播放入场动画的单位 (unit, color)
         self._last_drag_src = None # 最近一次拖拽起点坐标（部署入场动画的来源）
@@ -2366,7 +2367,7 @@ class App(tk.Tk):
         self.unit_widgets = {}
         self.enemy_widgets = []
         self.hq_widget = None
-
+        self.my_hq_widget = None
         # ---- 敌方支援阵线：总部 + 后排单位 ----
         hq = CardWidget(self.foe_rear_row, title=i18n.t("foe_hq"),
                         sub=i18n.t("hq_hint"), cost=None, color="#8a3a3a",
@@ -2405,6 +2406,12 @@ class App(tk.Tk):
         # ---- 我方前线 / 支援阵线 ----
         my_front = [u for u in me.board if u.position == "前线"]
         my_rear = [u for u in me.board if u.position != "前线"]
+        # ---- 我方支援阵线：总部 + 后排单位（总部与敌方同款，蓝色调区分）----
+        my_hq = CardWidget(self.my_rear_row, title=i18n.t("my_hq"),
+                           sub=i18n.t("hq_hint"), cost=None, color="#3a5a7a",
+                           draggable=False, defense=me.hq)
+        my_hq.pack(side="left", padx=(8, 14), ipady=6)
+        self.my_hq_widget = my_hq
         if not me.board:
             tk.Label(self.my_rear_row, text=i18n.t("my_rear_empty"),
                      bg="#1f232b", fg=DIM, font=FONT_S).pack(side="left", padx=8)
@@ -2949,6 +2956,7 @@ class App(tk.Tk):
         self.unit_widgets = b.unit_refs
         self.enemy_widgets = b.enemy_refs
         self.hq_widget = b.hq_ref
+        self.my_hq_widget = b.my_hq_ref        # 结算爆炸要用（我方总部也要炸）
         self.pending_flash = b.pending_flash
         return b
 
@@ -2961,6 +2969,7 @@ class App(tk.Tk):
             self.unit_widgets = {}
             self.enemy_widgets = []
             self.hq_widget = None
+            self.my_hq_widget = None
             self.pending_flash = []
         return b
 
@@ -3721,13 +3730,60 @@ class App(tk.Tk):
 
     # ---------------- 胜利 / 失败结算动画 ----------------
     def show_end_animation(self, won, on_done=None, nation=None):
-        """全屏结算动画：胜利金色大字放大+粒子庆祝；失败暗场震动+裂纹徽章。
+        """全屏结算动画：**先炸总部，再出胜负大字**。
+        胜利金色大字放大+粒子庆祝；失败暗场震动+裂纹徽章。
         顶部绘制国家专属徽章（胜利金色发光 / 失败灰色裂开）。
         动画播完后出现提示，点击屏幕任意处才执行 on_done 回到大厅"""
         if not self.anim_enabled:
             if on_done:
                 on_done()
             return
+        # ---- 阶段一：总部爆炸（先让玩家看清是哪边总部被摧毁）----
+        self._play_hq_explode(won, lambda: self._end_fullscreen(won, on_done, nation))
+
+    HQ_EXPLODE_MS = 1400        # 总部爆炸阶段时长
+
+    def _hq_targets_for(self, won):
+        """按胜负决定哪个总部爆炸：(控件, 文案键)"""
+        if won is True:
+            return [(self.hq_widget, "hq_fall_foe")]
+        if won is False:
+            return [(self.my_hq_widget, "hq_fall_me")]
+        return [(self.hq_widget, "hq_fall_both"), (self.my_hq_widget, "hq_fall_both")]
+
+    def _play_hq_explode(self, won, on_done):
+        """在总部控件上播放爆炸：闪白 + 💥 碎片 + 震动 + 中部提示条，
+        结束后回调（进入全屏结算画面）。"""
+        targets = [(w, k) for w, k in self._hq_targets_for(won)
+                   if w is not None and w.winfo_exists()]
+        if not targets:
+            on_done()
+            return
+        label = {"hq_fall_foe": i18n.t("hq_fall_foe"),
+                 "hq_fall_me": i18n.t("hq_fall_me"),
+                 "hq_fall_both": i18n.t("hq_fall_both")}[targets[0][1]]
+        tip = tk.Label(self, text=label, bg="#2a1a12",
+                       fg="#ffb347", font=("Microsoft YaHei UI", 26, "bold"),
+                       padx=36, pady=14, bd=2, relief="solid")
+        tip.place(relx=0.5, rely=0.16, anchor="center")
+        tip.lift()
+        self.shake(times=10, amp=12, interval=38)
+        for w, _key in targets:
+            self.flash_widget(w, "#ffb347", times=5, interval=90)
+            for k in range(5):
+                self.after(k * 90, lambda ww=w: (
+                    self.float_text(ww, "💥", "#ff9c54")
+                    if ww.winfo_exists() else None))
+        self._hq_tip = tip
+
+        def done():
+            if tip.winfo_exists():
+                tip.destroy()
+            self._hq_tip = None
+            on_done()
+        self.after(self.HQ_EXPLODE_MS, done)
+
+    def _end_fullscreen(self, won, on_done=None, nation=None):
         overlay = tk.Frame(self, bg="#0d1017")
         overlay.place(x=0, y=0, relwidth=1, relheight=1)
         cv = tk.Canvas(overlay, width=200, height=180, bg="#0d1017",

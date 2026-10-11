@@ -34,6 +34,7 @@ import pygame  # noqa: E402
 
 import kards_board as board  # noqa: E402
 import kards_engine as core  # noqa: E402
+import kards_i18n as i18n  # noqa: E402
 
 PASS, FAIL = [], []
 SECTION = [""]
@@ -586,24 +587,50 @@ def test_end_screen():
     hits = []
     b.show_end_animation(True, lambda: hits.append(1), nation="德国")
     check("结算状态已建立", b.end_state is not None)
-    check("胜利生成庆祝粒子", len(b.particles) > 0, f"{len(b.particles)} 个")
+    check("胜利先进入总部爆炸阶段", b.end_state.get("phase") == "hq",
+          str(b.end_state.get("phase")))
+    check("爆炸生成碎片粒子", len(b.particles) > 0, f"{len(b.particles)} 个")
+    check("胜利炸的是敌方总部", b.hq_ref.blast_t0 is not None)
+    check("胜利不炸我方总部", b.my_hq_ref.blast_t0 is None)
 
     b.handle_event(Ev(pygame.MOUSEBUTTONDOWN, (640, 400)))
     check("动画播完前点击无效", not hits)
     b.step(1000)
+    check("爆炸阶段结束前仍是 hq 阶段", b._end_phase() == "hq")
+    b.handle_event(Ev(pygame.MOUSEBUTTONDOWN, (640, 400)))
+    check("爆炸阶段点击无效（不能跳过爆炸）", not hits)
+    b.step(1000)
+    check("超时后进入 full 阶段", b._end_phase() == "full")
     b.handle_event(Ev(pygame.MOUSEBUTTONDOWN, (640, 400)))
     check("就绪后点击触发回调", hits == [1], str(hits))
     b.handle_event(Ev(pygame.MOUSEBUTTONDOWN, (640, 400)))
     check("回调只触发一次", hits == [1], str(hits))
 
+    # 失败：炸的是我方总部
     app2, b2 = new_board(g)
     b2.sync()
     b2.show_end_animation(False, None, nation="德国")
-    check("失败结算无粒子", b2.particles == [])
+    check("失败先进入总部爆炸阶段", b2.end_state.get("phase") == "hq")
+    check("失败炸的是我方总部", b2.my_hq_ref.blast_t0 is not None)
+    check("失败不炸敌方总部", b2.hq_ref.blast_t0 is None)
+
+    # 平局：两边一起炸
     b3 = board.PygameBoard(FakeApp(g), game=g, on_intent=lambda a: None)
     b3.sync()
     b3.show_end_animation(None, None, nation="德国")
     check("平局结算也能建立状态", b3.end_state is not None)
+    check("平局两边总部都炸", b3.hq_ref.blast_t0 is not None
+          and b3.my_hq_ref.blast_t0 is not None)
+    check("平局提示文案为 both",
+          b3._hq_fall_tip["text"] == i18n.t("hq_fall_both"))
+    # 阶段推进后 full 阶段补充胜利粒子（仅胜利）
+    b4 = board.PygameBoard(FakeApp(g), game=g, on_intent=lambda a: None)
+    b4.sync()
+    b4.show_end_animation(True, None, nation="德国")
+    n_before = len(b4.particles)
+    b4.step(board.PygameBoard.EXPLODE_MS + 100)
+    check("full 阶段追加庆祝粒子", len(b4.particles) > n_before,
+          f"{n_before} → {len(b4.particles)}")
 
 
 # ---------------------------------------------------------------- E 动画

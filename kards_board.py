@@ -261,7 +261,7 @@ class Ref:
     """
 
     __slots__ = ("rect", "kind", "unit", "card", "idx", "alive",
-                 "flash_tint", "fly", "ready", "guard", "nat_color")
+                 "flash_tint", "fly", "ready", "guard", "nat_color", "blast_t0")
 
     def __init__(self, rect, kind, unit=None, card=None, idx=None,
                  nat_color="#666"):
@@ -276,6 +276,7 @@ class Ref:
         self.ready = False
         self.guard = False
         self.nat_color = nat_color
+        self.blast_t0 = None      # 结算爆炸起始时刻（None=未爆炸）
 
     def winfo_exists(self):
         return self.alive
@@ -332,7 +333,8 @@ class PygameBoard:
         # 控制器鸭接面（App 会把这些引用挂到自己身上）
         self.unit_refs = {}       # id(unit) -> Ref
         self.enemy_refs = []      # [(unit, Ref)]
-        self.hq_ref = None
+        self.hq_ref = None        # 敌方总部
+        self.my_hq_ref = None     # 我方总部（结算时也要炸——玩家得看到自己的总部）
         self.pending_flash = []   # (unit, color) —— on_game_event "deploy" 塞进来
 
         # 交互状态
@@ -341,8 +343,9 @@ class PygameBoard:
         self.mouse = (0, 0)
         self.pause = False
         self.pause_confirm = None
-        self.end_state = None     # dict(won, on_done, nation, ready_at)
+        self.end_state = None     # dict(won, on_done, nation, ready_at, phase, phase_at)
         self._end_clicked = False
+        self._hq_fall_tip = None  # dict(text, until) —— 结算爆炸阶段的提示条
 
         # 绘制
         self.screen = None
@@ -470,20 +473,97 @@ class PygameBoard:
         self._tween(340, fn, on_done=fin, tag="attack")
 
     def show_end_animation(self, won, on_done=None, nation=None):
-        """全屏结算：胜利金色+粒子 / 失败灰暗 / 平局。点击任意处 → on_done"""
+        """全屏结算：**先炸总部，再出胜负大字**。点击任意处 → on_done
+
+        ⚠ 时序（用户要求）：不能一点「结算」就把胜利/战败大字盖上来 ——
+        先让总部地点爆开（敌方总部被我方打爆 / 我方总部沦陷），
+        爆炸播完才弹出胜负标，玩家能看清"是哪边总部先炸的"。
+
+        阶段划分（全部基于虚拟时钟 self.t_now，单测可直接 step 推进）：
+          phase 0  hq   : 爆炸特效 + 「XX总部被摧毁」提示（EXPLODE_MS）
+          phase 1  full : 胜负大字 + 粒子庆祝 / 暗场震动
+        """
         self.end_state = {"won": won, "on_done": on_done, "nation": nation,
                           "ready_at": self.t_now + 700}
         self._end_clicked = False
+        self._start_hq_explode(won)
         if won:
-            rng = random.Random(20261004)
-            for _ in range(60):
+            sfx("win" if won else "lose")
+
+    EXPLODE_MS = 1500               # 总部爆炸阶段时长（期间不出胜负大字）
+
+    def _start_hq_explode(self, won):
+        """结算前奏：在总部位置炸开。
+
+        哪个总部爆由 won 决定：
+          won=True  → 敌方总部（玩家打赢了）
+          won=False → 我方总部（玩家输了）
+          won=None  → 两边一起炸（平局）
+        """
+        if not self._anim_on():
+            self.end_state["phase"] = "full"
+            self.end_state["phase_at"] = self.t_now
+            return
+        targets = []
+        if won is True:
+            targets = [("foe", self.hq_ref)]
+        elif won is False:
+            targets = [("me", self.my_hq_ref)]
+        else:
+            targets = [("foe", self.hq_ref), ("me", self.my_hq_ref)]
+        targets = [(side, r) for side, r in targets if r is not None]
+        for side, ref in targets:
+            cx, cy = ref.rect.centerx, ref.rect.centery
+            ref.blast_t0 = self.t_now              # 绘制时按 t0 展开冲击波
+            ref.flash_tint = (GOLD, self.t_now + 600)
+            # 火星/碎片粒子
+            rng = random.Random(hash((id(ref), self.t_now)) & 0xFFFF)
+            for _ in range(26):
+                ang = rng.uniform(0, math.tau)
+                spd = rng.uniform(90, 320)
                 self.particles.append({
-                    "x": rng.uniform(0, self.W), "y": rng.uniform(0, self.H * 0.9),
-                    "vx": rng.uniform(-40, 40), "vy": rng.uniform(-120, -30),
-                    "t0": self.t_now, "dur": rng.randint(1200, 2600),
-                    "color": rng.choice([GOLD, "#fff1b8", "#e0e6f0", "#d4af37"]),
-                    "size": rng.randint(2, 5)})
-        sfx("win" if won else "lose")
+                    "x": cx, "y": cy,
+                    "vx": math.cos(ang) * spd, "vy": math.sin(ang) * spd,
+                    "t0": self.t_now, "dur": rng.randint(500, 1100),
+                    "color": rng.choice(["#ffb347", "#ff7a3c", "#ffe08a",
+                                         "#c0c6d0", GOLD]),
+                    "size": rng.randint(2, 6)})
+            self.rings.append({"x": cx, "y": cy, "t0": self.t_now,
+                               "dur": 620, "color": "#ff9c54"})
+        sfx("boom")
+        self.shake(times=10, amp=12, interval=38)
+        # 提示条：说明是哪边总部被摧毁
+        if won is True:
+            tip = i18n.t("hq_fall_foe")
+        elif won is False:
+            tip = i18n.t("hq_fall_me")
+        else:
+            tip = i18n.t("hq_fall_both")
+        self._hq_fall_tip = {"text": tip, "until": self.t_now + self.EXPLODE_MS}
+        self.end_state["phase"] = "hq"
+        self.end_state["phase_at"] = self.t_now
+
+    def _end_phase(self):
+        """当前结算阶段：hq（爆炸中）/ full（出大字）"""
+        st = self.end_state
+        if st is None:
+            return "full"
+        if st.get("phase") == "hq":
+            if self.t_now - st.get("phase_at", self.t_now) < self.EXPLODE_MS:
+                return "hq"
+            st["phase"] = "full"
+            st["phase_at"] = self.t_now
+            # 胜负大字出现的瞬间补粒子庆祝（胜利）
+            if st.get("won"):
+                rng = random.Random(20261004)
+                for _ in range(60):
+                    self.particles.append({
+                        "x": rng.uniform(0, self.W), "y": rng.uniform(0, self.H * 0.9),
+                        "vx": rng.uniform(-40, 40), "vy": rng.uniform(-120, -30),
+                        "t0": self.t_now, "dur": rng.randint(1200, 2600),
+                        "color": rng.choice([GOLD, "#fff1b8", "#e0e6f0", "#d4af37"]),
+                        "size": rng.randint(2, 5)})
+        return "full"
 
     def quit(self):
         self.running = False
@@ -529,6 +609,10 @@ class PygameBoard:
                       if self.t_now - r["t0"] < r["dur"]]
         if self.banner is not None and self.t_now > self.banner["until"]:
             self.banner = None
+        # 结算阶段推进（爆炸 → 大字）：放在 step 里，绘制与单测都能驱动，
+        # 不依赖 _draw_end 被调用（否则 headless 测试推不动阶段）。
+        if self.end_state is not None:
+            self._end_phase()
 
     # ================= 布局与同步 =================
 
@@ -616,6 +700,9 @@ class PygameBoard:
         hq = Ref(pygame.Rect(L["row_foe_rear"].x + 8, L["row_foe_rear"].y + 4,
                              self.HQ_W, self.HQ_H), "hq", nat_color=nat_foe)
         self.hq_ref = hq
+        my_hq = Ref(pygame.Rect(L["row_my_rear"].x + 8, L["row_my_rear"].y + 4,
+                                self.HQ_W, self.HQ_H), "hq", nat_color=nat_me)
+        self.my_hq_ref = my_hq
 
         def place_units(units, row_rect, is_enemy):
             x = row_rect.x + 8
@@ -651,6 +738,14 @@ class PygameBoard:
         place_units(foe_front, L["row_foe_front"], True)
         place_units(my_front, L["row_my_front"], False)
         place_units(my_rear, L["row_my_rear"], False)
+        # 我方后排也与 HQ 同排：HQ 占头部，单位从 HQ 右侧开始排
+        # （否则单位会压在总部上；截图肉眼确认的错位）
+        x = my_hq.rect.right + 14
+        for u in my_rear:
+            ref = self.unit_refs[id(u)]
+            ref.rect.topleft = (x, L["row_my_rear"].y +
+                                (L["row_my_rear"].h - self.UNIT_H) // 2)
+            x += self.UNIT_W + 10
 
         # 手牌 Ref
         self.hand_refs = []
@@ -741,7 +836,10 @@ class PygameBoard:
             return
         if self.end_state is not None:
             if ev.type == pygame.MOUSEBUTTONDOWN and not self._end_clicked:
-                if self.t_now >= self.end_state["ready_at"]:
+                # 必须等总部爆炸播完（full 阶段）才允许点击回大厅，
+                # 否则玩家一点就把"是哪边总部炸的"跳过去了。
+                if (self._end_phase() != "hq"
+                        and self.t_now >= self.end_state["ready_at"]):
                     self._end_clicked = True
                     self.end_state["on_done"]()
             return
@@ -1043,6 +1141,9 @@ class PygameBoard:
         # 敌方总部
         self._draw_hq(surf, g, foe)
 
+        # 我方总部（与敌方同款样式，蓝色调区分；结算时也会在这里爆炸）
+        self._draw_hq(surf, g, me, ref=self.my_hq_ref)
+
         # 单位
         lunge = getattr(self, "_lunge_state", {})
         for ref in self.unit_refs.values():
@@ -1071,19 +1172,31 @@ class PygameBoard:
                 if zr is not None:
                     rr(surf, zr.inflate(6, 6), col, radius=8, width=3)
 
-    def _draw_hq(self, surf, g, foe):
-        ref = self.hq_ref
+    def _draw_hq(self, surf, g, foe, ref=None):
+        """总部卡（含血量心形）。ref 可显式指定（我方总部），默认敌方总部。
+
+        结算爆炸：ref.blast_t0 有值时，按虚拟时钟展开冲击波 + 白光，
+        让玩家明确看到「是哪边总部先炸的」。
+        """
+        ref = ref if ref is not None else self.hq_ref
+        if ref is None:
+            return
         r = ref.rect
-        rr(surf, r, C("#3a2430"), radius=8, border_color=C("#8a3a3a"))
+        mine = ref is self.my_hq_ref
+        if mine:
+            rr(surf, r, C("#24303a"), radius=8, border_color=C("#3a6a8a"))
+        else:
+            rr(surf, r, C("#3a2430"), radius=8, border_color=C("#8a3a3a"))
         img = hq_image(foe.nation, r.w - 12, r.h - 44)
         if img is not None:
             surf.blit(img, (r.x + 6, r.y + 6))
         else:
             f = font(15, True)
-            hq_txt = t("foe_hq")
+            hq_txt = t("my_hq") if mine else t("foe_hq")
             surf.blit(f.render(hq_txt, True, C(TEXT)),
                       (r.centerx - f.size(hq_txt)[0] // 2, r.y + 14))
-            surf.blit(font(26).render(foe.nation, True, C("#cc8888")),
+            tint = "#88aacc" if mine else "#cc8888"
+            surf.blit(font(26).render(foe.nation, True, C(tint)),
                       (r.centerx - font(26).size(foe.nation)[0] // 2, r.y + 40))
         hp = font(22, True)
         htxt = str(foe.hq)
@@ -1095,6 +1208,41 @@ class PygameBoard:
                              (hx, hy - 3), (hx + 4, hy - 7), (hx + 7, hy - 2)])
         surf.blit(hp.render(htxt, True, C(RED)),
                   (r.centerx - hw // 2 + 6, r.bottom - 30))
+        # ---- 结算爆炸特效 ----
+        if ref.blast_t0 is not None:
+            self._draw_blast(surf, r, ref.blast_t0)
+
+    def _draw_blast(self, surf, r, t0):
+        """总部爆炸：扩散冲击波 + 中心白光 + 闪红（按虚拟时钟推进）"""
+        dt = self.t_now - t0
+        if dt < 0:
+            return
+        cx, cy = r.centerx, r.centery
+        maxr = max(r.w, r.h) * 2.2
+        # 冲击波圆环
+        p = min(1.0, dt / 620.0)
+        rad = int(maxr * p)
+        alpha = int(200 * (1 - p))
+        if rad > 0 and alpha > 0:
+            ring = pygame.Surface((rad * 2 + 8, rad * 2 + 8), pygame.SRCALPHA)
+            pygame.draw.circle(ring, (*C("#ff9c54"), alpha),
+                               (rad + 4, rad + 4), rad, max(2, int(6 * (1 - p))))
+            surf.blit(ring, (cx - rad - 4, cy - rad - 4))
+        # 中心白光（前 260ms）
+        if dt < 260:
+            fa = int(235 * (1 - dt / 260.0))
+            flash = pygame.Surface(r.size, pygame.SRCALPHA)
+            flash.fill((255, 240, 200, fa))
+            surf.blit(flash, r.topleft, special_flags=pygame.BLEND_RGBA_ADD)
+        # 火球（前 700ms 逐渐膨胀）
+        if dt < 700:
+            fr = int(max(r.w, r.h) * (0.35 + 0.75 * (dt / 700.0)))
+            fa = int(180 * (1 - dt / 700.0))
+            ball = pygame.Surface((fr * 2, fr * 2), pygame.SRCALPHA)
+            pygame.draw.circle(ball, (*C("#ff7a3c"), fa), (fr, fr), fr)
+            pygame.draw.circle(ball, (*C("#ffe08a"), max(0, fa - 40)),
+                               (fr, fr), int(fr * 0.55))
+            surf.blit(ball, (cx - fr, cy - fr))
 
     def _draw_unit(self, surf, ref, g, ox=0, oy=0):
         r = ref.rect.move(ox, oy)
@@ -1428,15 +1576,60 @@ class PygameBoard:
                       (r.centerx - bf.size(txt)[0] // 2, r.centery - 10))
 
     def _draw_end(self, surf):
+        """结算画面。
+
+        ⚠ 必须分阶段（用户要求）：phase="hq" 时**不画胜负大字** —— 只有总部
+        位置的爆炸 + 「XX总部被摧毁」提示，让玩家先看清是哪边炸的；
+        爆炸播完（phase="full"）才弹出胜利/战败大字与徽章。
+        """
+        phase = self._end_phase()
+        if phase == "hq":
+            # 爆炸阶段：只压一层薄暗罩 + 顶部提示，不遮挡战场（总部要看得到）
+            dim = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+            dim.fill((13, 16, 23, 110))
+            surf.blit(dim, (0, 0))
+            tip = getattr(self, "_hq_fall_tip", None)
+            if tip is not None and self.t_now < tip["until"]:
+                f = font(40, True)
+                tw = f.size(tip["text"])[0]
+                box = pygame.Rect(0, int(self.H * 0.10), tw + 64, 62)
+                box.centerx = self.W // 2
+                rr(surf, box, C("#2a1a12"), radius=10,
+                   border_color=C("#ff9c54"))
+                surf.blit(f.render(tip["text"], True, C("#ffb347")),
+                          (box.centerx - tw // 2, box.centery - 24))
+            # 爆炸闪屏：整屏橙色泛光（前 300ms）
+            st = self.end_state
+            dt = self.t_now - st.get("phase_at", self.t_now)
+            if dt < 300:
+                fa = int(90 * (1 - dt / 300.0))
+                fw = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+                fw.fill((255, 170, 90, fa))
+                surf.blit(fw, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            return
+
         won = self.end_state["won"]
         dim = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
         dim.fill((13, 16, 23, 235))
         surf.blit(dim, (0, 0))
         txt, color = ((t("draw_big"), DIM) if won is None
                       else (t("win_big"), GOLD) if won else (t("lose_big"), RED))
+        # 大字弹出：phase 切换后 260ms 内从小到大（更有冲击力）
+        st = self.end_state
+        gp = min(1.0, (self.t_now - st.get("phase_at", self.t_now)) / 260.0)
         f = font(64, True)
-        surf.blit(f.render(txt, True, C(color)),
-                  (self.W // 2 - f.size(txt)[0] // 2, int(self.H * 0.34)))
+        if gp < 1.0:
+            # 放大登场：用 smoothscale 缩放渲染结果，围绕中心插值
+            base = f.render(txt, True, C(color))
+            scale = 0.55 + 0.45 * gp
+            w = max(1, int(base.get_width() * scale))
+            h = max(1, int(base.get_height() * scale))
+            big = pygame.transform.smoothscale(base, (w, h))
+            surf.blit(big, (self.W // 2 - w // 2,
+                            int(self.H * 0.36) - h // 2))
+        else:
+            surf.blit(f.render(txt, True, C(color)),
+                      (self.W // 2 - f.size(txt)[0] // 2, int(self.H * 0.34)))
         sub = (t("win_sub") if won is True
                else (t("lose_sub") if won is False else t("draw_sub")))
         f2 = font(18)
