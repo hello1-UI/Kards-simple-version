@@ -2632,7 +2632,8 @@ class App(tk.Tk):
                 return u is not None and g.unit_ready(unit) \
                     and u in g.attack_targets(unit)
             if kind == "hq":
-                return g.unit_ready(unit)
+                # 支援线步兵/坦克不能直击总部（必须上前线；空军/炮兵可以）
+                return g.unit_ready(unit) and g.can_hit_hq(unit)[0]
             if kind in ("front", "deploy"):
                 return True     # 机动不要求"可攻击"，引擎内部会再校验
             return False

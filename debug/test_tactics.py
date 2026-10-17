@@ -90,15 +90,32 @@ g = new_game()
 me, foe = g.players
 art = place(g, "Pak36反坦克炮", me, "后方")        # 炮兵
 f1 = place(g, "步兵班", foe, "前线", slot=1)
-f2 = place(g, "T-70", foe, "前线", slot=2)
+f2 = place(g, "T-70", foe, "前线", slot=3)   # ⚠ T-70 自带[警卫]，放 slot=3 与 f1 不相邻
 rear_foe = place(g, "步兵班", foe, "后方", slot=5)
 tg = g.attack_targets(art)
 check("炮兵支援线可攻击敌方前线", f1 in tg and f2 in tg)
 check("炮兵可攻击敌方支援阵线（任意阵线）", rear_foe in tg)
 inf_r = place(g, "殖民步兵", me, "后方")
-check("步兵在支援线不能攻击(无目标)", g.attack_targets(inf_r) == [])
+# ⚠ 支援线步兵/坦克打相邻线（前线）：敌方控制前线时可打敌方前线单位
+#   （用户报「步兵和坦克是可以打前线单位的」；官方攻略站：
+#    units can only attack foes on adjacent lines / repel the invaders）
+tg = g.attack_targets(inf_r)
+check("支援线步兵可攻击敌方前线单位（敌方占线）", f1 in tg and f2 in tg,
+      f"{[u.name for u in tg]}")
+check("支援线步兵打不到敌方支援阵线", rear_foe not in tg)
 check("步兵在支援线不能打总部", g.can_hit_hq(inf_r)[0] is False)
 check("炮兵支援线可以打总部", g.can_hit_hq(art)[0] is True)
+tank_r = place(g, "二号坦克 C 型", me, "后方")
+tg = g.attack_targets(tank_r)
+check("支援线坦克可攻击敌方前线单位（敌方占线）", f1 in tg and f2 in tg,
+      f"{[u.name for u in tg]}")
+
+# 前线空着时，支援线步兵/坦克无地面目标（够不着敌方支援阵线）
+g2 = new_game()
+me2, foe2 = g2.players
+place(g2, "步兵班", foe2, "后方", slot=5)          # 敌方全在支援阵线
+inf_r2 = place(g2, "殖民步兵", me2, "后方")
+check("前线空着时支援线步兵无目标", g2.attack_targets(inf_r2) == [])
 
 # 战斗机：同为空军，待遇必须与炮兵/轰炸机一致（用户报的这个）
 g = new_game()

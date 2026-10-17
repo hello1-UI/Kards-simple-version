@@ -823,7 +823,8 @@ class PygameBoard:
             return (extra is not None and g.unit_ready(u)
                     and extra in g.attack_targets(u))
         if kind == "hq":
-            return g.unit_ready(u)
+            # 支援线步兵/坦克不能直击总部（必须上前线；空军/炮兵可以）
+            return g.unit_ready(u) and g.can_hit_hq(u)[0]
         if kind in ("front", "deploy"):
             return True
         return False

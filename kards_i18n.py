@@ -87,6 +87,7 @@ LANGS = {
             "· 拖到「我方前线」行上前线，拖回支援阵线撤后\n"
             "· 移动与攻击都消耗行动费(⚡)；无[闪击]部署当回合不能移动/攻击\n"
             "· 步兵每回合移动/攻击二选一；坦克可以移动并攻击\n"
+            "· 步兵/坦克攻击相邻阵线：前线可打敌方支援阵线与总部；敌方占据前线时，支援线可直接打敌方前线单位\n"
             "· 空军（战斗机/轰炸机）与炮兵可攻击任意阵线的敌人，不必上前线\n"
             "· 炮兵/轰炸机无视[警卫]；轰炸机必须优先打战斗机且会被战斗机拦截\n"
             "· 炮兵/轰炸机攻击不吃反击；轰炸机不反击（打它不吃反击）\n"
@@ -260,8 +261,9 @@ LANGS = {
         "btn_surrender": "🏳 投降",
         "btn_to_menu": "🏠 返回主菜单",
         "log_surrender": "  你选择了投降。",
-        "log_need_frontline": "  后方的步兵/坦克无法攻击，请先移动到前线"
-                              "（空军与炮兵可攻击任意阵线，不受此限制）。",
+        "log_need_frontline": "  后方的步兵/坦克只能攻击相邻的敌方前线单位；"
+                              "要打敌方支援阵线或总部，请先上前线"
+                              "（空军与炮兵可攻击任意阵线）。",
         "log_guard_blocked": "  该目标被相邻位置的[警卫]保护，必须先攻击警卫！",
         "log_drop_cancel": "  已取消（把卡拖到支援阵线即可部署）。",
         "log_unit_only_rear": "  新单位只能部署在我方支援阵线（绿色高亮处）。",
@@ -356,6 +358,7 @@ LANGS = {
             "· Drag to 'My Frontline' to advance; drag back to retreat\n"
             "· Moving and attacking both cost Operation (⚡); without Blitz a unit cannot move/attack the turn it deploys\n"
             "· Infantry: move OR attack each turn; tanks may move and attack\n"
+            "· Infantry/tanks attack adjacent lines only: from the frontline hit enemy support line & HQ; when the enemy holds the frontline, your support line can strike their frontline units\n"
             "· Air (fighters/bombers) & artillery can attack targets in any line — no need to reach the frontline\n"
             "· Artillery & bombers ignore Guard; bombers must target fighters and can be intercepted\n"
             "· Artillery & bombers take no counterattack; bombers never counterattack\n"
@@ -524,8 +527,9 @@ LANGS = {
         "btn_surrender": "🏳 Surrender",
         "btn_to_menu": "🏠 Main Menu",
         "log_surrender": "  You chose to surrender.",
-        "log_need_frontline": "  Infantry/tanks cannot attack from the support line — "
-                              "move them to the frontline first (air and artillery "
+        "log_need_frontline": "  Infantry/tanks in the support line can only attack enemy "
+                              "frontline units (adjacent line); to hit the enemy support "
+                              "line or HQ, move to the frontline first (air and artillery "
                               "can attack any line).",
         "log_guard_blocked": "  That target is protected by an adjacent [Guard] — "
                              "attack the Guard first!",
@@ -618,6 +622,7 @@ LANGS = {
             "· 「味方前線」へドラッグで前進、支援ラインへ戻すと後退\n"
             "· 移動と攻撃は両方行動コスト(⚡)を消費；電撃なしの配置ターンは移動/攻撃不可\n"
             "· 歩兵は毎ターン移動か攻撃のどちらか；戦車は移動して攻撃も可\n"
+            "· 歩兵・戦車は隣接する戦線のみ攻撃可：前線からは敵支援ラインと本部を、敵が前線を占拠中なら支援ラインから敵前線ユニットを攻撃できる\n"
             "· 空軍（戦闘機・爆撃機）と砲兵は任意の戦線を攻撃できる（前線に出る必要なし）\n"
             "· 砲兵・爆撃機は護衛を無視；爆撃機は戦闘機を優先攻撃し、迎撃される\n"
             "· 砲兵・爆撃機の攻撃は反撃を受けない；爆撃機は反撃しない\n"
@@ -786,7 +791,8 @@ LANGS = {
         "btn_surrender": "🏳 降伏",
         "btn_to_menu": "🏠 メインメニュー",
         "log_surrender": "  降伏を選択しました。",
-        "log_need_frontline": "  後方の歩兵・戦車は攻撃できません。先に前線へ移動してください"
+        "log_need_frontline": "  後方の歩兵・戦車が攻撃できるのは隣接する敵前線ユニットのみ。"
+                              "敵支援ラインや本部を攻めるには前線へ移動してください"
                               "（空軍と砲兵は任意の戦線を攻撃できます）。",
         "log_guard_blocked": "  その目標は隣接する[護衛]に守られています。先に護衛を攻撃してください！",
         "log_drop_cancel": "  キャンセルしました（支援ラインにドロップで配置）。",
