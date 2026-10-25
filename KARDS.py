@@ -62,7 +62,7 @@ APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 # a: 重要修复(1位数)  b: 卡牌更新(2位数)  c: 赛季更新(2位数)  d: 补丁修复(3位数)
 # 升位规则: 某位 +1 后, 其右侧所有位清零（如卡牌更新 1.01.00.000）
 # 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
-VERSION = (1, 3, 0, 5)
+VERSION = (1, 3, 0, 6)
 
 # 字族：客户机器可能没有微软雅黑（精简版/英文 Windows），tkinter 显式指定
 # 字族时不会跨族回退，中文会渲染成方块。App 启动时 ensure_tk_cjk_font()
