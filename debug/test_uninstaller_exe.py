@@ -65,7 +65,7 @@ def run_case(title, dirname):
 
     # 等待脱离进程完成删除
     gone = False
-    for _ in range(24):
+    for _ in range(180):    # 与卸载器 bat 的 90 次重试对齐（Defender 锁新包）
         if not os.path.isdir(target):
             gone = True
             break

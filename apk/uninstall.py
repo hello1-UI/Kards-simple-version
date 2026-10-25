@@ -140,12 +140,19 @@ def _spawn_detached(cmd, cwd=None):
 
     Windows 上只用 DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP，
     **不要**混用 CREATE_NO_WINDOW（两者语义冲突会导致进程起不来）。
+
+    ⚠ 必须清洗 _MEIPASS2/_PYI_* 环境变量：onefile 父进程会把它们传给
+    子进程，PyInstaller bootloader 见到就跳过解压、直接复用父进程的
+    _MEI 目录 —— 父进程一退出就删掉该目录，子进程的 Python 运行时
+    凭空消失，静默死亡（后台清理"从未执行"的根因，竞态所以偶发）。
     """
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("_MEI") and not k.startswith("_PYI")}
     flags = 0
     flags |= getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
     flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
     return subprocess.Popen(
-        cmd, cwd=cwd, close_fds=True,
+        cmd, cwd=cwd, close_fds=True, env=env,
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL, creationflags=flags)
 
@@ -208,7 +215,8 @@ def gc_mode(target, self_path):
 
     正在运行的 exe 无法删除自己，所以生成一个 .bat：
       - bat 由 cmd 执行，不受本进程文件占用影响
-      - bat 循环重试 rd，直到目录删干净，最后 del 掉自己
+      - bat 循环重试 rd（90 次 ≈ 90s，Defender 扫新包会锁文件一阵），
+        直到目录删干净，最后 del 掉自己
     """
     time.sleep(1.5)
 
@@ -223,7 +231,7 @@ def gc_mode(target, self_path):
         "@echo off\r\n"
         "cd /d \"%SystemRoot%\"\r\n"
         "set TARGET=" + target + "\r\n"
-        "for /L %%i in (1,1,40) do (\r\n"
+        "for /L %%i in (1,1,90) do (\r\n"
         "  if not exist \"%TARGET%\" goto done\r\n"
         "  rd /s /q \"%TARGET%\" 2>nul\r\n"
         "  ping 127.0.0.1 -n 2 >nul\r\n"

@@ -23,7 +23,7 @@ def check(name, cond, extra=""):
     print(("  [OK] " if cond else "  [!!] ") + name + (f"  {extra}" if extra else ""))
 
 
-def wait_gone(path, tries=40):
+def wait_gone(path, tries=180):   # 与卸载器 bat 的 90 次重试对齐（Defender 锁新包）
     for _ in range(tries):
         if not os.path.isdir(path):
             return True
