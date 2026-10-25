@@ -674,6 +674,87 @@ def test_surrender_explode():
           b3._hq_fall_tip["text"])
 
 
+def test_intro():
+    """D5 开场动画（客户需求：进对局要有两方对战的动画）"""
+    section("D5 开场动画")
+    g, _ = make_game()
+    app, b = new_board(g)
+    b.sync()
+    check("初始无开场状态", b.intro is None)
+    b.start_intro()
+    check("start_intro 建立状态", b.intro is not None)
+    check("记录双方国名", b.intro["my"] and b.intro["foe"])
+    b.step(50)
+    surf = pygame.Surface((b.W, b.H)); b.draw(surf)                       # 绘制不崩（滑入阶段）
+    check("滑入阶段可绘制", b.intro is not None)
+    b.step(board.PygameBoard.INTRO_CLASH_MS)
+    check("对撞时刻触发特效", b.intro is not None
+          and b.intro["clashed"]
+          and len(b.rings) >= 2 and len(b.particles) > 0)
+    surf = pygame.Surface((b.W, b.H)); b.draw(surf)                       # 对撞帧绘制不崩
+    b.step(board.PygameBoard.INTRO_MS)  # 推过总时长
+    check("播完自动结束", b.intro is None)
+
+    # 点击跳过
+    b2 = board.PygameBoard(app, game=g, on_intent=lambda a: None)
+    b2.sync()
+    b2.start_intro()
+    b2.handle_event(Ev(pygame.MOUSEBUTTONDOWN, (640, 400)))
+    check("点击跳过开场", b2.intro is None)
+
+    # 动画关闭时不建立状态
+    app3, b3 = new_board(g)
+    b3.sync()
+    app3.anim_enabled = False        # 动画开关在 app 上（生产环境同款）
+    b3.start_intro()
+    check("动画关闭时不开场", b3.intro is None)
+    app3.anim_enabled = True
+
+    # 无 game 时安全返回
+    b4 = board.PygameBoard(FakeApp(None), game=None, on_intent=lambda a: None)
+    b4.start_intro()
+    check("无对局时 start_intro 安全", b4.intro is None)
+
+
+def test_deploy_fly():
+    """D6 部署飞行动画（客户报「部署的时候要有动画」）：
+    令牌必须是卡牌造型且落地有冲击环+绿闪，不再是 9px 小圆点"""
+    section("D6 部署飞行动画")
+    g, _ = make_game()
+    app, b = new_board(g)
+    me = g.players[0]
+    u = spawn_unit(g, me, pos="前线")
+    b.sync()
+    check("我方有单位可测", len(me.board) > 0)
+    ref = b.unit_refs.get(id(u))
+    check("单位 Ref 存在", ref is not None)
+    # 模拟部署入场：anim_entry 挂飞行令牌
+    b.anim_entry(u)
+    check("入场后挂上飞行令牌", ref.fly is not None)
+    n_rings = len(b.rings)
+    surf = pygame.Surface((b.W, b.H)); b.draw(surf)                        # 飞行中绘制不崩（画卡牌令牌）
+    check("飞行中令牌仍在", ref.fly is not None)
+    b.step(1000)                        # 推过 480ms 飞行时长
+    surf = pygame.Surface((b.W, b.H)); b.draw(surf)                        # 落地帧：清令牌 + 冲击环 + 绿闪
+    check("落地清除飞行令牌", ref.fly is None)
+    check("落地生成冲击环", len(b.rings) > n_rings,
+          f"{n_rings} -> {len(b.rings)}")
+    check("落地绿闪", ref.flash_tint is not None)
+
+
+def test_fonts():
+    """D7 中文字体解析（客户机器 SysFont 全落空导致方块字）"""
+    section("D7 中文字体解析")
+    path = board._resolve_cjk_font()
+    check("本机能找到中文字体", path is not None, str(path))
+    f = board.font(14)
+    check("font() 可用", f is not None)
+    w = f.size("步兵班")[0]
+    check("可渲染中文且宽度>0", w > 0, f"w={w}")
+    # 二次调用走缓存路径
+    check("解析结果被缓存", board._CJK_FONT_PATH is not None)
+
+
 # ---------------------------------------------------------------- E 动画
 
 def test_animations():
@@ -999,6 +1080,7 @@ def main():
     print("=" * 60)
     for fn in (test_pure, test_layout_and_sync, test_drop_zones, test_input,
                test_pause_menu, test_end_screen, test_surrender_explode,
+               test_intro, test_deploy_fly, test_fonts,
                test_animations, test_draw,
                test_main_loop, test_app_hybrid_game, test_app_wiring):
         try:

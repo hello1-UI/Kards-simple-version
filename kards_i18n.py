@@ -286,6 +286,7 @@ LANGS = {
         "hq_fall_foe": "敌方总部被摧毁！",
         "hq_fall_me": "我方总部沦陷！",
         "hq_fall_both": "双方总部同时陷落！",
+        "intro_skip": "点击任意处跳过",
         # 投降变体：总部没被打掉，是主动认输，文案要区分开
         "hq_fall_foe_surrender": "敌方举旗投降！",
         "hq_fall_me_surrender": "我方举旗投降！",
@@ -553,6 +554,7 @@ LANGS = {
         "hq_fall_foe": "Enemy HQ destroyed!",
         "hq_fall_me": "Our HQ has fallen!",
         "hq_fall_both": "Both HQs fell at once!",
+        "intro_skip": "Click anywhere to skip",
         "hq_fall_foe_surrender": "The enemy has surrendered!",
         "hq_fall_me_surrender": "We have surrendered!",
         "account_btn": "👤 {name} | {w}W {l}L {d}D",
@@ -814,6 +816,7 @@ LANGS = {
         "hq_fall_foe": "敵の本部を撃破！",
         "hq_fall_me": "我が本部が陥落！",
         "hq_fall_both": "双方の本部が同時に陥落！",
+        "intro_skip": "クリックでスキップ",
         "hq_fall_foe_surrender": "敵が降伏しました！",
         "hq_fall_me_surrender": "我々は降伏しました！",
         "account_btn": "👤 {name}｜{w}勝 {l}負 {d}分",

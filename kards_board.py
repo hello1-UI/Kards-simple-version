@@ -134,15 +134,81 @@ def t(key, **kw):
 
 _font_cache = {}
 
+# SysFont 用的归一化候选名（按优先级）
+_FONT_NAME_CANDIDATES = [
+    "microsoftyahei", "microsoftyaheiui", "msyh", "simhei", "dengxian",
+    "simsun", "nsimsun", "notosanscjksc", "notosanscjk", "sourcehansanssc",
+    "sourcehansans", "wenquanyimicrohei", "wenquanyizenhei", "pingfangsc",
+    "heiti", "arialunicodems",
+]
+# Windows 字体目录里的文件名候选（SysFont 枚举失败时按文件直接加载）
+_FONT_FILE_CANDIDATES = [
+    "msyh.ttc", "msyh.ttf", "msyhbd.ttc", "msyhl.ttc",
+    "simhei.ttf", "simsun.ttc", "simsun.ttf", "nsimsun.ttc",
+    "deng.ttf", "dengb.ttf", "dengl.ttf",
+    "msjh.ttc", "msjhl.ttc",
+    "notosanscjk-regular.ttc", "notosanscjksc-regular.otf",
+    "notosanssc-regular.otf", "notosanssc-regular.ttf",
+    "sourcehansanssc-regular.otf", "wqy-microhei.ttc",
+    "arialuni.ttf",
+]
+# 随游戏捆绑的开源中文字体（SIL OFL，见 assets/fonts/）
+_BUNDLED_FONTS = ["NotoSansCJKsc-Regular.otf", "NotoSansSC-Regular.otf"]
+
+
+def _resolve_cjk_font():
+    """找出机器上可用的中文字体，返回 Font() 可用的路径；找不到返回 None。
+
+    客户机器上 SysFont 的常规候选可能全军覆没（精简版 Windows / 缺中文字体），
+    所以三级兜底：SysFont 名单 → 按文件名扫字体目录 → 游戏自带字体。
+    结果缓存（首帧调用后不再找）。
+    """
+    global _CJK_FONT_PATH
+    if _CJK_FONT_PATH is not None:
+        return _CJK_FONT_PATH if _CJK_FONT_PATH != "" else None
+    import os
+    found = ""
+    for name in _FONT_NAME_CANDIDATES:
+        p = pygame.font.match_font(name)
+        if p:
+            found = p
+            break
+    if not found:
+        windir = os.environ.get("WINDIR", r"C:\Windows")
+        fdir = os.path.join(windir, "Fonts")
+        if os.path.isdir(fdir):
+            names = {fn.lower() for fn in os.listdir(fdir)}
+            for fn in _FONT_FILE_CANDIDATES:
+                if fn in names:
+                    found = os.path.join(fdir, fn)
+                    break
+    if not found:
+        here = os.path.dirname(os.path.abspath(__file__))
+        for fn in _BUNDLED_FONTS:
+            p = os.path.join(here, "assets", "fonts", fn)
+            if os.path.exists(p):
+                found = p
+                break
+    _CJK_FONT_PATH = found          # 找到=路径；没找到=""（下次不再找）
+    return found or None
+
+
+_CJK_FONT_PATH = None             # None=未探测 ""=探测过但没有
+
 
 def font(size, bold=False):
-    """带中文回退的字体（雅黑 → 黑宝 → 默认）。缓存。"""
+    """带中文回退的字体（探测到的中文字体 → 捆绑字体 → 默认）。缓存。"""
     key = (size, bold)
     if key not in _font_cache:
+        path = _resolve_cjk_font()
         try:
-            f = pygame.font.SysFont(
-                "microsoftyahei,msyh,simhei,dengxian,notosanscjk,arial",
-                size, bold=bold)
+            if path:
+                f = pygame.font.Font(path, size)
+                f.set_bold(bold)
+            else:
+                f = pygame.font.SysFont(
+                    "microsoftyahei,msyh,simhei,dengxian,notosanscjk,arial",
+                    size, bold=bold)
         except Exception:
             f = pygame.font.Font(None, size)
         _font_cache[key] = f
@@ -346,6 +412,7 @@ class PygameBoard:
         self.end_state = None     # dict(won, on_done, nation, ready_at, phase, phase_at)
         self._end_clicked = False
         self._hq_fall_tip = None  # dict(text, until) —— 结算爆炸阶段的提示条
+        self.intro = None         # 开场动画 dict(t0, my, foe, clashed)
 
         # 绘制
         self.screen = None
@@ -471,6 +538,111 @@ class PygameBoard:
             if on_done:
                 on_done()
         self._tween(340, fn, on_done=fin, tag="attack")
+
+    # ---------------- 开场动画（两军对冲） ----------------
+
+    INTRO_MS = 2600            # 总时长
+    INTRO_CLASH_MS = 1200      # 两军相撞时刻
+
+    def start_intro(self):
+        """对局开始的开场动画：两军从左右推进 → 中央对撞 → 国名 VS。
+        点击/按键可跳过。必须在 game 已就绪后调用（需要双方国名）。"""
+        g = self._game_state()
+        if g is None or not self._anim_on():
+            return
+        me, foe = g.players[0], g.players[1]
+        self.intro = {"t0": self.t_now, "my": me.nation, "foe": foe.nation,
+                      "clashed": False}
+
+    def _draw_intro(self, surf):
+        """两军对冲开场动画（客户需求：进对局要有两方对战的动画）"""
+        st = self.intro
+        el = self.t_now - st["t0"]
+        W, H = self.W, self.H
+        surf.fill(C(BG))
+
+        def ease(p):
+            p = max(0.0, min(1.0, p))
+            return p * p * (3 - 2 * p)
+
+        my_c = NATION_COLOR.get(st["my"], "#667")
+        foe_c = NATION_COLOR.get(st["foe"], "#766")
+        cy = int(H * 0.46)
+
+        # 左右两块阵地色带滑入（0~600ms），最终贴边、宽 210，国名写在上面
+        band_w = 210
+        p_in = ease(el / 600)
+        lb = pygame.Rect(int(-band_w * (1 - p_in)), cy - 130, band_w, 260)
+        rb = pygame.Rect(int(W - band_w * p_in), cy - 130, band_w, 260)
+        rr(surf, lb, C(my_c), radius=10)
+        rr(surf, rb, C(foe_c), radius=10)
+        f = font(36, True)
+        my_txt = plain(st["my"])
+        foe_txt = plain(st["foe"])
+        surf.blit(f.render(my_txt, True, C(TEXT)),
+                  (lb.centerx - f.size(my_txt)[0] // 2, cy - 24))
+        surf.blit(f.render(foe_txt, True, C(TEXT)),
+                  (rb.centerx - f.size(foe_txt)[0] // 2, cy - 24))
+
+        # 行军部队：每方 3 个小令牌从中线两侧向中央推进，对撞瞬间消失
+        if el < self.INTRO_CLASH_MS:
+            p_march = ease((el - 500) / (self.INTRO_CLASH_MS - 500))
+            start_x = band_w + 40
+            tok_w, tok_h = 36, 46
+            for i in range(3):
+                off = (i - 1) * 54
+                ty = cy - tok_h // 2 + off
+                tx = int(start_x + (W / 2 - start_x) * p_march)
+                rr(surf, pygame.Rect(tx - tok_w, ty, tok_w, tok_h),
+                   C("#31394a"), radius=6, border_color=C(my_c))
+                rr(surf, pygame.Rect(W - tx, ty, tok_w, tok_h),
+                   C("#3a3131"), radius=6, border_color=C(foe_c))
+
+        # 对撞白闪（1200~1450ms 快速衰减，只提亮不洗白）
+        if st.get("clashed") and el < self.INTRO_CLASH_MS + 250:
+            a = max(0, 120 - int((el - self.INTRO_CLASH_MS) * 0.48))
+            if a > 0:
+                flash = pygame.Surface((W, H), pygame.SRCALPHA)
+                flash.fill((255, 244, 214, a))
+                surf.blit(flash, (0, 0))
+
+        # VS 金字（对撞后弹出）
+        p_vs = ease((el - self.INTRO_CLASH_MS) / 320)
+        if p_vs > 0:
+            vs = "VS"
+            fv = font(int(30 + 42 * p_vs), True)
+            vx = W // 2 - fv.size(vs)[0] // 2
+            vy = cy - fv.size(vs)[1] // 2 - int(8 * (1 - p_vs))
+            surf.blit(fv.render(vs, True, C(GOLD)), (vx, vy))
+
+        # 冲击环 / 火花粒子（step 里生成的，画在这里）
+        for r in self.rings:
+            q = (self.t_now - r["t0"]) / r["dur"]
+            rad = int(10 + q * 190)
+            pygame.draw.circle(surf, C(r["color"]),
+                               (int(r["x"]), int(r["y"])), rad, 3)
+        for pt in self.particles:
+            q = (self.t_now - pt["t0"]) / pt["dur"]
+            if q > 1.0:
+                continue
+            px = pt["x"] + pt["vx"] * q * 0.9
+            py = pt["y"] + pt["vy"] * q * 0.9 + 260 * q * q
+            s = pt["size"]
+            pygame.draw.rect(surf, C(pt["color"]),
+                             (int(px), int(py), s, s))
+
+        # 跳过提示
+        hint = t("intro_skip")
+        fh = font(14)
+        surf.blit(fh.render(hint, True, C(DIM)),
+                  (W // 2 - fh.size(hint)[0] // 2, H - 46))
+
+        # 收尾渐隐（2300~2600ms）盖一层背景色，衔接正式棋盘
+        p_out = (el - (self.INTRO_MS - 300)) / 300
+        if p_out > 0:
+            fade = pygame.Surface((W, H), pygame.SRCALPHA)
+            fade.fill((13, 16, 23, int(255 * min(1.0, p_out))))
+            surf.blit(fade, (0, 0))
 
     def show_end_animation(self, won, on_done=None, nation=None):
         """全屏结算：**先炸总部，再出胜负大字**。点击任意处 → on_done
@@ -619,6 +791,30 @@ class PygameBoard:
         # 不依赖 _draw_end 被调用（否则 headless 测试推不动阶段）。
         if self.end_state is not None:
             self._end_phase()
+        # 开场动画推进：对撞特效在 step 里触发（单测/headless 也能推到）
+        if self.intro is not None:
+            el = self.t_now - self.intro["t0"]
+            if not self.intro["clashed"] and el >= self.INTRO_CLASH_MS:
+                self.intro["clashed"] = True
+                cx, cy = self.W // 2, int(self.H * 0.46)
+                self.rings.append({"x": cx, "y": cy, "t0": self.t_now,
+                                   "dur": 620, "color": "#ff9c54"})
+                self.rings.append({"x": cx, "y": cy, "t0": self.t_now,
+                                   "dur": 950, "color": GOLD})
+                rng = random.Random(hash(self.intro["foe"]) & 0xFFFF)
+                for _ in range(26):
+                    ang = rng.uniform(0, math.tau)
+                    spd = rng.uniform(120, 380)
+                    self.particles.append({
+                        "x": cx, "y": cy,
+                        "vx": math.cos(ang) * spd, "vy": math.sin(ang) * spd,
+                        "t0": self.t_now, "dur": rng.randint(400, 900),
+                        "color": rng.choice([GOLD, "#fff1b8", "#e0e6f0",
+                                             "#ff9c54"]),
+                        "size": rng.randint(2, 5)})
+                self.shake(times=8, amp=10, interval=36)
+            if el >= self.INTRO_MS:
+                self.intro = None
 
     # ================= 布局与同步 =================
 
@@ -850,6 +1046,11 @@ class PygameBoard:
                     self._end_clicked = True
                     self.end_state["on_done"]()
             return
+        if self.intro is not None:
+            # 开场动画：点击/按键跳过
+            if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN):
+                self.intro = None
+            return
         if ev.type == pygame.KEYDOWN:
             if ev.key == pygame.K_ESCAPE:
                 self.pause = not self.pause
@@ -1073,6 +1274,10 @@ class PygameBoard:
         if g is None:
             return
         self._ensure_sync()
+        if self.intro is not None:
+            # 开场动画盖在棋盘前面（step 里推进，点击可跳过）
+            self._draw_intro(surf)
+            return
         me, foe = g.players[0], g.players[1]
         human_turn = g.current is me
         L = self.layout()
@@ -1291,7 +1496,11 @@ class PygameBoard:
                                  (cx - 7, cy + 2)])
 
     def _draw_fly_token(self, surf, ref):
-        """入场/行军飞行令牌（落地前只画令牌不画真身）"""
+        """入场/行军飞行令牌（落地前只画令牌不画真身）。
+
+        以前只画一个 9px 金点，客户反馈「部署的时候要有动画」——
+        现在画一张带名字/攻防的小卡牌走弧线，落地冲击环 + 绿色闪光。
+        """
         src, t0, dur = ref.fly
         p = min(1.0, (self.t_now - t0) / max(1, dur))
         sx, sy = src
@@ -1300,10 +1509,48 @@ class PygameBoard:
         lift = math.sin(p * math.pi) * 60
         x = sx + (ex - sx) * p
         y = sy + (ey - sy) * p - lift
-        pygame.draw.circle(surf, C(GOLD), (int(x), int(y)), 9)
-        pygame.draw.circle(surf, C("#15171c"), (int(x), int(y)), 5)
+
+        u = ref.unit
+        w, h = 52, 66
+        card = pygame.Rect(0, 0, w, h)
+        card.center = (int(x), int(y))
+        # 运动拖尾（越快越长）
+        tail = 3
+        for i in range(tail, 0, -1):
+            q = max(0.0, p - i * 0.045)
+            tx = sx + (ex - sx) * q
+            ty = sy + (ey - sy) * q - math.sin(q * math.pi) * 60
+            tr = pygame.Rect(0, 0, int(w * (1 - i * 0.18)), int(h * (1 - i * 0.18)))
+            tr.center = (int(tx), int(ty))
+            rr(surf, tr, C("#3a4250"), radius=6)
+        rr(surf, card, C("#2b3038"), radius=7,
+           border_color=C(GOLD), width=2)
+        name = ""
+        atk = dfn = None
+        if u is not None:
+            name = u.name
+            atk, dfn = u.attack, u.defense
+        if name:
+            f = font(11, True)
+            # 名字超宽截断
+            shown = name
+            while f.size(shown)[0] > w - 8 and len(shown) > 1:
+                shown = shown[:-1]
+            surf.blit(f.render(plain(shown), True, C(TEXT)),
+                      (card.x + 4, card.y + 4))
+        if atk is not None:
+            fa = font(13, True)
+            surf.blit(fa.render(str(atk), True, C(GOLD)), (card.x + 5, card.bottom - 20))
+            fd = font(13, True)
+            s = str(dfn)
+            surf.blit(fd.render(s, True, C(GREEN)),
+                      (card.right - 5 - fd.size(s)[0], card.bottom - 20))
         if p >= 1.0:
             ref.fly = None
+            # 落地冲击环 + 绿闪，让"部署完成"一眼可见
+            self.rings.append({"x": ex, "y": ey, "t0": self.t_now,
+                               "dur": 380, "color": GREEN})
+            ref.flash_tint = (GREEN, self.t_now + 320)
 
     def _draw_hand(self, surf, L, g, me, human_turn):
         rr(surf, L["hand"], C(HAND_AREA), radius=8)

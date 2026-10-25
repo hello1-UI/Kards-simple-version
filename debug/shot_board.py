@@ -130,7 +130,43 @@ def main():
     b3.draw(surf)
     pygame.image.save(surf, os.path.join(OUT, "08_投降爆炸_我方总部.png"))
     print("  写出 08_投降爆炸_我方总部.png")
+
+    # 开场动画（两军对冲）：滑入 / 对撞 / VS 三帧
+    b4 = B.PygameBoard(app, game=g, on_intent=app.pyboard_intent)
+    b4.anim_enabled = True
+    b4.sync()
+    b4.start_intro()
+    b4.step(350)
+    b4.draw(surf)
+    pygame.image.save(surf, os.path.join(OUT, "09_开场_滑入.png"))
+    print("  写出 09_开场_滑入.png")
+    b4.step(board_intro_to_clash(b4))
+    b4.draw(surf)
+    pygame.image.save(surf, os.path.join(OUT, "10_开场_对撞.png"))
+    print("  写出 10_开场_对撞.png")
+    b4.step(500)
+    b4.draw(surf)
+    pygame.image.save(surf, os.path.join(OUT, "11_开场_VS.png"))
+    print("  写出 11_开场_VS.png")
+    b4.intro = None
+
+    # 部署飞行令牌（卡牌造型 + 拖尾）半途帧
+    b5 = B.PygameBoard(app, game=g, on_intent=app.pyboard_intent)
+    b5.anim_enabled = True
+    b5.sync()
+    u5 = me.board[0]
+    b5.anim_entry(u5)
+    b5.step(240)                 # 飞到一半
+    b5.draw(surf)
+    pygame.image.save(surf, os.path.join(OUT, "12_部署飞行中.png"))
+    print("  写出 12_部署飞行中.png")
     print("输出目录:", OUT)
+
+
+def board_intro_to_clash(b):
+    """距离对撞时刻还差多少毫秒（截图工具用）"""
+    el = b.t_now - b.intro["t0"]
+    return max(0, b.INTRO_CLASH_MS - el)
 
 
 if __name__ == "__main__":

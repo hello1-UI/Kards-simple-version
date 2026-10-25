@@ -64,10 +64,65 @@ APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 # 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
 VERSION = (1, 3, 0, 4)
 
-FONT = ("Microsoft YaHei UI", 12)
-FONT_S = ("Microsoft YaHei UI", 10)
-FONT_B = ("Microsoft YaHei UI", 13, "bold")
-FONT_XL = ("Microsoft YaHei UI", 32, "bold")
+# 字族：客户机器可能没有微软雅黑（精简版/英文 Windows），tkinter 显式指定
+# 字族时不会跨族回退，中文会渲染成方块。App 启动时 ensure_tk_cjk_font()
+# 会检测并按需切到游戏自带的 Noto Sans CJK（assets/fonts/）。
+FONT_FAMILY = "Microsoft YaHei UI"
+FONT = (FONT_FAMILY, 12)
+FONT_S = (FONT_FAMILY, 10)
+FONT_B = (FONT_FAMILY, 13, "bold")
+FONT_XL = (FONT_FAMILY, 32, "bold")
+
+# 系统可能存在的 CJK 字族（覆盖简繁日韩常见字体）
+_TK_CJK_FAMILIES = [
+    "microsoft yahei ui", "microsoft yahei", "微软雅黑", "msyh",
+    "simhei", "黑体", "simsun", "宋体", "nsimsun", "新宋体",
+    "dengxian", "等线", "kaiti", "楷体", "fangsong", "仿宋",
+    "noto sans cjk sc", "noto sans sc", "source han sans sc",
+    "wenquanyi micro hei", "pingfang sc", "heiti sc",
+    "microsoft jhenghei", "pmingliu", "mingliu",
+    "yu gothic ui", "malgun gothic",
+]
+_BUNDLED_FONT_FILES = ["NotoSansCJKsc-Regular.otf", "NotoSansSC-Regular.otf"]
+_BUNDLED_FONT_FAMILY = "Noto Sans CJK SC"
+
+
+def ensure_tk_cjk_font(root):
+    """系统缺中文字体时的 tkinter 兜底（客户机器实测出现过全屏方块）。
+
+    tkinter 显式指定字族时不会跨族回退 —— 英文/精简版 Windows 没有
+    Microsoft YaHei UI，主菜单、组卡、对局里所有中文都变成 □。
+    检测：系统字族里找到任一 CJK 字族就直接用；一个都没有则把游戏
+    自带的 Noto Sans CJK 私有加载进进程（AddFontResourceExW FR_PRIVATE，
+    不写系统注册表），再全局切换字族。必须在构建任何 UI 之前调用。
+    """
+    import tkinter.font as tkfont
+    global FONT_FAMILY, FONT, FONT_S, FONT_B, FONT_XL
+    try:
+        fams = {f.lower() for f in tkfont.families(root)}
+    except Exception:
+        return
+    for fam in _TK_CJK_FAMILIES:
+        if fam in fams:
+            return                      # 系统有中文字体，保持默认
+    import os
+    import ctypes
+    here = os.path.dirname(os.path.abspath(__file__))
+    for fn in _BUNDLED_FONT_FILES:
+        p = os.path.join(here, "assets", "fonts", fn)
+        if not os.path.exists(p):
+            continue
+        try:
+            FR_PRIVATE = 0x10           # 仅本进程可见，不污染系统
+            if ctypes.windll.gdi32.AddFontResourceExW(p, FR_PRIVATE, 0):
+                FONT_FAMILY = _BUNDLED_FONT_FAMILY
+                FONT = (FONT_FAMILY, 12)
+                FONT_S = (FONT_FAMILY, 10)
+                FONT_B = (FONT_FAMILY, 13, "bold")
+                FONT_XL = (FONT_FAMILY, 32, "bold")
+        except Exception:
+            pass
+        break
 
 
 def kw_text(keywords):
@@ -200,9 +255,9 @@ class CardWidget(tk.Frame):
         mid.pack(expand=True, fill="both")
         if atk is not None:
             tk.Label(mid, text=str(atk), bg=bg, fg=GOLD,
-                     font=("Microsoft YaHei UI", 16, "bold")).pack(side="left", expand=True)
+                     font=(FONT_FAMILY, 16, "bold")).pack(side="left", expand=True)
             tk.Label(mid, text=str(defense), bg=bg, fg=GREEN,
-                     font=("Microsoft YaHei UI", 16, "bold")).pack(side="right", expand=True)
+                     font=(FONT_FAMILY, 16, "bold")).pack(side="right", expand=True)
             if sub:
                 tk.Label(mid, text=sub, bg=bg, fg=DIM, font=FONT_S,
                          wraplength=inner_w, justify="center").pack(side="bottom")
@@ -216,7 +271,7 @@ class CardWidget(tk.Frame):
                      font=FONT_B).pack(side="bottom")
         if rarity:
             tk.Label(self, text=rarity, bg=core.RARITY_COLORS[rarity], fg="#15171c",
-                     font=("Microsoft YaHei UI", 8, "bold"), padx=3).place(
+                     font=(FONT_FAMILY, 8, "bold"), padx=3).place(
                 relx=1.0, x=-3, y=3, anchor="ne")
         if color:
             tk.Frame(self, bg=color, height=4).pack(side="bottom", fill="x")
@@ -234,6 +289,7 @@ class CardWidget(tk.Frame):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
+        ensure_tk_cjk_font(self)   # 缺中文字体的机器：切到自带字体（必须在建 UI 前）
         self.title(APP_TITLE)
         self.configure(bg=BG)
         self.geometry("1200x800")
@@ -1659,14 +1715,14 @@ class App(tk.Tk):
         left_t = tk.Frame(top, bg=BG)
         left_t.pack(side="left")
         tk.Label(left_t, text=f"组建 {nation} 卡组", bg=BG, fg=TEXT,
-                 font=("Microsoft YaHei UI", 20, "bold")).pack(anchor="w")
+                 font=(FONT_FAMILY, 20, "bold")).pack(anchor="w")
         tk.Label(left_t, text=f"总部卡：{hq.name}（{hq.hp} HP）｜{hq.perk_desc}｜"
                               f"可用：{nation} + 盟国（意大利/法国/芬兰/波兰/澳新军团）",
                  bg=BG, fg=DIM, font=FONT_S).pack(anchor="w")
         right_t = tk.Frame(top, bg=BG)
         right_t.pack(side="right")
         self.deck_count_lbl = tk.Label(right_t, text="", bg=BG, fg=GOLD,
-                                       font=("Microsoft YaHei UI", 16, "bold"))
+                                       font=(FONT_FAMILY, 16, "bold"))
         self.deck_count_lbl.pack(side="left", padx=10)
         self.ally_count_lbl = tk.Label(right_t, text="", bg=BG, fg=DIM, font=FONT_S)
         self.ally_count_lbl.pack(side="left", padx=10)
@@ -2311,7 +2367,7 @@ class App(tk.Tk):
         wrap = tk.Frame(parent, bg=BG)
         wrap.pack(fill="x")
         tk.Label(wrap, text=caption, bg=BG, fg=DIM,
-                 font=("Microsoft YaHei UI", 9), width=11,
+                 font=(FONT_FAMILY, 9), width=11,
                  anchor="w").pack(side="left", fill="y")
         row = tk.Frame(wrap, bg="#1f232b", highlightthickness=1,
                        highlightbackground="#2a2f3a")
@@ -2981,6 +3037,7 @@ class App(tk.Tk):
         联机轮询）照常触发。结束后按玩家选择决定是否退出程序。"""
         b = self._pyboard
         try:
+            b.start_intro()           # 开场动画：两军对冲（点击可跳过）
             b.run(pump=self.update)
         finally:
             self._deactivate_pyboard()
@@ -3093,7 +3150,7 @@ class App(tk.Tk):
         except tk.TclError:
             return
         lbl = tk.Label(self, text=text, bg=BG, fg=color,
-                       font=("Microsoft YaHei UI", 16, "bold"))
+                       font=(FONT_FAMILY, 16, "bold"))
         lbl.place(x=max(0, x - 40), y=max(0, y - 20), width=80, height=26)
         steps = 10
 
@@ -3127,7 +3184,7 @@ class App(tk.Tk):
         if not self.anim_enabled:
             return
         lbl = tk.Label(self, text=text, bg="#10131a", fg=color,
-                       font=("Microsoft YaHei UI", 28, "bold"),
+                       font=(FONT_FAMILY, 28, "bold"),
                        padx=48, pady=18, bd=2, relief="solid")
         lbl.place(relx=0.5, rely=0.45, anchor="center")
         shades = [color, "#8a93a5", "#4a5260"]
@@ -3161,7 +3218,7 @@ class App(tk.Tk):
 
     def _spawn_token(self, text, color):
         lbl = tk.Label(self, text=text, bg=color, fg="#f2f4f8",
-                       font=("Microsoft YaHei UI", 10, "bold"), bd=0, padx=8, pady=3)
+                       font=(FONT_FAMILY, 10, "bold"), bd=0, padx=8, pady=3)
         lbl.place(x=-300, y=-300)
         lbl.lift()
         self._anim_tokens.add(lbl)
@@ -3396,7 +3453,7 @@ class App(tk.Tk):
                    cx, cy + 66, cx - 64, cy + 10]
             cv.create_polygon(pts, fill=main, outline=hi, width=4)
             cv.create_text(cx, cy, text=nation[0], fill=lo,
-                           font=("Microsoft YaHei UI", 46, "bold"))
+                           font=(FONT_FAMILY, 46, "bold"))
 
         if not won:
             # 裂纹贯穿 + 徽章缓缓倾塌
@@ -3783,7 +3840,7 @@ class App(tk.Tk):
                  "hq_fall_me": i18n.t("hq_fall_me"),
                  "hq_fall_both": i18n.t("hq_fall_both")}[targets[0][1]]
         tip = tk.Label(self, text=label, bg="#2a1a12",
-                       fg="#ffb347", font=("Microsoft YaHei UI", 26, "bold"),
+                       fg="#ffb347", font=(FONT_FAMILY, 26, "bold"),
                        padx=36, pady=14, bd=2, relief="solid")
         tip.place(relx=0.5, rely=0.16, anchor="center")
         tip.lift()
@@ -3815,7 +3872,7 @@ class App(tk.Tk):
         else:
             txt, color = (i18n.t("win_big"), GOLD) if won else (i18n.t("lose_big"), RED)
         lbl = tk.Label(overlay, text=txt, bg="#0d1017", fg=color,
-                       font=("Microsoft YaHei UI", 12, "bold"))
+                       font=(FONT_FAMILY, 12, "bold"))
         lbl.place(relx=0.5, rely=0.42, anchor="center")
         sub = tk.Label(overlay,
                        text=i18n.t("win_sub") if won is True
