@@ -2390,6 +2390,17 @@ class App(tk.Tk):
         g = self.game
         if g is None:
             return
+        # ⚠ after 队列竞态守卫：窗口销毁（对局收尾/退出）后仍可能有排定的
+        # refresh 回调触发，此时 foe_info 等已销毁，configure 会抛
+        # TclError: invalid command name —— 偶发 --smoke 崩溃 + 进程挂死
+        # （挂死又连锁导致卸载残留）的根因。控件已亡则直接放弃本次刷新。
+        try:
+            if not (self.foe_info.winfo_exists()
+                    and self.my_info.winfo_exists()
+                    and self.hand_frame.winfo_exists()):
+                return
+        except tk.TclError:
+            return
         # 刷新会重建所有卡片控件，先清掉拖拽残留（高亮/幽灵卡），
         # 否则旧控件的引用会留在 _hl_saved 里，且幽灵卡可能浮在死控件上
         self._clear_highlights()
