@@ -319,6 +319,8 @@ class App(tk.Tk):
         self._lobby_active = False
         # 服务器 / 大厅
         self.mp_server_addr = net.DEFAULT_SERVER   # 记住上次填的服务器地址
+        self._pub_addr = ""                        # 公网可连地址（打通才有）
+        self._pub_lan = ""                         # 局域网地址（复制用兜底）
         self.mp_user = None        # 服务器账号名（未登录为 None）
         self.mp_matching = False   # 快速匹配等待中
         self.mp_room_code = None   # 自己开的邀请码房间
@@ -1123,6 +1125,17 @@ class App(tk.Tk):
         self.srv_status = tk.Label(box, text="", bg=PANEL, fg=GOLD, font=FONT_S,
                                    anchor="w", justify="left", wraplength=290)
         self.srv_status.pack(anchor="w", padx=14, pady=(2, 4))
+        # 公网地址行：「建立服务器」打通 UPnP 后把外网可连的地址放这儿。
+        # 默认是空的（连别人服务器时不该出现）。
+        self.srv_public_var = tk.StringVar(value="")
+        self.srv_public_lbl = tk.Label(box, textvariable=self.srv_public_var, bg=PANEL,
+                                       fg=GREEN, font=FONT_S, anchor="w",
+                                       justify="left", wraplength=290)
+        self.srv_public_lbl.pack(anchor="w", padx=14)
+        self.srv_copy_btn = tk.Button(box, text=i18n.t("btn_copy_addr"), bg="#2b3a4a",
+                                      fg=TEXT, font=FONT_S, bd=0, padx=10, pady=3,
+                                      cursor="hand2", command=self._lobby_copy_addr)
+        self._pub_addr = ""          # 当前可复制的地址（公网优先，其次局域网）
         # 游客（未登录）时给一个显眼的登录入口：联机按钮此时是灰的，
         # 光靠状态栏一行小字用户找不到出路（产品规则：游客不能联机）
         self.srv_login_btn = tk.Button(box, text=i18n.t("btn_login_or_reg"),
@@ -1314,6 +1327,8 @@ class App(tk.Tk):
             self.srv_addr_var.set(addr)
         # 局域网的其他人要连过来，得知道这个地址；顺带提醒防火墙
         self._lobby_log(i18n.t("host_firewall_hint"))
+        # 跨局域网：后台让路由器开公网端口（不阻塞 UI），结果用主线程轮询取
+        self._lobby_public_start(int(port) if port.isdigit() else 6000, addr)
         # ⚠ 已经连在同一台服务器上（本机开服时通常就是这台）→ **保持现有连接**。
         # 断链重连会让免密令牌失去意义（地址写法从 127.0.0.1:6000 变成
         # 192.168.x.x:6000），玩家会被打回登录框 —— 也就是用户报的
@@ -1328,6 +1343,99 @@ class App(tk.Tk):
         # 服务器进程刚起来时端口可能还没 listen 完，等一拍再连
         self.after(700, self._lobby_connect)
 
+    # ---- 跨局域网：公网地址 ----
+
+    def _lobby_public_start(self, port, lan_addr):
+        """开服后开始申请公网端口（后台线程），并起一个主线程轮询。"""
+        self._pub_addr = ""
+        self._pub_lan = lan_addr
+        try:
+            if not (self.srv_public_lbl.winfo_exists()):
+                return
+            self.srv_public_var.set(i18n.t("pub_working"))
+            self.srv_public_lbl.configure(fg=DIM)
+            self.srv_copy_btn.pack_forget()
+        except (AttributeError, tk.TclError):
+            return
+        kards_host.map_public_async(port)
+        self._schedule("_t_pub", 200, self._pub_poll)
+
+    def _pub_poll(self):
+        """主线程轮询映射结果（绝不能在后台线程里碰 tk 控件）。"""
+        st = kards_host.public_status()
+        if st.get("state") == "working":
+            self._schedule("_t_pub", 250, self._pub_poll)
+            return
+        self._lobby_public_render(st)
+
+    def _lobby_public_render(self, st):
+        try:
+            if not self.srv_public_lbl.winfo_exists():
+                return
+        except (AttributeError, tk.TclError):
+            return
+        lan = getattr(self, "_pub_lan", "") or kards_host.local_addr()
+        port = st.get("port") or 6000
+        local_ip = st.get("local_ip") or lan.split(":")[0]
+        lines = [i18n.t("pub_lan", addr=lan)]
+        fg = GREEN
+
+        if st.get("ok"):
+            # 地址要从**传进来的这份状态**拼，别再回头读 kards_host 的全局量
+            # —— 两者一旦不同步（刚完成映射、下一轮还没刷新），就会显示一个空地址。
+            pub = f"{st.get('external_ip')}:{port}"
+            key = "pub_direct" if st.get("direct") else "pub_ok"
+            lines.insert(0, i18n.t(key, addr=pub))
+            self._pub_addr = pub
+        elif st.get("cg_nat"):
+            lines.append(i18n.t("pub_cgnat", ip=st.get("external_ip") or "?",
+                                port=port))
+            fg = GOLD
+            self._pub_addr = lan
+        elif st.get("double_nat"):
+            lines.append(i18n.t("pub_double_nat", ip=st.get("external_ip") or "?",
+                                port=port, local=local_ip))
+            fg = GOLD
+            self._pub_addr = lan
+        else:
+            err = st.get("error") or ""
+            if err == "no_gateway":
+                lines.append(i18n.t("pub_fail_nogw", port=port, ip=local_ip))
+            else:
+                lines.append(i18n.t("pub_fail", err=err or "?", port=port,
+                                    ip=local_ip))
+            fg = GOLD
+            self._pub_addr = lan
+
+        try:
+            self.srv_public_var.set("\n".join(lines))
+            self.srv_public_lbl.configure(fg=fg)
+            self.srv_copy_btn.pack(anchor="w", padx=14, pady=(2, 6))
+        except tk.TclError:
+            pass
+
+    def _lobby_public_clear(self):
+        """连的是别人的服务器 → 自己这台没有公网入口，把那一行清掉。"""
+        self._pub_addr = ""
+        try:
+            if self.srv_public_lbl.winfo_exists():
+                self.srv_public_var.set("")
+                self.srv_copy_btn.pack_forget()
+        except (AttributeError, tk.TclError):
+            pass
+
+    def _lobby_copy_addr(self):
+        addr = getattr(self, "_pub_addr", "") or (
+            self.srv_addr_var.get() if getattr(self, "srv_addr_var", None) else "")
+        if not addr:
+            return
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(addr)
+        except tk.TclError:
+            return
+        self._lobby_log(i18n.t("addr_copied", addr=addr))
+
     def _lobby_connect(self):
         parsed = net.parse_addr(self.srv_addr_var.get()
                                 if getattr(self, "srv_addr_var", None) else self.mp_server_addr)
@@ -1336,6 +1444,9 @@ class App(tk.Tk):
             return
         host, port = parsed
         addr = f"{host}:{port}"
+        # 连的若是别人的服务器，本机就没有"公网入口"这回事，别留上次开服的字样
+        if not net.is_self_host(host):
+            self._lobby_public_clear()
         self._close_server_link()
         self.mp_server_addr = addr
         self._srv_addr = addr

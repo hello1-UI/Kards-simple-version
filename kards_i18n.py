@@ -136,6 +136,24 @@ LANGS = {
                               "首次启动时系统可能弹出防火墙提示，需要选「允许访问」。",
         "host_keep_session": "服务器已在运行，保持当前登录状态（{name}）。",
         "srv_reconnecting": "连接似乎断了，正在自动重连…",
+        # ---- 大厅：跨局域网（公网端口自动映射）----
+        "pub_working": "正在向路由器申请公网端口…（约 5 秒）",
+        "pub_ok": "公网地址 {addr}（已自动开放端口，外网朋友填这个）",
+        "pub_direct": "公网地址 {addr}（本机直接持有公网 IP，无需端口映射）",
+        "pub_lan": "局域网地址 {addr}（同一 Wi-Fi 用这个）",
+        "pub_cgnat": "路由器拿到的是运营商内网地址 {ip}，端口映射无效（外网到不了）。\n"
+                     "换方案：① 用一台有公网 IP 的机器跑服务器；② 用内网穿透工具暴露 {port} 端口。",
+        "pub_double_nat": "你的网络是「双重 NAT」：路由器的 WAN 口是 {ip}，不是公网地址。\n"
+                          "需要两级映射：先在光猫/上级路由把 TCP {port} 转到这台路由器，\n"
+                          "再由这台路由器转到本机 {local}。（或在光猫上把本机设为 DMZ）",
+        "pub_fail": "未能自动开放端口（{err}）。\n"
+                    "请到路由器「端口映射 / 虚拟服务器」把 TCP {port} 转到本机 {ip}，"
+                    "或在同一 Wi-Fi 下联机。",
+        "pub_fail_nogw": "没有找到支持 UPnP 的路由器。\n"
+                         "请到路由器手动把 TCP {port} 映射到本机 {ip}，"
+                         "或在同一 Wi-Fi 下联机。",
+        "btn_copy_addr": "复制地址",
+        "addr_copied": "已复制 {addr}，发给朋友即可。",
         # ---- 大厅：在线玩家 ----
         "lobby_players": "② 在线玩家",
         "lobby_no_players": "（还没有其他人在线）",
@@ -407,6 +425,25 @@ LANGS = {
                               "the firewall prompt on first launch must be allowed.",
         "host_keep_session": "Server is already running — staying signed in as {name}.",
         "srv_reconnecting": "Connection seems lost — reconnecting automatically…",
+        # ---- lobby: cross-LAN (automatic public port mapping) ----
+        "pub_working": "Asking the router for a public port… (about 5s)",
+        "pub_ok": "Public address {addr} (port opened automatically — give this to remote players)",
+        "pub_direct": "Public address {addr} (this PC holds a public IP — no port mapping needed)",
+        "pub_lan": "LAN address {addr} (use this on the same Wi-Fi)",
+        "pub_cgnat": "Your router's WAN address is a carrier-internal {ip}, so port mapping cannot work.\n"
+                     "Options: 1) run the server on a machine with a real public IP; "
+                     "2) use a tunnel tool to expose port {port}.",
+        "pub_double_nat": "Your network is double-NATted: the router WAN address is {ip}, not public.\n"
+                          "You need two hops: forward TCP {port} on the modem/upstream router to this router, "
+                          "then forward it to this PC ({local}). (Or put the PC in the modem DMZ.)",
+        "pub_fail": "Could not open the port automatically ({err}).\n"
+                    "Forward TCP {port} to this PC ({ip}) in your router's "
+                    "port-forwarding page, or play on the same Wi-Fi.",
+        "pub_fail_nogw": "No UPnP-capable router found.\n"
+                         "Forward TCP {port} to this PC ({ip}) in your router settings, "
+                         "or play on the same Wi-Fi.",
+        "btn_copy_addr": "Copy address",
+        "addr_copied": "Copied {addr} — send it to your friend.",
         # ---- Lobby: players ----
         "lobby_players": "② Players online",
         "lobby_no_players": "(nobody else online yet)",
@@ -672,6 +709,26 @@ LANGS = {
                               "初回起動時のファイアウォール確認は「許可」を選んでください。",
         "host_keep_session": "サーバーは起動済みです。現在のログイン状態（{name}）を維持します。",
         "srv_reconnecting": "接続が切れたようです。自動で再接続しています…",
+        # ---- ロビー：異なる LAN 間の対戦（公衆ポート自動マッピング）----
+        "pub_working": "ルーターに公衆ポートを要求しています…（約 5 秒）",
+        "pub_ok": "公衆アドレス {addr}（ポートは自動開放済み。外部の相手にこれを伝えてください）",
+        "pub_direct": "公衆アドレス {addr}（この PC が公衆 IP を直接持つためポートマッピング不要）",
+        "pub_lan": "LAN アドレス {addr}（同じ Wi-Fi ならこちら）",
+        "pub_cgnat": "ルーターの WAN アドレスが事業者内ネットワークの {ip} のため、"
+                     "ポートマッピングは機能しません。\n"
+                     "代替案：① 公衆 IP を持つマシンでサーバーを動かす／"
+                     "② トンネルツールで {port} 番ポートを公開する。",
+        "pub_double_nat": "お使いのネットワークは「二重 NAT」です：ルーターの WAN は {ip} で公衆アドレスではありません。\n"
+                          "二段階の転送が必要です：まず光回線終端装置/上位ルーターで TCP {port} をこのルーターへ、\n"
+                          "次にこのルーターから本機 {local} へ転送してください。",
+        "pub_fail": "ポートを自動開放できませんでした（{err}）。\n"
+                    "ルーターの「ポートマッピング / 仮想サーバー」で TCP {port} を "
+                    "この PC（{ip}）へ転送するか、同じ Wi-Fi で対戦してください。",
+        "pub_fail_nogw": "UPnP 対応ルーターが見つかりません。\n"
+                         "ルーター設定で TCP {port} をこの PC（{ip}）へ転送するか、"
+                         "同じ Wi-Fi で対戦してください。",
+        "btn_copy_addr": "アドレスをコピー",
+        "addr_copied": "{addr} をコピーしました。相手に送ってください。",
         # ---- ロビー：プレイヤー ----
         "lobby_players": "② オンラインプレイヤー",
         "lobby_no_players": "（まだ他の人はいません）",
