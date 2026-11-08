@@ -7,11 +7,15 @@
 不带参数时：
     tag  = 从 KARDS.py 的 VERSION 推导（v1.2.0.3）
     资产 = KARDS.zip + KARDS_SimpleVersion-Setup.zip（存在才上传）
+           + 自动生成的 SHA256SUMS.txt
 
 行为：
-    1. 若同名 tag 的 Release 已存在，先删掉（便于反复执行）
-    2. POST /releases 创建 Release
-    3. 逐个上传资产（二进制 POST，timeout 放宽到 600s）
+    1. 为本次上传的每个 zip 算 SHA256，写出 SHA256SUMS.txt 一起上传
+       （客户端 kards_update 会拿它对下载到的包做完整性校验；
+        没有它，客户端只能"未校验"地安装，镜像源也就用不了了）
+    2. 若同名 tag 的 Release 已存在，先删掉（便于反复执行）
+    3. POST /releases 创建 Release
+    4. 逐个上传资产（二进制 POST，timeout 放宽到 600s）
 
 配套: 推送代码用 debug/push_via_api.py（推送 ≠ 发 Release，两者分开）
 """
@@ -72,6 +76,26 @@ def version_tag():
     return "v" + ".".join(nums)
 
 
+def write_sums(paths, out_dir):
+    """为要上传的资产生成 SHA256SUMS.txt（标准 `sha256sum` 格式）。
+
+    客户端（kards_update.parse_sums）按「哈希 + 两空格 + 文件名」解析，
+    所以这里必须严格用这个格式，别改成 JSON 或 csv。
+    """
+    import hashlib
+    lines = []
+    for p in paths:
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(262144), b""):
+                h.update(chunk)
+        lines.append(f"{h.hexdigest()}  {os.path.basename(p)}")
+    out = os.path.join(out_dir, "SHA256SUMS.txt")
+    with open(out, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    return out
+
+
 def main():
     if not TOKEN:
         raise SystemExit("请设置 GITHUB_TOKEN=<token>")
@@ -93,10 +117,13 @@ def main():
     if not paths:
         raise SystemExit("没有可上传的资产")
 
+    sums = write_sums(paths, ROOT)
+    paths.append(sums)
+
     print(f"tag = {tag}")
     print("资产:")
     for p in paths:
-        print(f"  {os.path.basename(p)}  {os.path.getsize(p)/1048576:.1f} MB")
+        print(f"  {os.path.basename(p)}  {os.path.getsize(p)/1048576:.2f} MB")
 
     # 1. 删掉同名 tag 的旧 Release（可重复执行）
     st, rel = api("GET", f"{API}/releases/tags/{tag}")
@@ -149,7 +176,10 @@ def main():
             print(f"  上传 {name} (第 {attempt} 次, {len(blob)/1048576:.1f} MB) ...",
                   end="", flush=True)
             st, res = api("POST", f"{up}?name={urllib.parse.quote(name)}",
-                          raw=blob, ctype="application/zip", timeout=900)
+                          raw=blob,
+                          ctype=("text/plain; charset=utf-8"
+                                 if name.lower().endswith(".txt") else "application/zip"),
+                          timeout=900)
             if st in (200, 201):
                 print(f" OK {res.get('size', 0)/1048576:.1f} MB")
                 done = True
