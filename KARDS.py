@@ -37,24 +37,14 @@ import kards_net as net
 import kards_account as account
 import kards_host
 import kards_update as net_update
+# 配色/字体清单的唯一真源（与 kards_board.py 共用，别再抄第二份）
+from kards_theme import (BG, PANEL, CARD_BG, CARD_SEL, TEXT, DIM,
+                         RED, GREEN, GOLD, NATION_COLOR,
+                         BUNDLED_FONT_FILES as _BUNDLED_FONT_FILES,
+                         BUNDLED_FONT_FAMILY as _BUNDLED_FONT_FAMILY)
 
 # ---------------------------------------------------------------- 主题配色
-
-BG = "#1a1d23"          # 背景
-PANEL = "#242831"       # 面板
-CARD_BG = "#2e3440"     # 卡牌
-CARD_SEL = "#4c6b8a"    # 选中
-TEXT = "#e6e6e6"
-DIM = "#9aa0a8"
-RED = "#e05c5c"
-GREEN = "#6fbf73"
-GOLD = "#e0b45c"
-NATION_COLOR = {
-    "德国": "#6b7a8f", "苏联": "#a05a4c", "美国": "#4c7a6b",
-    "英国": "#7a6b8f", "日本": "#8f6b4c",
-    "意大利": "#6f8f6b", "法国": "#6b7a9f", "芬兰": "#8fb0c8",
-    "波兰": "#c8a06b", "澳新军团": "#8f9f6b", "中立": "#7a7a7a",
-}
+# 色值定义见 kards_theme.py（tkinter 与 pygame 共用一份，改一处两边生效）
 
 APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 
@@ -83,8 +73,6 @@ _TK_CJK_FAMILIES = [
     "microsoft jhenghei", "pmingliu", "mingliu",
     "yu gothic ui", "malgun gothic",
 ]
-_BUNDLED_FONT_FILES = ["NotoSansCJKsc-Regular.otf", "NotoSansSC-Regular.otf"]
-_BUNDLED_FONT_FAMILY = "Noto Sans CJK SC"
 
 
 def ensure_tk_cjk_font(root):
@@ -744,6 +732,12 @@ class App(tk.Tk):
                           wraplength=390, justify="left")
         status.pack(pady=(10, 4), padx=16)
 
+        # 完整性校验的说明行：整件事的重点是"玩家知道这次到底校验没校验"，
+        # 所以单独一行常驻，而不是塞进随时会被刷新的 status 里。
+        verify_lbl = tk.Label(win, text="", bg=BG, fg=DIM, font=FONT_S,
+                              wraplength=390, justify="left")
+        verify_lbl.pack(padx=16)
+
         bar_holder = tk.Frame(win, bg=BG)
         bar_holder.pack(fill="x", padx=16)
         bar = tk.Frame(bar_holder, bg="#2a2f38", height=10)
@@ -783,6 +777,13 @@ class App(tk.Tk):
             if state["polling"]:
                 try:
                     status.configure(text=text, fg=fg)
+                except tk.TclError:
+                    state["polling"] = False
+
+        def set_verify(text, fg=DIM):
+            if state["polling"]:
+                try:
+                    verify_lbl.configure(text=text, fg=fg)
                 except tk.TclError:
                     state["polling"] = False
 
@@ -835,6 +836,10 @@ class App(tk.Tk):
                 info = task.info or {}
                 set_status(i18n.t("update_new", ver=info.get("version", "?"),
                                   cur=net_update.version_str(VERSION)))
+                if task.checksum:
+                    set_verify(i18n.t("update_verify_will"), DIM)
+                else:
+                    set_verify(i18n.t("update_verify_none"), GOLD)
                 try:
                     notes_box.configure(state="normal")
                     notes_box.delete("1.0", "end")
@@ -869,9 +874,11 @@ class App(tk.Tk):
                     tk.Button(btns, text=i18n.t("btn_close"), bg="#4a4f5a", fg=TEXT,
                               font=FONT_B, bd=0, padx=16, pady=7, cursor="hand2",
                               command=close).pack()
-            elif st in ("downloading", "extracting"):
+            elif st in ("downloading", "verifying", "extracting"):
                 pct = int(task.progress * 100)
-                key = "update_downloading" if st == "downloading" else "update_extracting"
+                key = {"downloading": "update_downloading",
+                       "verifying": "update_verifying",
+                       "extracting": "update_extracting"}[st]
                 set_status(i18n.t(key, done=pct))
                 try:
                     bar_fill.place_configure(relwidth=max(0.0, min(1.0, task.progress)))
@@ -885,6 +892,10 @@ class App(tk.Tk):
                               cursor="hand2", command=close).pack()
             elif st == "done":
                 set_status(i18n.t("update_ready", ver=net_update.version_str(VERSION)), GREEN)
+                if task.verified:
+                    set_verify(i18n.t("update_verify_ok"), GREEN)
+                else:
+                    set_verify(i18n.t("update_verify_skip"), GOLD)
                 if not state.get("installed"):
                     state["installed"] = True
                     rebuild_buttons()
