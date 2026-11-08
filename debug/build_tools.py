@@ -14,15 +14,14 @@ import os
 import subprocess
 import sys
 
+import pyfind
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PYINST = os.path.join(ROOT, "pyinst")
 
-# 打包用的解释器：优先系统 Python（tkinter/winreg 齐全）
-CANDIDATES = [
-    r"C:\Users\freet\AppData\Local\Programs\Python\Python313\python.exe",
-    sys.executable,
-]
+# 打包用的解释器：优先系统 Python（tkinter/winreg 齐全），由 pyfind 现算
+CANDIDATES = pyfind.candidates()
 
 
 def pick_python():

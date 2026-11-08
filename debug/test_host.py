@@ -31,21 +31,11 @@ def _pick_python():
     以 `--server` 启动同样会先 import 到 tkinter 然后 ModuleNotFoundError，
     所以这里不能直接用 sys.executable（受管解释器），
     必须先找到一个能 import tkinter 的。
+
+    候选列表由 debug/pyfind.py 现算（以前这里写死过作者本机的绝对路径）。
     """
-    candidates = [sys.executable]
-    for p in (r"C:\Users\freet\AppData\Local\Programs\Python\Python313\python.exe",
-              shutil.which("python"), shutil.which("py")):
-        if p and p not in candidates:
-            candidates.append(p)
-    for p in candidates:
-        try:
-            r = subprocess.run([p, "-c", "import tkinter"],
-                               capture_output=True, timeout=25)
-            if r.returncode == 0:
-                return p
-        except (OSError, subprocess.SubprocessError):
-            continue
-    return sys.executable
+    import pyfind
+    return pyfind.find_python("tkinter")
 
 
 PY = _pick_python()

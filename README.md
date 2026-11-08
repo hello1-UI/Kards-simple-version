@@ -14,7 +14,9 @@ Python 实现的 KARDS 风格二战卡牌对战游戏（非官方粉丝作品；
 - **本机开服**：大厅里直接「建立服务器」，同一份 `KARDS.exe --server` 兼任服务器，无需命令行
 - **账号与战绩**：服务器端账号（SQLite），本地账号首次登录联机时自动迁移并同步战绩
 - **游客模式**：未登录自动以游客进入，可人机对战；触发联机时提示登录
-- **自动更新**：设置里「检查更新」，比对 GitHub Release 后下载安装
+- **自动更新**：设置里「检查更新」，比对 GitHub Release 后下载安装，
+  下载完按 **SHA256** 校验完整性（校验值取自 Release 的 digest 或
+  `SHA256SUMS.txt`）；对不上就换源重下，绝不装来路不明的东西
 - **多语言界面**：简体中文 / English / 日本語（默认中文）
 
 ## 运行
@@ -22,7 +24,7 @@ Python 实现的 KARDS 风格二战卡牌对战游戏（非官方粉丝作品；
 需要 Python 3.11+、tkinter 与 **pygame**：
 
 ```bash
-pip install pygame
+pip install -r requirements.txt
 python KARDS.py
 ```
 
@@ -51,15 +53,39 @@ assets/sfx/<事件>.wav|ogg     # 音效：deploy / move / attack / win / lose
 
 安装版会优先读 **exe 同级目录**下的 `assets/`，所以玩家可以自己补图而不用重新打包。
 
+## 模块一览
+
+| 文件 | 职责 |
+|---|---|
+| `KARDS.py` | 主程序：tkinter 主菜单/大厅/组卡/账号，命令行入口 |
+| `kards_engine.py` | 纯规则引擎（卡池、回合、战斗、AI），不依赖任何 GUI |
+| `kards_board.py` | pygame 对战棋盘（动画、卡面、音效），可脱离 Tk 单测 |
+| `kards_theme.py` | **配色与字体清单的唯一真源**，两套渲染器共用 |
+| `kards_i18n.py` | 三语文本与本地偏好（`settings.json`） |
+| `kards_net.py` / `kards_server.py` | 联机客户端 / 中继服务器 |
+| `kards_account.py` | 本地账号与游客会话 |
+| `kards_update.py` | 自动更新（查询、下载、SHA256 校验、解压覆盖） |
+| `kards_host.py` | 大厅里「一键开服」拉起服务器子进程 |
+| `debug/` | 回归测试与打包/发版工具（非运行必需） |
+
 ## 测试
 
 ```bash
-python debug/test_board.py       # pygame 对战界面（169 项）
-python debug/test_original.py    # 原版机制对齐（49 项）
-python debug/test_tactics.py     # 战术规则（33 项）
-python debug/test_server.py      # 联机服务器（54 项）
+python debug/test_board.py       # pygame 对战界面（SDL dummy 驱动，无需窗口）
+python debug/test_original.py    # 原版机制对齐
+python debug/test_tactics.py     # 战术规则（射程、拦截、空袭）
+python debug/test_server.py      # 联机服务器
+python debug/test_update.py      # 自动更新（含 SHA256 校验，离线部分不联网）
+python debug/test_i18n.py        # 三语文案完整性
 ```
 
-其余回归脚本见 `debug/`（另有拖拽、账号迁移、开服、自动更新、安装器等 20 余个）。
+其余回归脚本见 `debug/`（另有拖拽、账号迁移、开服、安装器等 20 余个）。
+CI 会在 Windows 上跑其中的核心子集，见 `.github/workflows/ci.yml`。
 
 > GUI 相关测试需要带 tkinter 的解释器，请用系统 Python 运行。
+> 拿不准用哪个解释器时，`python debug/pyfind.py` 会列出本机候选。
+
+## 许可
+
+原创代码 MIT（见 `LICENSE`）。本项目是非官方粉丝作品，KARDS 的名称、
+卡牌数据与美术归 1939 Games 所有 —— 详见 `NOTICE.md`。

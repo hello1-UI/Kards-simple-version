@@ -2,7 +2,7 @@
 """GUI：关键词说明窗口与按钮的实机验证（系统 Python + tkinter）
 
 运行：
-    C:\\Users\\freet\\AppData\\Local\\Programs\\Python\\Python313\\python.exe \\
+    python \\
         debug/test_keywords_gui.py
 
 注意：受管 Python 没有 tkinter，必须用系统 Python。

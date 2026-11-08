@@ -17,7 +17,9 @@ import sys
 import tempfile
 import time
 
-PY = r"C:/Users/freet/AppData/Local/Programs/Python/Python313/python.exe"
+import pyfind
+
+PY = pyfind.find_python("tkinter")   # KARDS.py 要 import tkinter，受管 Python 没有
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SERVER_LOG = os.devnull          # ⚠ 不能是 PIPE：没人读会写满管道把服务器卡死
 

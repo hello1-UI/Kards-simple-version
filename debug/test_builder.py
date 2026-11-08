@@ -7,7 +7,7 @@
 本测试把按钮行为逐条锁死。
 
 运行：
-    C:\\Users\\freet\\AppData\\Local\\Programs\\Python\\Python313\\python.exe \\
+    python \\
         debug/test_builder.py
 """
 import os

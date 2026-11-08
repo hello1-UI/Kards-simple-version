@@ -2,7 +2,7 @@
 """pygame 对战棋盘测试（SDL dummy 驱动，不需要真实窗口）
 
 运行：
-    C:\\Users\\freet\\AppData\\Local\\Programs\\Python\\Python313\\python.exe \\
+    python \\
         debug/test_board.py
 
 覆盖：
