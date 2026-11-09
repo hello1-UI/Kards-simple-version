@@ -4,7 +4,8 @@ KARDS 简化版 - 图形界面（tkinter，纯标准库）
 
 复用 kards.py 的游戏逻辑，提供点击式对战界面：
 - 开始界面：战斗（联机预留）/ 练习（人机对战）
-- 练习模式：5 大主国选阵营 → 自由组卡（39 张 + 总部卡，单卡≤3，盟国≤20）
+- 练习模式：5 大主国选阵营 → 自由组卡（39 张 + 总部卡，单卡上限按稀有度
+  普通4/稀有3/史诗2/传说1，盟国≤20）
   → 支持粘贴原版卡牌清单导入（中英文名均可）→ 随机匹配（可内战）→ 随机先手/后手
 - 对战中右上角「⚙ 设置/投降」：投降 / 返回主菜单 / 安全退出；Esc 快捷退出
 - 拖拽操作：手牌拖到「我方支援阵线」部署；我方单位拖到敌方单位/总部攻击；
@@ -1828,10 +1829,11 @@ class App(tk.Tk):
             w.destroy()
         for c in core.allowed_cards(self.deck_nation, self.db):
             n = self.deck_counts.get(c.name, 0)
+            full = n >= core.max_copies(c)      # 带满了（传说卡带 1 张就满）
             row = tk.Label(self.avail_inner, bg=CARD_BG if n else BG,
-                           fg=GOLD if n else TEXT, font=FONT_S, anchor="w",
-                           padx=10, pady=4,
-                           text=self._card_row_text(c) + i18n.t("copies", n=n, max=core.MAX_COPIES))
+                           fg=DIM if full else (GOLD if n else TEXT),
+                           font=FONT_S, anchor="w", padx=10, pady=4,
+                           text=self._card_row_text(c) + i18n.t("copies", n=n, max=core.max_copies(c)))
             row.pack(fill="x", pady=1)
             row.bind("<Button-1>", lambda e, card=c: self._add_card(card))
             bind_tooltip(row, lambda c=c: card_tooltip(c))
@@ -1861,7 +1863,7 @@ class App(tk.Tk):
 
     def _add_card(self, card):
         n = self.deck_counts.get(card.name, 0)
-        if n >= core.MAX_COPIES:
+        if n >= core.max_copies(card):
             return
         if self._deck_total() >= core.DECK_SIZE:
             return
@@ -1901,7 +1903,7 @@ class App(tk.Tk):
         while self._deck_total() < core.DECK_SIZE and guard < 100000:
             guard += 1
             c = random.choices(pool, weights=weights, k=1)[0]
-            if self.deck_counts.get(c.name, 0) >= core.MAX_COPIES:
+            if self.deck_counts.get(c.name, 0) >= core.max_copies(c):
                 continue
             if c.nation in core.ALLY_NATIONS and self._deck_ally_count() >= core.ALLY_LIMIT:
                 continue
@@ -1924,9 +1926,9 @@ class App(tk.Tk):
 
         def do_import():
             counts, unmatched = core.parse_deck_text(txt.get("1.0", "end"), self.db)
-            self.deck_counts = {}
-            for name, n in counts.items():
-                self.deck_counts[name] = min(n, core.MAX_COPIES)
+            # parse_deck_text 已经按稀有度截过；这里再走一遍 clamp_counts 是保险，
+            # 免得以后解析逻辑改动时漏掉上限。
+            self.deck_counts = core.clamp_counts(counts, self.db)[0]
             win.destroy()
             self._builder_refresh()
             msg = i18n.t("import_result", n=sum(counts.values()), m=self._deck_total())
@@ -1973,11 +1975,19 @@ class App(tk.Tk):
             if counts is None:
                 messagebox.showwarning(i18n.t("btn_load"), i18n.t("load_missing"))
                 return
+            counts, trimmed = core.clamp_counts(counts, self.db)
             self.deck_counts = dict(counts)
             self._builder_refresh()
-            messagebox.showinfo(i18n.t("btn_load"),
-                                i18n.t("load_ok", name=nm, n=self._deck_total(),
-                                       size=core.DECK_SIZE))
+            msg = i18n.t("load_ok", name=nm, n=self._deck_total(), size=core.DECK_SIZE)
+            if trimmed:
+                # 旧存档是按"单卡一律 3 张"存的，稀有度上限上线后传说/史诗 会超标。
+                # 不提示的话玩家只看到张数变少、开始按钮变灰，不知道为什么。
+                items = i18n.t("load_trimmed_sep").join(
+                    f"{n} ×{old}→×{new}" for n, old, new in trimmed[:5])
+                if len(trimmed) > 5:
+                    items += i18n.t("load_trimmed_more", k=len(trimmed) - 5)
+                msg += "\n\n" + i18n.t("load_trimmed", items=items)
+            messagebox.showinfo(i18n.t("btn_load"), msg)
 
         for nm in names:
             row = tk.Label(win, text=f"📄 {nm}", bg=PANEL, fg=TEXT, font=FONT,

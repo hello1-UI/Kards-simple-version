@@ -6,7 +6,9 @@ KARDS 简化版 —— 二战卡牌对战游戏
 - 双方各有总部(HQ)，将敌方总部血量降到 0 即获胜。
 - 每回合获得 Kredits（资源）= 当前回合数（上限 12），用于打出卡牌。
 - 场上每方最多 5 个单位，每个单位占据一个编号位置(0-4)。
-- 卡组：40 张 = 1 张总部卡 + 39 张单位/指令/反制，单卡上限 3 张，盟国卡上限 20 张。\n稀有度：对齐原版的卡为固定评定，其余按费用+关键词自动评定 普通/稀有/史诗/传说（★~★★★）。
+- 卡组：40 张 = 1 张总部卡 + 39 张单位/指令/反制，单卡上限按稀有度取
+  （普通 4 / 稀有 3 / 史诗 2 / 传说 1），盟国卡上限 20 张。
+- 稀有度：对齐原版的卡为固定评定，其余按费用+关键词自动评定 普通/稀有/史诗/传说（★~★★★）。
 - 主国: 德国/苏联/美国/英国/日本；盟国: 意大利/法国/芬兰/波兰/澳新军团。
 - 总部卡自带「研发」被动（各主国不同）。
 - 单位关键词（对齐原版 KARDS）:
@@ -47,8 +49,29 @@ HAND_LIMIT = 10
 START_HP = 3        # 起始手牌数
 COUNTER_SLOTS = 3    # 反制区上限
 DECK_SIZE = 39       # 卡组张数：39 张单位/指令/反制 + 1 张总部卡 = 40 张
-MAX_COPIES = 3       # 单卡上限
+
+# ---- 单卡上限（按稀有度）--------------------------------------------------
+# 对齐原版 KARDS：普通 Standard 4 / 限定 Limited 3 / 特殊 Special 2 / 精英 Elite 1。
+# 本地卡池用的是另一套稀有度名，对应关系：
+#     普通 = Standard、稀有 = Limited、史诗 = Special、传说 = Elite
+RARITY_COPIES = {"普通": 4, "稀有": 3, "史诗": 2, "传说": 1}
+DEFAULT_COPIES = RARITY_COPIES["普通"]    # 稀有度缺失/不认识时按普通卡处理
+# 兼容旧引用：全卡池**最宽**的上限。只在"不知道具体是哪张卡、又需要一个
+# 保守上限"时使用；判定某张卡能不能带第 N 张，一律用 max_copies(card)。
+MAX_COPIES = max(RARITY_COPIES.values())
 ALLY_LIMIT = 20      # 盟国卡上限（约卡组的 1/3）
+
+
+def max_copies(card_or_rarity=None):
+    """这张卡最多能带几张。
+
+    参数可以是卡牌对象，也可以直接给稀有度名（组卡界面只拿到名字时会用到）。
+    ⚠ 这里**不认** 1~4 的数字编号：卡牌对象里 rarity 存的一律是中文名，接受
+    数字只会让"1"被当成什么而没人说得清（1 是传说还是普通？两套历史编号刚好
+    相反），宁可让未知值兜底成普通卡。
+    """
+    rarity = getattr(card_or_rarity, "rarity", card_or_rarity)
+    return RARITY_COPIES.get(rarity, DEFAULT_COPIES)
 
 # ---- AI 自动投降 ----
 # 设计原则：宁可多打一会儿，也不要早退。只有"确实已经输了"才投降。
@@ -1114,11 +1137,12 @@ def validate_deck(deck, nation, db):
         counts[c.name] = counts.get(c.name, 0) + 1
     ally_n = 0
     for name, n in counts.items():
-        if n > MAX_COPIES:
-            return False, f"[{name}] 超过单卡 {MAX_COPIES} 张上限"
         card = db.get(name)
         if card is None:
             return False, f"未知卡牌: {name}"
+        cap = max_copies(card)
+        if n > cap:
+            return False, f"[{name}] 是{card.rarity}卡，最多 {cap} 张（当前 {n} 张）"
         if card.nation != nation and card.nation not in ALLY_NATIONS:
             return False, f"[{name}] 不属于 {nation} 或盟国阵营"
         if card.nation in ALLY_NATIONS:
@@ -1132,7 +1156,7 @@ COST_WEIGHT = {1: 3, 2: 3, 3: 3, 4: 2, 5: 2, 6: 1, 7: 1}
 
 
 def build_deck(nation, db, size=DECK_SIZE):
-    """随机推荐卡组：主国+盟国卡池，低费加权，遵守单卡/盟国上限"""
+    """随机推荐卡组：主国+盟国卡池，低费加权，遵守单卡（按稀有度）/盟国上限"""
     pool = allowed_cards(nation, db)
     weights = [COST_WEIGHT.get(c.cost, 1) for c in pool]
     counts = {}
@@ -1142,7 +1166,7 @@ def build_deck(nation, db, size=DECK_SIZE):
     while len(deck) < size and guard < 200000:
         guard += 1
         c = random.choices(pool, weights=weights, k=1)[0]
-        if counts.get(c.name, 0) >= MAX_COPIES:
+        if counts.get(c.name, 0) >= max_copies(c):
             continue
         if c.nation in ALLY_NATIONS and ally_n >= ALLY_LIMIT:
             continue
@@ -1318,14 +1342,18 @@ def load_deck_counts(name, db):
             nation = s[4:]
         elif not s.startswith("#"):
             body.append(ln)
-    counts, _ = parse_deck_text("\n".join(body), db)
+    counts, _ = parse_deck_text("\n".join(body), db, clamp=False)
     return counts, nation
 
 
-def parse_deck_text(text, db):
+def parse_deck_text(text, db, clamp=True):
     """解析粘贴的卡组清单，返回 (counts{卡名:数量}, unmatched[原始行])
 
     支持每行: "3 谢尔曼坦克" / "谢尔曼坦克 x3" / "3x Sherman Tank" / "谢尔曼坦克"
+
+    clamp=False 时**不**按稀有度上限截断，原样返回清单里的数字。读取自己保存
+    的卡组时用这个模式：旧存档是按"单卡一律 3 张"存的，先拿到原数才能告诉
+    玩家哪几张被下调了（见 clamp_counts）。
     """
     counts = {}
     unmatched = []
@@ -1342,12 +1370,17 @@ def parse_deck_text(text, db):
                 name, n = m.group(1).strip(), int(m.group(2))
             else:
                 name, n = line, 1
-        n = max(1, min(n, MAX_COPIES))
         card_name = _resolve_card_name(name, db)
         if card_name is None:
             unmatched.append(line)
+            continue
+        if clamp:
+            # 上限按稀有度算：一行写"9 虎式坦克"不该被静默补成 4 张传说
+            cap = max_copies(db[card_name])
+            n = min(n, cap)
+            counts[card_name] = min(cap, counts.get(card_name, 0) + n)
         else:
-            counts[card_name] = min(MAX_COPIES, counts.get(card_name, 0) + n)
+            counts[card_name] = counts.get(card_name, 0) + n
     return counts, unmatched
 
 
@@ -1375,7 +1408,7 @@ def counts_to_deck(counts, nation, db, autofill=True):
         c = db.get(name)
         if c is None:
             continue
-        n = min(n, MAX_COPIES)
+        n = min(n, max_copies(c))
         if c.nation in ALLY_NATIONS:
             n = min(n, max(0, ALLY_LIMIT - ally_n))
             ally_n += n
@@ -1393,7 +1426,7 @@ def counts_to_deck(counts, nation, db, autofill=True):
         while len(deck) < DECK_SIZE and guard < 200000:
             guard += 1
             c = random.choices(pool, weights=weights, k=1)[0]
-            if extra_counts.get(c.name, 0) >= MAX_COPIES:
+            if extra_counts.get(c.name, 0) >= max_copies(c):
                 continue
             if c.nation in ALLY_NATIONS and ally_n >= ALLY_LIMIT:
                 continue
@@ -1403,6 +1436,28 @@ def counts_to_deck(counts, nation, db, autofill=True):
             deck.append(c)
     random.shuffle(deck)
     return deck
+
+
+def clamp_counts(counts, db):
+    """把 {卡名:数量} 收进各稀有度的单卡上限，返回 (新counts, [(卡名, 原数, 新数)])
+
+    上限规则按稀有度区分后，旧存档/旧清单里的"3 张传说"就不合法了。载入时
+    **静默丢牌**是最糟的处理：玩家只看到 39 变成 37、开始按钮变灰，却不知道
+    少的是哪张。所以这里把改动明细回传出去，由界面决定怎么提示。
+    """
+    out, changes = {}, []
+    for name, n in (counts or {}).items():
+        card = db.get(name)
+        if card is None:
+            changes.append((name, n, 0))
+            continue
+        cap = max_copies(card)
+        if n > cap:
+            changes.append((name, n, cap))
+            n = cap
+        if n > 0:
+            out[name] = n
+    return out, changes
 
 
 # ---------------------------------------------------------------- 玩家
@@ -2499,8 +2554,9 @@ def cli_build_deck(nation, db):
     ally_n = 0
     while True:
         total = sum(counts.values())
+        caps = "/".join(f"{r}{RARITY_COPIES[r]}" for r in RARITY_LEVELS)
         print("\n" + "=" * 50)
-        print(f"  组卡中: {total}/{DECK_SIZE} (单卡≤{MAX_COPIES}, 盟国卡 {ally_n}/{ALLY_LIMIT})")
+        print(f"  组卡中: {total}/{DECK_SIZE} (单卡上限 {caps}，盟国卡 {ally_n}/{ALLY_LIMIT})")
         for i, c in enumerate(allowed):
             n = counts.get(c.name, 0)
             if c.kind == "unit":
@@ -2520,8 +2576,9 @@ def cli_build_deck(nation, db):
             op, idx = cmd.split()[0], int(cmd.split()[1])
             card = allowed[idx]
             if op == "a":
-                if counts.get(card.name, 0) >= MAX_COPIES:
-                    print(f"  {card.name} 已达 {MAX_COPIES} 张上限！")
+                cap = max_copies(card)
+                if counts.get(card.name, 0) >= cap:
+                    print(f"  {card.name} 是{card.rarity}卡，已达 {cap} 张上限！")
                 elif total >= DECK_SIZE:
                     print("  卡组已满！")
                 elif card.nation in ALLY_NATIONS and ally_n >= ALLY_LIMIT:
