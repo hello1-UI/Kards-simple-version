@@ -935,10 +935,16 @@ def test_app_wiring():
     app = K.App()
     app.update()
 
-    check("默认渲染引擎为 pygame（增强界面）",
-          K.i18n.get_pref("renderer", "pygame") == "pygame")
-    check("缺省（未写过偏好）也走 pygame",
-          K.i18n.get_pref("renderer_never_set_xyz", "pygame") == "pygame")
+    # 经典 tkinter 对战界面已删除：未激活棋盘时视图方法应全部有类级兜底
+    check("未激活时视图兜底齐全（不 AttributeError）",
+          all(callable(getattr(app, a, None)) for a in K.App._PY_VIEW_ATTRS))
+    n_logs = len(getattr(app, "_lobby_log", ()) or ()) if hasattr(app, "_lobby_log") else -1
+    try:
+        app.refresh()
+        app.show_banner("兜底", "#fff", 10)
+        check("未激活时兜底调用不报错", True)
+    except Exception as exc:                       # noqa: BLE001
+        check("未激活时兜底调用不报错", False, repr(exc))
 
     b = app._activate_pyboard()
     for a in K.App._PY_VIEW_ATTRS:
@@ -965,13 +971,10 @@ def test_app_wiring():
     check("停用后 unit_widgets 清空", app.unit_widgets == {})
     check("停用后 hq_widget 归 None", app.hq_widget is None)
 
-    # 设置项读写
-    K.i18n.set_pref("renderer", "tk")
-    check("renderer 偏好可持久化", K.i18n.get_pref("renderer") == "tk")
-    check("renderer=tk → 走经典 tkinter 界面", app._use_pyboard() is False)
-    K.i18n.set_pref("renderer", "pygame")
-    check("renderer=pygame → 走增强 pygame 界面", app._use_pyboard() is True)
-    check("--legacy-board 可强制回退经典界面", True)   # 命令行开关（见 debug/test_drag.py 用法）
+    # 渲染器偏好已随经典界面删除：偏好读写本身仍应工作
+    K.i18n.set_pref("lang_pref_probe_xyz", "1")
+    check("偏好读写仍可用（渲染器项已删）",
+          K.i18n.get_pref("lang_pref_probe_xyz") == "1")
 
     app.destroy()
 
@@ -989,7 +992,6 @@ def test_app_hybrid_game():
     sys.argv.append("--no-update-check")
     import KARDS as K
 
-    K.i18n.set_pref("renderer", "pygame")
     app = K.App()
     app.update()
     for w in app.winfo_children():          # 清掉可能自动弹出的账号窗等
@@ -1063,11 +1065,8 @@ def test_app_hybrid_game():
     finally:
         app._deactivate_pyboard()
 
-    # 经典界面回退：切到 tk renderer 后应能正常开一局（tkinter 侧不被破坏）
-    K.i18n.set_pref("renderer", "tk")
-    check("renderer=tk 时 new_game 不再进 pygame 分支",
-          app._use_pyboard() is False)
-    K.i18n.set_pref("renderer", "pygame")
+    # 经典界面已删除：对局只有 pygame 一条路，new_game 后必然留下棋盘痕迹
+    check("对局结束后棋盘已停用", app._pyboard is None)
 
     app.destroy()
 

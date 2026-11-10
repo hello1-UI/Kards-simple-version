@@ -511,3 +511,81 @@ def stats_add(name, result):
     st = u.setdefault("stats", {"win": 0, "lose": 0, "draw": 0})
     st[result] = st.get(result, 0) + 1
     _save(db)
+
+
+# ---------------------------------------------------------------- 货币 ----
+# 金币 / 钻石。设计取向：
+# - 只存本地（DATA_DIR/currency.json）：服务器还没有货币协议，硬塞进账号
+#   结构会造成"在线时改不动"的死数据。等服务器支持后再迁移同步。
+# - 游客也发币（按 guest 键存），但换账号/清档即没了 —— 引导注册。
+
+CURRENCY_START = {"gold": 300, "diamonds": 10}   # 初次见面的见面礼
+
+# 一场对局的奖励（与 stats_add 的 result 对齐）
+CURRENCY_REWARDS = {
+    "win":  {"gold": 100, "diamonds": 1},
+    "lose": {"gold": 30,  "diamonds": 0},
+    "draw": {"gold": 50,  "diamonds": 0},
+}
+
+_CURRENCY_FILE = os.path.join(DATA_DIR, "currency.json")
+
+
+def _currency_key(name=None):
+    """货币归谁：游客统一 guest；正式账号按 后端:名字，避免本地/服务器重名混账。
+
+    ⚠ 判定顺序：**显式传入的名字优先**，其次当前登录账号；都没有、或明确
+    处于游客态、或名字就是 GUEST 哨兵，才落 guest 键。不能只看 `_is_guest`：
+    调用方可能拿着账号名来查，但进程里还没走过登录流程（`current()` 为 None
+    且 `_is_guest` 为 False），这时按名字路由才不会把账记到别人头上。
+    """
+    name = name or current()
+    if name is None or name == GUEST or is_guest():
+        return "guest"
+    return f"{backend()}:{name}"
+
+
+def _load_currency():
+    try:
+        with open(_CURRENCY_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_currency(d):
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(_CURRENCY_FILE, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+    except OSError:
+        pass            # 磁盘只读时钱丢了就丢了，别为它崩掉对局结算
+
+
+def get_currency(name=None):
+    """返回 {"gold": n, "diamonds": n}；从未记录过的账号给初始金额"""
+    c = _load_currency().get(_currency_key(name)) or CURRENCY_START
+    return {"gold": int(c.get("gold", 0)), "diamonds": int(c.get("diamonds", 0))}
+
+
+def currency_add(gold=0, diamonds=0, name=None):
+    """加（或减，传负数）货币，返回更新后的 {"gold": n, "diamonds": n}"""
+    d = _load_currency()
+    k = _currency_key(name)
+    c = d.get(k) or dict(CURRENCY_START)
+    c["gold"] = max(0, int(c.get("gold", 0)) + gold)
+    c["diamonds"] = max(0, int(c.get("diamonds", 0)) + diamonds)
+    d[k] = c
+    _save_currency(d)
+    return {"gold": c["gold"], "diamonds": c["diamonds"]}
+
+
+def currency_reward(result, name=None):
+    """按对局结果发放奖励，返回 {"gold": n, "diamonds": n}（增量）。
+
+    name 不传时记到"当前玩家"头上（登录账号或 guest 池），与 App 结算处
+    `account.get_currency(self.account)` 的口径一致。
+    """
+    r = CURRENCY_REWARDS.get(result) or {"gold": 0, "diamonds": 0}
+    currency_add(gold=r["gold"], diamonds=r["diamonds"], name=name)
+    return dict(r)
