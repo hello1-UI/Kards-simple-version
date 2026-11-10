@@ -2944,7 +2944,6 @@ class App(tk.Tk):
                 # 我方还在 → 判我方获胜。
                 winner = g.players[0] if g.players[0].hq > 0 else g.players[1]
         me = g.players[0]
-        result = "draw" if won is None else ("win" if won else "lose")
         if winner is None:
             won = None
             self.add_log("战斗结束！双方总部同时陷落——平局！")
@@ -2953,6 +2952,7 @@ class App(tk.Tk):
             self.add_log(f"战斗结束！{winner.name} 获胜！")
         # 账号战绩 + 货币奖励。游客也发币（存 guest 键）：输了也有 30 金币
         # 保底，胜利才给钻石，让"再来一局"始终有个看得见的进账。
+        result = "draw" if won is None else ("win" if won else "lose")
         if self.account:
             account.stats_add(self.account, result)
             self._refresh_account_btn()

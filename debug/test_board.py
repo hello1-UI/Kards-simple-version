@@ -938,7 +938,6 @@ def test_app_wiring():
     # 经典 tkinter 对战界面已删除：未激活棋盘时视图方法应全部有类级兜底
     check("未激活时视图兜底齐全（不 AttributeError）",
           all(callable(getattr(app, a, None)) for a in K.App._PY_VIEW_ATTRS))
-    n_logs = len(getattr(app, "_lobby_log", ()) or ()) if hasattr(app, "_lobby_log") else -1
     try:
         app.refresh()
         app.show_banner("兜底", "#fff", 10)
