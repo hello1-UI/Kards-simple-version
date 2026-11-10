@@ -59,46 +59,67 @@ def main():
         # 让被测进程把账号/会话写到临时目录，别污染真实用户数据
         env = dict(os.environ)
         env["KARDS_DATA_DIR"] = tmp
+        # ⚠ 自战是「父进程再拉起两个子进程」，子进程会继承父进程 stdout：
+        # 用 PIPE 会让父进程退出后管道不关闭 → readline 永久阻塞。
+        # 统一写文件再轮询，既不会卡死也方便看完整日志。
+        out_path = os.path.join(tmp, "client.log")
+        fh = open(out_path, "w", encoding="utf-8")
         proc = subprocess.Popen(
             [PY, "-u", os.path.join(ROOT, "KARDS.py"),
              "--debug-on-net", f"127.0.0.1:{port}"],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
+            stdout=fh, stderr=subprocess.STDOUT,
             cwd=ROOT, env=env)
-        ready = False
-        out = []
+        a_ok = b_ok = False
         t0 = time.time()
-        # 双窗口自动匹配 + 组卡 + 开局，给足时间（实测 ~25s）
-        while time.time() - t0 < 90:
-            line = proc.stdout.readline()
-            if not line:
+        # 两进程各自连服 + 匹配 + 组卡 + ready/seed 交换，给足时间（实测 ~35s）
+        while time.time() - t0 < 100:
+            time.sleep(1)
+            try:
+                txt = open(out_path, encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            a_ok = "窗口A] 就绪" in txt
+            b_ok = "窗口B] 就绪" in txt
+            if a_ok and b_ok:
                 break
-            out.append(line.rstrip())
-            if "就绪" in line:
-                ready = True
+            if "Traceback" in txt and not (a_ok or b_ok):
                 break
-            if "Traceback" in line or "MSG-ERROR" in line:
-                for _ in range(12):
-                    extra = proc.stdout.readline()
-                    if not extra:
-                        break
-                    out.append(extra.rstrip())
-                break
-        print("\n".join(out))
-        print("RESULT:", "PASS" if ready else "FAIL")
+        try:
+            fh.close()
+        except OSError:
+            pass
+        try:
+            print(open(out_path, encoding="utf-8", errors="replace").read()[-5000:])
+        except OSError:
+            pass
+        ready = a_ok and b_ok
+        print("RESULT:", "PASS" if ready else "FAIL",
+              f"(耗时 {time.time() - t0:.0f}s, A就绪={a_ok}, B就绪={b_ok})")
         if not ready:
             # 把「为什么没就绪」讲清楚，方便定位
-            joined = "\n".join(out)
+            try:
+                joined = open(out_path, encoding="utf-8", errors="replace").read()
+            except OSError:
+                joined = ""
             if "连不上服务器" in joined:
                 print("  原因：自战模式没连上服务器（检查地址参数是否被识别）")
-            elif not out:
+            elif not joined:
                 print("  原因：子进程没有任何输出（可能启动即崩）")
+            elif "Traceback" in joined:
+                print("  原因：子进程抛异常，见上方 Traceback")
+            else:
+                print("  原因：超时未进入对局（检查准备阶段 ready/seed 交换）")
         return 0 if ready else 1
     finally:
         for p in (proc, srv):
             if p is None:
                 continue
-            p.terminate()
+            # 自战父进程下挂着两个窗口子进程，必须按进程树杀，否则会残留
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)],
+                               capture_output=True)
+            else:
+                p.terminate()
             try:
                 p.wait(timeout=5)
             except subprocess.TimeoutExpired:

@@ -254,16 +254,38 @@ ROOMS_BY_CODE = {} # 邀请码 -> Room
 
 
 def lobby_snapshot():
-    return [{"name": c.name, "stats": DB.stats(c.name), "in_game": c.room is not None}
-            for c in CLIENTS.values()]
+    """在线玩家快照。
+
+    ⚠ 必须在 LOBBY_LOCK 内**拷贝**出客户端列表再遍历：登录/断线是在别的
+    线程改 CLIENTS 的，直接迭代 .values() 会撞上 RuntimeError: dictionary
+    changed size during iteration —— 实测两人同时登录时，先登的那条连接
+    会被这个异常直接掐断（服务器日志：连接异常 RuntimeError(...)）。
+    账号统计查询放到锁外做，避免 sqlite 读写长时间占着大厅锁。
+    """
+    with LOBBY_LOCK:
+        clients = list(CLIENTS.values())
+    snap = []
+    for c in clients:
+        if not getattr(c, "alive", False) or not c.name:
+            continue
+        try:
+            snap.append({"name": c.name, "stats": DB.stats(c.name),
+                         "in_game": c.room is not None})
+        except Exception:            # noqa: BLE001  单个玩家查询失败不该拖垮大厅
+            continue
+    return snap
 
 
 def broadcast_lobby():
     """给所有在大厅（未进入对局）的玩家推送在线列表"""
     snap = lobby_snapshot()
-    for c in list(CLIENTS.values()):
-        if c.room is None:
-            c.push({"m": "lobby", "players": snap})
+    with LOBBY_LOCK:
+        targets = [c for c in CLIENTS.values() if c.room is None]
+    for c in targets:
+        try:
+            c.send({"m": "lobby", "players": snap})
+        except Exception:            # noqa: BLE001  单条推送失败不影响其他玩家
+            continue
 
 
 # ----------------------------------------------------------------- 连接处理

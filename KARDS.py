@@ -1557,6 +1557,10 @@ class App(tk.Tk):
         elif m == "join_err":
             self._lobby_log("⚠ " + str(msg.get("err") or "join_err"))
         elif m == "peer_left":
+            if self.mp_role is not None:
+                # 准备阶段：对手已经走了，别再傻等（否则永远卡在「等待对手准备」）
+                self._mp_route_in_game(msg)
+                return
             self._lobby_log(i18n.t("log_peer_left"))
         elif m == "kick":
             # 被服务器踢掉（同一账号在别处登录）。**不能**自动重连：
@@ -1565,6 +1569,8 @@ class App(tk.Tk):
             self._kicked = True
             self.mp_user = None
             self._lobby_log(i18n.t("log_kicked"))
+            if self.mp_role is not None:
+                self._mp_cleanup_to_menu()      # 准备阶段被踢：直接退出准备界面
         elif m == "err":
             self._lobby_log("⚠ " + str(msg.get("err") or "err"))
         elif m in ("act", "seed", "ready", "concede", "chat", "ping"):
@@ -2165,9 +2171,26 @@ class App(tk.Tk):
         self._schedule("_t_net", 80, self._mp_poll_net)
 
     def _mp_route_in_game(self, msg):
-        """对局中的中转消息：交给 _mp_handle；准备阶段交给 hello 轮询"""
+        """中转消息路由：对局中交给 _mp_handle；准备阶段在此落地 ready/seed
+
+        ⚠ 准备阶段（game is None）**必须**处理 ready/seed：`_lobby_drain_events()`
+        会把 inbox 里的消息全部喂给本方法，若这里只认对局状态，双方点完准备
+        后对手的 ready 会被静默吞掉（主机永远等不到对手准备、永远不发种子）
+        → 两边一起卡在「等待对手准备」。用户实测踩过。
+        """
         if self.game is not None:
             self._mp_handle(msg)
+            return
+        m = msg.get("m")
+        if m == "ready":
+            self.mp_opp = msg
+        elif m == "seed" and self.mp_role == "client":
+            self._mp_launch(msg.get("seed", 0))
+        elif m in ("peer_left", "kick"):
+            messagebox.showerror(i18n.t("mp_title"), i18n.t("mp_peer_left_prep"))
+            self._mp_cleanup_to_menu()
+        elif m == "concede":
+            self._mp_cleanup_to_menu()
 
     def _mp_handle(self, msg):
         g = self.game
@@ -2971,125 +2994,124 @@ class App(tk.Tk):
     HQ_EXPLODE_MS = 1400        # 总部爆炸阶段时长
 
     # ---------------- 冒烟测试 ----------------
+def _debug_addr(addr=None):
+    """解析 --debug-on-net / --debug-auto 的服务器地址参数"""
+    if addr:
+        return addr
+    for arg in sys.argv[1:]:
+        if arg.startswith("--"):
+            continue
+        if net.parse_addr(arg) is not None:
+            return arg
+    return net.DEFAULT_SERVER
+
+
 def run_debug_net(addr=None):
-    """--debug-on-net：本机双开自战（一个进程跑两个窗口，自动连同一服务器）
+    """--debug-on-net：本机双开自战（**两个独立进程**，各自一个窗口）
 
-    用于在一台电脑上体验/调试**服务器中转**联机流程：
-    两个窗口各注册一个临时账号 → 自动匹配 → 各自组卡 → 开局对打。
+    为什么必须是两个进程：
+      对战界面只有 pygame，而 `pygame.display.set_mode()` 在同一进程里
+      第二次调用会让前一个 Surface 失效（实测报 Surface is not
+      initialized）——单进程双窗口再也跑不起来。分开进程还顺带消灭了
+      session.json 共享导致「后连的把先连的顶下线」的老坑。
+      这样做和玩家真实场景（两个人各开一个客户端）完全一致。
+
     前提：先启动 `python kards_server.py`（默认 6000 端口）。
-
-    地址也可从命令行给：`python KARDS.py --debug-on-net 127.0.0.1:6001`
-    （自动化测试就是这么带着随机端口起服务器的）。
+    用法：python KARDS.py --debug-on-net 127.0.0.1:6000
     """
-    import time as _time
-    core.setup_error_log()
-    if addr is None:
-        # 找 --debug-on-net 后面那个「长得像 host:port」的参数
-        for arg in sys.argv[1:]:
-            if arg.startswith("--"):
-                continue
-            if net.parse_addr(arg) is not None:
-                addr = arg
-                break
-    addr = addr or net.DEFAULT_SERVER
-    print(f"[调试自战] 正在启动两个窗口，服务器 {addr} …")
-    a = App()
-    a.title("KARDS 联机调试 · 窗口A")
-    a.geometry("+60+60")
-    b = App()
-    b.title("KARDS 联机调试 · 窗口B")
-    b.geometry("+780+60")
+    import tempfile
 
-    def pump(n=1):
-        for _ in range(n):
-            for w in (a, b):
-                try:
-                    if w.winfo_exists():
-                        w.update()
-                except tk.TclError:
-                    return False
-            _time.sleep(0.01)
-        return True
-
-    a.on_battle()
-    b.on_battle()
-    pump(3)
-    # ⚠ kards_account 的会话缓存(session.json)是**模块级全局**。两个窗口
-    # 同进程自战，如果不作废缓存：窗口B 连上后 `_lobby_poll` 会用窗口A
-    # 刚拿到的令牌自动 resume，服务器判「同账号异地登录」把 A 踢下线
-    # → A 的 mp_link.alive 变 False → 匹配静默失败（探针已实证）。
-    # 真实游戏一个进程只有一个窗口，不会遇到；自战模式必须手动处理。
-    for app in (a, b):
-        account._drop_session()
-        app.srv_addr_var.set(addr)
-        app._lobby_connect()
-        # 等到「连上并且自动 resume 判定结束」再动下一个窗口，
-        # 否则两个窗口的 resume 会互相踩
-        t0 = _time.time()
-        while app.mp_link is None and _time.time() - t0 < 8:
-            if not pump(1):
-                return
-    # 等两个窗口都连上服务器
-    t0 = _time.time()
-    while (a.mp_link is None or b.mp_link is None) and _time.time() - t0 < 12:
-        if not pump(1):
-            return
-    if a.mp_link is None or b.mp_link is None:
-        print("[调试自战] 连不上服务器，请先运行 python kards_server.py")
-        return
-
-    # 两个窗口各自注册临时账号（登录框会自动弹出，这里直接走账号模块）
-    for app, who in ((a, "DebugA"), (b, "DebugB")):
-        account.set_remote(app.mp_link, addr)
-        pw = "debug1234"
-        ok, err = account.login(who, pw)
-        if not ok:
-            ok, err = account.register(who, pw)
-        if not ok:
-            print(f"[调试自战] {who} 账号失败：{err}")
-            return
-        app.mp_user = account.current()
-        app._apply_account(app.mp_user)
-        app._srv_send({"m": "lobby"})
-    # 关掉可能弹出的账号窗（避免挡住调试视线）
-    pump(20)
-    for app in (a, b):
-        for w in app.winfo_children():
-            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "account":
-                w.destroy()
-    pump(3)
-
-    a._mp_quick_match()
-    pump(2)
-    b._mp_quick_match()
-
-    # 等匹配成功（_lobby_poll 收到 matched 后自动进入选阵营）
-    t0 = _time.time()
-    while (a.mp_role is None or b.mp_role is None) and _time.time() - t0 < 15:
-        if not pump(1):
-            return
-    pump(60)   # 等 after(500ms) 调度选阵营界面
-
-    for app, nation in ((a, "德国"), (b, "苏联")):
-        app._build_deck_builder(nation, mp=True)
-        deck = core.build_deck(nation, app.db)
-        app.deck_counts = {}
-        for c in deck:
-            app.deck_counts[c.name] = app.deck_counts.get(c.name, 0) + 1
-        app._start_mp()
-
-    t0 = _time.time()
-    while (a.game is None or b.game is None) and _time.time() - t0 < 15:
-        if not pump(1):
-            return
-    print("[调试自战] 就绪！两个窗口分属联机双方，自己操作两边即可对打。")
-
+    addr = _debug_addr(addr)
+    print(f"[调试自战] 启动两个独立进程，服务器 {addr} …")
+    base = os.environ.get("KARDS_DATA_DIR") or tempfile.mkdtemp(prefix="kards_dbgnet_")
+    script = ([sys.executable] if getattr(sys, "frozen", False)
+              else [sys.executable, os.path.abspath(__file__)])
+    procs = []
+    for tag in ("A", "B"):
+        env = dict(os.environ)
+        env["KARDS_DATA_DIR"] = os.path.join(base, tag)
+        os.makedirs(env["KARDS_DATA_DIR"], exist_ok=True)
+        procs.append(subprocess.Popen(
+            script + ["--debug-auto", addr, tag, "--no-fullscreen"],
+            env=env, cwd=os.path.dirname(os.path.abspath(__file__))))
+    print("[调试自战] 两个窗口已拉起：A=DebugA(德国) / B=DebugB(苏联)，"
+          "自动登录→匹配→组卡→开局。")
     try:
-        while pump(1):
-            pass
-    except tk.TclError:
+        for p in procs:
+            p.wait()
+    except KeyboardInterrupt:
         pass
-    print("[调试自战] 已退出。")
+    finally:
+        for p in procs:
+            if p.poll() is None:
+                p.terminate()
+
+
+def run_debug_auto(addr=None, tag="A"):
+    """--debug-auto：调试自战的子进程（一个窗口跑完 连服→登录→匹配→组卡→开局）"""
+    addr = _debug_addr(addr)
+    me = "DebugA" if tag == "A" else "DebugB"
+    nation = "德国" if tag == "A" else "苏联"
+    try:
+        # 子进程 stdout 被父进程接管时默认是缓冲的，被 taskkill 会丢日志
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError, OSError):
+        pass
+    app = App()
+    app.title(f"KARDS 联机调试 · 窗口{tag}")
+    app.geometry("+60+60" if tag == "A" else "+780+60")
+    app.on_battle()                 # 先进联机大厅：地址框/日志框在这里才建出来
+    st = {"n": 0, "deck": False, "said": False}
+
+    def tick():
+        st["n"] += 1
+        n = st["n"]
+        try:
+            if app.game is not None:
+                if not st["said"]:
+                    st["said"] = True
+                    print(f"[窗口{tag}] 就绪！联机对局已开始。")
+                app.after(500, tick)
+                return
+            if n == 2:
+                app.srv_addr_var.set(addr)
+                app._lobby_connect()
+            elif n == 6:
+                if app.mp_link is None:
+                    print(f"[窗口{tag}] 连不上服务器 {addr}，请先运行 kards_server.py")
+                    return
+                account.set_remote(app.mp_link, addr)
+                ok, err = account.login(me, "debug1234")
+                if not ok:
+                    ok, err = account.register(me, "debug1234")
+                if not ok:
+                    print(f"[窗口{tag}] 账号失败：{err}")
+                    return
+                app.mp_user = account.current()
+                app._apply_account(app.mp_user)
+                app._srv_send({"m": "lobby"})
+                # 关掉自动弹出的账号窗，别挡视线
+                for w in app.winfo_children():
+                    if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "account":
+                        w.destroy()
+            elif n == 9:
+                app._mp_quick_match()
+            elif (app.mp_role is not None and not st["deck"]
+                  and getattr(app, "start_frame", None) is not None
+                  and app.start_frame.winfo_exists()):
+                st["deck"] = True
+                app._build_deck_builder(nation, mp=True)
+                deck = core.build_deck(nation, app.db)
+                app.deck_counts = {}
+                for c in deck:
+                    app.deck_counts[c.name] = app.deck_counts.get(c.name, 0) + 1
+                app._start_mp()
+        except Exception as exc:                       # noqa: BLE001
+            print(f"[窗口{tag}] 异常：{exc!r}")
+        app.after(300, tick)
+
+    app.after(300, tick)
+    app.mainloop()
 
 
 def _another_instance_running():
@@ -3313,6 +3335,13 @@ def main():
         sys.exit(0 if kards_board.smoke() else 1)
     if "--debug-on-net" in sys.argv:
         run_debug_net()
+        return
+    if "--debug-auto" in sys.argv:
+        # 调试自战的子进程入口：单实例互斥体不能拦（同一台机器要开两个窗口）
+        i = sys.argv.index("--debug-auto")
+        rest = sys.argv[i + 1:]
+        run_debug_auto(rest[0] if rest else None,
+                       rest[1] if len(rest) > 1 else "A")
         return
     if "--smoke" not in sys.argv and _another_instance_running():
         return
