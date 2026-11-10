@@ -30,3 +30,6 @@ decks_*/
 # ---- 工作区元数据 ----
 .workbuddy/
 debug/shots/
+
+# PyInstaller 默认工作目录（兜底）
+build/
