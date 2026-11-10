@@ -20,6 +20,7 @@ logs/
 settings.json
 accounts.json
 session.json
+currency.json
 kards_server.db*
 
 # 自组卡组（玩家数据）
