@@ -98,6 +98,8 @@ KEYWORD_DESC = {
     "动员": "你的回合开始时 +1/+1，直到它受到伤害为止",
     "收缴": "消灭敌方单位时，将一张 1/1 副本（费用至多 3）加入手牌",
     "亡计": "被消灭时，对敌方总部造成伤害（由卡牌效果授予）",
+    "召集": "将一个单位移动到支援阵线（不耗行动费、不算本回合移动）",
+    "进军": "将一个单位移动到前线（不耗行动费、不算本回合移动）",
 }
 
 # 关键词速查表：给「关键词说明」界面用。
@@ -115,6 +117,8 @@ KEYWORD_GUIDE = [
     ("动员", "你的回合开始时 +1/+1，直到它受到伤害为止", "触发"),
     ("亡计", "被消灭时，对敌方总部造成伤害", "触发"),
     ("收缴", "消灭敌方单位时，将一张 1/1 副本（费用至多 3）加入手牌", "触发"),
+    ("召集", "将一个单位移动到支援阵线（不耗行动费，也不算它本回合的移动）", "其他"),
+    ("进军", "将一个单位移动到前线（不耗行动费，也不算它本回合的移动）", "其他"),
 ]
 
 # 兵种与规则术语速查（同样用于「关键词说明」界面）
@@ -175,6 +179,8 @@ KEYWORD_I18N = {
     "动员": {"en": "Mobilize", "ja": "動員"},
     "亡计": {"en": "Deathrattle", "ja": "遺言"},
     "收缴": {"en": "Confiscate", "ja": "接収"},
+    "召集": {"en": "Rally", "ja": "召集"},
+    "进军": {"en": "Advance", "ja": "進軍"},
     "行动费": {"en": "Operation cost", "ja": "行動コスト"},
     "前线": {"en": "Frontline", "ja": "前線"},
     "支援阵线": {"en": "Support line", "ja": "支援ライン"},
@@ -229,6 +235,10 @@ KEYWORD_DESC_I18N = {
              "ja": "破壊された時、敵本部にダメージを与える"},
     "收缴": {"en": "When it kills an enemy unit, add a 1/1 copy (cost<=3) to your hand",
              "ja": "敵ユニットを倒すと 1/1 コピー（コスト3以下）を手札に追加"},
+    "召集": {"en": "Move a unit to the support line (no operation cost, doesn't count as its move)",
+             "ja": "ユニットを支援ラインへ移動（行動コスト不要、移動回数も消費しない）"},
+    "进军": {"en": "Move a unit to the frontline (no operation cost, doesn't count as its move)",
+             "ja": "ユニットを前線へ移動（行動コスト不要、移動回数も消費しない）"},
     "行动费": {"en": "Moving and attacking both cost this. The ⚡ number on the card.",
                "ja": "移動と攻撃で消費する。カード下の ⚡ の数値。"},
     "前线": {"en": "The middle row. Infantry must be here to attack enemy units.",
@@ -781,6 +791,29 @@ def mk_draw(n):
     return eff
 
 
+def mk_advance_ally():
+    """通用指令: [进军] 把攻击力最高的支援阵线友方单位调到前线"""
+    def eff(game, caster):
+        t = game._strongest([u for u in caster.board if u.position == "后方"])
+        if t is None:
+            game.log("  [进军] 我方没有支援阵线单位，效果落空。")
+            return
+        game.keyword_move(t, "前线", source="进军")
+    return eff
+
+
+def mk_rally_ally():
+    """通用指令: [召集] 把最危急（防御最低）的前线友方单位撤回支援阵线"""
+    def eff(game, caster):
+        cands = [u for u in caster.board if u.position == "前线"]
+        if not cands:
+            game.log("  [召集] 我方没有前线单位，效果落空。")
+            return
+        t = min(cands, key=lambda u: (u.defense, u.attack))
+        game.keyword_move(t, "后方", source="召集")
+    return eff
+
+
 def mk_destroy_random():
     """通用指令: 消灭一个随机敌方单位"""
     def eff(game, caster):
@@ -951,6 +984,10 @@ EXTRA_CARDS = [
     # ---- 指令 ----
             OrderCard("冬季战争", "苏联", 1, mk_deal_all(1), "对所有敌方单位造成 1 点伤害", rarity="稀有"),
             OrderCard("总参二局", "波兰", 2, mk_draw(1), "抽 1 张牌", rarity="普通"),
+            OrderCard("总攻命令", "苏联", 1, mk_advance_ally(),
+                      "[进军] 将攻击力最高的支援阵线友方单位移动到前线", rarity="普通"),
+            OrderCard("战术撤退", "英国", 1, mk_rally_ally(),
+                      "[召集] 将防御最低的前线友方单位撤回支援阵线", rarity="普通"),
             OrderCard("突然袭击", "德国", 2, mk_destroy_cost_le(2), "消灭一个费用不大于 2 的敌方单位（攻击力最高者优先）", rarity="稀有"),
             OrderCard("虎！虎！虎！", "日本", 2, mk_deal_all(1), "对所有敌方单位造成 1 点伤害", rarity="普通"),
             OrderCard("空中闪击", "德国", 3, mk_deal_hq(3), "对敌方总部造成 3 点伤害", rarity="稀有"),
@@ -990,7 +1027,7 @@ def card_database():
         UnitCard("装甲掷弹兵", "德国", 2, 2, 2, ["奋战"], "步兵", rarity="普通"),
         UnitCard("山地猎兵", "德国", 3, 4, 3, [], "步兵", rarity="普通"),
         UnitCard("Bf-109战斗机", "德国", 3, 3, 4, [], "战斗机", rarity="普通"),
-        UnitCard("四号坦克", "德国", 6, 5, 5, [], "坦克",
+        UnitCard("四号坦克", "德国", 6, 5, 5, ["召集"], "坦克",
                  traits={"deploy": "retreat"}, rarity="稀有"),
         UnitCard("88毫米炮", "德国", 6, 3, 4, ["伏击"], "炮兵",
                  traits={"dmg2": ["空军", "坦克"]}, rarity="稀有"),
@@ -1710,14 +1747,25 @@ class Game:
             return
         p = unit.owner
         foe = self.opponent_of(p)
-        if d == "retreat":      # 四号坦克: 使一个（攻击力最高的）前线敌方单位撤回后方
+        if d == "retreat":      # 四号坦克: [召集] 一个攻击力最高的前线敌方单位移到支援阵线
             t = self._strongest([u for u in foe.board if u.position == "前线"])
             if t:
-                t.position = "后方"
-                self.log(f"  [部署] {unit.name} 迫使 {t.name} 撤回了后方。")
-                self.emit({"type": "move", "unit": t})
+                self.keyword_move(t, "后方", source="召集")
             else:
-                self.log("  [部署] 敌方没有前线单位，撤退效果落空。")
+                self.log("  [部署] 敌方没有前线单位，[召集] 效果落空。")
+        elif d == "rally_ally":   # [召集]友方：最危急（防御最低）的前线友方单位撤回支援阵线
+            cands = [u for u in p.board if u.position == "前线"]
+            t = min(cands, key=lambda u: (u.defense, u.attack)) if cands else None
+            if t:
+                self.keyword_move(t, "后方", source="召集")
+            else:
+                self.log("  [部署] 我方没有前线单位，[召集] 效果落空。")
+        elif d == "advance_ally":  # [进军]友方：攻击力最高的支援阵线友方单位调到前线
+            t = self._strongest([u for u in p.board if u.position == "后方"])
+            if t:
+                self.keyword_move(t, "前线", source="进军")
+            else:
+                self.log("  [部署] 我方没有支援阵线单位，[进军] 效果落空。")
         elif d == "per_enemy":  # 第13步兵团: 每有一个敌方单位，+1/+1
             n = len(foe.board)
             if n:
@@ -1855,6 +1903,27 @@ class Game:
             unit.position = "后方"
             self.log(f"  {unit.name} 撤回了后方。")
         unit.moved = True
+        return True
+
+    # ---------------- 词条移动（召集 / 进军）----------------
+    def keyword_move(self, unit, dest, source=""):
+        """[召集]/[进军] 的位置移动：不耗行动费、也不占用单位本回合的移动
+        （unit.moved 不动）—— 这是它比普通"移动"强的全部所在。
+
+        与普通移动的唯一规则交集：前线仍只能一方占领（can_take_frontline）。
+        否则"进军"会变成无视占线的免费强占，比原版移动还强，占线战术就废了。
+        """
+        tag = f"[{source}] " if source else ""
+        where = "前线" if dest == "前线" else "支援阵线"
+        if unit.position == dest:
+            self.log(f"  {tag}{unit.name} 已在{where}，效果落空。")
+            return False
+        if dest == "前线" and not self.can_take_frontline(unit.owner):
+            self.log(f"  {tag}前线被敌方占领或已满，{unit.name} 无法进军。")
+            return False
+        unit.position = dest
+        self.log(f"  {tag}{unit.name} {'奔赴前线！' if dest == '前线' else '移回了支援阵线。'}")
+        self.emit({"type": "move", "unit": unit})
         return True
 
     # ---------------- 攻击 ----------------

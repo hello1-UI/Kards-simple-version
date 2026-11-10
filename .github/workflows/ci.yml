@@ -41,6 +41,7 @@ jobs:
           python debug/test_concede.py
           python debug/test_theme.py
           python debug/test_deck_limits.py
+          python debug/test_keywords_move.py
 
       - name: 对战棋盘（pygame，dummy 驱动）
         run: |
