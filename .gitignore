@@ -13,6 +13,7 @@ pyinst/dist_tools/
 # 分发包（本地打包后自行上传 Release）
 KARDS.zip
 KARDS_SimpleVersion-Setup.zip
+SHA256SUMS.txt
 
 # ---- 运行时状态与日志 ----
 logs/
