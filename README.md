@@ -22,7 +22,9 @@ F11 可切换窗口化。
   `SHA256SUMS.txt`）；对不上就换源重下，绝不装来路不明的东西
 - **多语言界面**：简体中文 / English / 日本語（默认中文）
 - **背景音乐**：主菜单 / 对战 / 结算三段场景曲自动切换，`♪` 一键开关、
-  设置窗可调音量；缺音频文件或没有声卡时静默降级，不影响对局
+  设置窗可调音量；**曲库自选**——每个场景从音乐文件夹里任意挑一首（也支持
+  随机 / 静音），丢新歌进去立刻能扫到，不用重新打包；缺音频或没有声卡时
+  静默降级，不影响对局
 
 ## 运行
 
@@ -53,14 +55,19 @@ python KARDS.py --board-smoke            # 自检：pygame 棋盘跑若干帧 + 
 assets/cards/<卡牌名>.png     # 卡面（不含文件名后缀，如「虎式坦克.png」）
 assets/hq/<国家>.png          # 总部图（如「德国.png」）
 assets/sfx/<事件>.wav|ogg     # 音效：deploy / move / attack / win / lose
-assets/music/<场景>.ogg       # 背景音乐：menu / battle / result（也支持 .wav / .mp3）
+assets/music/                 # 背景音乐曲库：目录里的 .ogg/.wav/.mp3/.flac 全部可选
 ```
 
-安装版会优先读 **exe 同级目录**下的 `assets/`，所以玩家可以自己补图、换曲而不用重新打包。
+安装版会优先读 **exe 同级目录**下的 `assets/`，玩家自己的歌推荐放进
+`%USERPROFILE%\AppData\Kards-Simple-Version\music\`（设置窗「打开音乐文件夹」
+一键直达），**两者都会进曲库，自选目录同名曲子优先**。
 
-背景音乐随包附带三首程序合成的占位曲（`menu.wav` / `battle.wav` / `result.wav`），
-想换风格直接同名覆盖即可；开关在**主菜单 ♪ 按钮 / 设置窗 / 对局暂停菜单**，
-音量在设置窗里调，偏好存 `settings.json`。
+背景音乐随包附带 9 首曲目；在**设置 → 背景音乐**里给 菜单 / 对战 / 结算
+三个场景各挑一首（或选「随机」/「不放音乐」），每行都有 ▶ 试听，选完即刻生效。
+开关在**主菜单 ♪ 按钮 / 设置窗 / 对局暂停菜单**，音量与选曲偏好都存 `settings.json`。
+
+⚠ `.m4a / .aac / .wma` 这些格式 pygame 解不了：跑 `py debug/convert_music.py`
+（依赖 `imageio-ffmpeg`）可把音乐目录里的 m4a 批量转成 .ogg。
 
 ## 模块一览
 
@@ -71,7 +78,7 @@ assets/music/<场景>.ogg       # 背景音乐：menu / battle / result（也支
 | `kards_board.py` | pygame 对战棋盘（动画、卡面、音效），可脱离 Tk 单测 |
 | `kards_theme.py` | **配色与字体清单的唯一真源**，两套渲染器共用 |
 | `kards_i18n.py` | 三语文本与本地偏好（`settings.json`） |
-| `kards_music.py` | 背景音乐：场景切歌、音量/开关、缺资源静默降级 |
+| `kards_music.py` | 背景音乐：曲库扫描、分场景自选、场景切歌、缺资源静默降级 |
 | `kards_net.py` / `kards_server.py` | 联机客户端 / 中继服务器 |
 | `kards_account.py` | 本地账号与游客会话 |
 | `kards_update.py` | 自动更新（查询、下载、SHA256 校验、解压覆盖） |
