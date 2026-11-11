@@ -21,6 +21,8 @@ F11 可切换窗口化。
   下载完按 **SHA256** 校验完整性（校验值取自 Release 的 digest 或
   `SHA256SUMS.txt`）；对不上就换源重下，绝不装来路不明的东西
 - **多语言界面**：简体中文 / English / 日本語（默认中文）
+- **背景音乐**：主菜单 / 对战 / 结算三段场景曲自动切换，`♪` 一键开关、
+  设置窗可调音量；缺音频文件或没有声卡时静默降级，不影响对局
 
 ## 运行
 
@@ -43,7 +45,7 @@ python KARDS.py --board-smoke            # 自检：pygame 棋盘跑若干帧 + 
 组卡仍是 tkinter）。pygame 缺失或装坏时开局会明确报错提示安装，
 不会再悄悄换一种界面。
 
-## 卡面 / 音效资产（可选）
+## 卡面 / 音效 / 音乐资产（可选）
 
 把图片丢进 `assets/` 就会自动使用，不改一行代码；缺失时程序化绘制兜底：
 
@@ -51,9 +53,14 @@ python KARDS.py --board-smoke            # 自检：pygame 棋盘跑若干帧 + 
 assets/cards/<卡牌名>.png     # 卡面（不含文件名后缀，如「虎式坦克.png」）
 assets/hq/<国家>.png          # 总部图（如「德国.png」）
 assets/sfx/<事件>.wav|ogg     # 音效：deploy / move / attack / win / lose
+assets/music/<场景>.ogg       # 背景音乐：menu / battle / result（也支持 .wav / .mp3）
 ```
 
-安装版会优先读 **exe 同级目录**下的 `assets/`，所以玩家可以自己补图而不用重新打包。
+安装版会优先读 **exe 同级目录**下的 `assets/`，所以玩家可以自己补图、换曲而不用重新打包。
+
+背景音乐随包附带三首程序合成的占位曲（`menu.wav` / `battle.wav` / `result.wav`），
+想换风格直接同名覆盖即可；开关在**主菜单 ♪ 按钮 / 设置窗 / 对局暂停菜单**，
+音量在设置窗里调，偏好存 `settings.json`。
 
 ## 模块一览
 
@@ -64,6 +71,7 @@ assets/sfx/<事件>.wav|ogg     # 音效：deploy / move / attack / win / lose
 | `kards_board.py` | pygame 对战棋盘（动画、卡面、音效），可脱离 Tk 单测 |
 | `kards_theme.py` | **配色与字体清单的唯一真源**，两套渲染器共用 |
 | `kards_i18n.py` | 三语文本与本地偏好（`settings.json`） |
+| `kards_music.py` | 背景音乐：场景切歌、音量/开关、缺资源静默降级 |
 | `kards_net.py` / `kards_server.py` | 联机客户端 / 中继服务器 |
 | `kards_account.py` | 本地账号与游客会话 |
 | `kards_update.py` | 自动更新（查询、下载、SHA256 校验、解压覆盖） |
