@@ -61,3 +61,6 @@ jobs:
 
       - name: 多语言
         run: python debug/test_i18n.py
+
+      - name: 背景音乐
+        run: python debug/test_music.py

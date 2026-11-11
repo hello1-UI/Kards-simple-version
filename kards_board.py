@@ -38,6 +38,7 @@ import pygame
 
 import kards_engine as core
 import kards_i18n as i18n
+import kards_music as music
 # 配色/字体清单与 KARDS.py 共用一份真源。以前这里是「拷贝一份避免循环
 # import，改动需两边同步」—— 事实上已经悄悄不同步了（稀有度宝石恒灰）。
 from kards_theme import (BG, PANEL, CARD_BG, TEXT, DIM, RED, GREEN, GOLD,
@@ -1171,9 +1172,12 @@ class PygameBoard:
     # ---- 暂停菜单 ----
 
     def _pause_items(self):
+        # 音乐项就地显示当前状态，点一下切换（对局中想安静不必翻设置）
+        music_lbl = t("music_on") if music.is_enabled() else t("music_off")
         return [("resume", t("btn_resume")),
                 ("concede", t("btn_surrender")),
                 ("leave", t("btn_to_menu")),
+                ("music", music_lbl),
                 ("quit", t("btn_quit"))]
 
     def _handle_pause(self, ev):
@@ -1200,6 +1204,11 @@ class PygameBoard:
                         self.on_intent({"k": "leave"})
                     else:
                         self.pause_confirm = "leave"
+                elif key == "music":
+                    try:
+                        music.toggle(resume_track="battle")
+                    except Exception:                      # noqa: BLE001
+                        pass
                 elif key == "quit":
                     self.result = "quit"
                     self.running = False

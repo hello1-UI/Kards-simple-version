@@ -18,6 +18,7 @@
 """
 import os
 import sys
+import tempfile
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +36,12 @@ import pygame  # noqa: E402
 import kards_board as board  # noqa: E402
 import kards_engine as core  # noqa: E402
 import kards_i18n as i18n  # noqa: E402
+import kards_music as K_BOARD_MUSIC  # noqa: E402
+
+# 音乐偏好改写到临时文件：测试切换开关时不要动玩家真实的 settings.json
+i18n._SETTINGS_PATH = os.path.join(
+    tempfile.mkdtemp(prefix="kards_board_music_"), "settings.json")
+K_BOARD_MUSIC.reset_cache()
 
 PASS, FAIL = [], []
 SECTION = [""]
@@ -537,8 +544,8 @@ def test_pause_menu():
 
     b.pause = True
     items = b._pause_items()
-    check("暂停菜单含 继续/投降/主菜单/退出 四项",
-          [k for k, _ in items] == ["resume", "concede", "leave", "quit"],
+    check("暂停菜单含 继续/投降/主菜单/音乐/退出 五项",
+          [k for k, _ in items] == ["resume", "concede", "leave", "music", "quit"],
           str([k for k, _ in items]))
     check("暂停菜单文案已本地化（非键名）",
           all(lbl and not lbl.startswith("btn_") for _, lbl in items),
@@ -574,7 +581,15 @@ def test_pause_menu():
           app.intents == [{"k": "leave"}], str(app.intents))
 
     b.pause = True
+    before_music = K_BOARD_MUSIC.is_enabled()
     b.handle_event(Ev(pygame.MOUSEBUTTONDOWN, item_rect(3).center))
+    check("点「音乐」→ 开关翻转且不退出暂停",
+          K_BOARD_MUSIC.is_enabled() is not before_music and b.pause is True,
+          str(K_BOARD_MUSIC.status()))
+    K_BOARD_MUSIC.set_enabled(before_music, resume_track="battle")
+
+    b.pause = True
+    b.handle_event(Ev(pygame.MOUSEBUTTONDOWN, item_rect(4).center))
     check("退出 → result='quit' 且主循环停止",
           b.result == "quit" and b.running is False)
 

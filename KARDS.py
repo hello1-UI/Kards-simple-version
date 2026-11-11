@@ -38,6 +38,7 @@ import kards_net as net
 import kards_account as account
 import kards_host
 import kards_update as net_update
+import kards_music as music
 # 配色/字体清单的唯一真源（与 kards_board.py 共用，别再抄第二份）
 from kards_theme import (BG, PANEL, CARD_BG, CARD_SEL, TEXT, DIM,
                          RED, GREEN, GOLD, NATION_COLOR,
@@ -53,7 +54,7 @@ APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 # a: 重要修复(1位数)  b: 卡牌更新(2位数)  c: 赛季更新(2位数)  d: 补丁修复(3位数)
 # 升位规则: 某位 +1 后, 其右侧所有位清零（如卡牌更新 1.01.00.000）
 # 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
-VERSION = (1, 5, 0, 1)
+VERSION = (1, 6, 0, 0)
 
 # 字族：客户机器可能没有微软雅黑（精简版/英文 Windows），tkinter 显式指定
 # 字族时不会跨族回退，中文会渲染成方块。App 启动时 ensure_tk_cjk_font()
@@ -347,6 +348,7 @@ class App(tk.Tk):
         self.bind_all("<Escape>", self.on_esc)
         self.bind_all("<F1>", self.on_f1)
         self._build_start()
+        self._music_play("menu", fade_ms=1200)   # 进来先淡入主菜单曲
         if not self.account and self.anim_enabled:
             self.after(300, self._account_dialog)
         # 启动后静默检查更新（后台线程，不阻塞界面；没更新就自己消失）
@@ -381,6 +383,10 @@ class App(tk.Tk):
         # 不是我们拉的不动（可能是别人开的、或玩家自己想留着）。
         try:
             kards_host.stop()
+        except Exception:                        # noqa: BLE001
+            pass
+        try:
+            music.stop(fade_ms=250)
         except Exception:                        # noqa: BLE001
             pass
         tk.Tk.destroy(self)
@@ -499,7 +505,13 @@ class App(tk.Tk):
         self.guest_hint.pack(side="left", padx=8)
         self.currency_lbl = tk.Label(box, text="", bg=BG, fg=GOLD, font=FONT_S)
         self.currency_lbl.pack(side="left", padx=(16, 0))
+        # 一键静音：不想听音乐时不用翻设置窗
+        self.music_btn = tk.Button(box, text=self._music_btn_text(), bg="#4a4f5a",
+                                   fg=TEXT, font=FONT_S, bd=0, padx=10, pady=6,
+                                   cursor="hand2", command=self._toggle_music)
+        self.music_btn.pack(side="left", padx=(16, 0))
         self._refresh_account_btn()
+        self._refresh_music_btn()
 
     # ---------------- 账号管理 ----------------
     def _account_btn_text(self):
@@ -556,6 +568,87 @@ class App(tk.Tk):
         self.account = name
         core.set_decks_dir(account.deck_dir(name))
         self._refresh_account_btn()
+
+    # ---------------- 背景音乐 ----------------
+    # 播放/切歌统一走 kards_music（细节见该模块）。这里只做两件事：
+    # ① 把「界面」翻译成「场景曲目」；② 保证任何异常都不会冒到界面层。
+    def _music_play(self, scene, fade_ms=700):
+        """切换场景音乐。缺资源 / 没装 pygame / 声卡异常都静默降级。"""
+        try:
+            music.play(scene, fade_ms=fade_ms)
+        except Exception:                                  # noqa: BLE001
+            pass
+        self._refresh_music_btn()
+
+    def _music_btn_text(self):
+        if music.is_enabled():
+            return i18n.t("music_on")
+        return i18n.t("music_off")
+
+    def _refresh_music_btn(self):
+        """刷新主菜单的 ♪ 按钮（控件可能已随界面重建销毁，同货币标签的写法）"""
+        btn = getattr(self, "music_btn", None)
+        if btn is None:
+            return
+        try:
+            if not btn.winfo_exists():
+                return
+            btn.configure(text=self._music_btn_text(),
+                          fg=TEXT if music.is_enabled() else DIM)
+        except tk.TclError:
+            pass
+
+    def _toggle_music(self):
+        """主菜单一键开关音乐（开了就续放当前界面该放的曲子）"""
+        try:
+            music.toggle(resume_track="menu" if self.game is None else "battle")
+        except Exception:                                  # noqa: BLE001
+            pass
+        self._refresh_music_btn()
+
+    def _music_row(self, win):
+        """设置窗内的音乐区块：开关按钮 + 音量滑块 + 缺资源提示。
+
+        做成共用方法，主菜单设置窗和对局内设置窗各调一次，避免两处逻辑漂移。
+        """
+        tk.Label(win, text=i18n.t("settings_music"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(10, 2))
+        row = tk.Frame(win, bg=BG)
+        row.pack()
+        btn = tk.Button(row, bg="#4a5f7a" if music.is_enabled() else "#4a4f5a",
+                        fg=TEXT, font=FONT_S, bd=0, padx=12, pady=6,
+                        cursor="hand2", width=10)
+
+        def flip():
+            # 对局中关掉再开：续放对局曲；在菜单就续放菜单曲
+            scene = "battle" if self.game is not None else "menu"
+            music.toggle(resume_track=scene)
+            btn.configure(text=self._music_btn_text(),
+                          bg="#4a5f7a" if music.is_enabled() else "#4a4f5a")
+            self._refresh_music_btn()
+
+        btn.configure(text=self._music_btn_text(), command=flip)
+        btn.pack(side="left", padx=(0, 10))
+
+        tk.Label(row, text=i18n.t("music_volume"), bg=BG, fg=TEXT,
+                 font=FONT_S).pack(side="left", padx=(0, 6))
+
+        def on_scale(v):
+            try:
+                music.set_volume(int(float(v)))
+            except (TypeError, ValueError):
+                pass
+
+        scale = tk.Scale(row, from_=0, to=100, orient="horizontal", length=130,
+                         bg=BG, fg=TEXT, troughcolor="#2c313c", highlightthickness=0,
+                         bd=0, sliderrelief="flat", showvalue=0,
+                         command=on_scale)
+        scale.set(music.get_volume())
+        scale.pack(side="left")
+        if not music.available():
+            tk.Label(win, text=i18n.t("music_no_files"), bg=BG, fg=DIM,
+                     font=FONT_S, wraplength=320, justify="left").pack(pady=(2, 0))
+        return btn
 
     def _account_dialog(self, for_server=False):
         # 单实例：反复点击（或启动定时器与手动点击撞车）时不再叠开多个窗口
@@ -677,7 +770,7 @@ class App(tk.Tk):
         win.role = "start_settings"
         win.title(i18n.t("settings_title"))
         win.configure(bg=BG)
-        win.geometry("380x460")
+        win.geometry("380x580")
         win.transient(self)
         tk.Label(win, text=i18n.t("settings_title"), bg=BG, fg=TEXT,
                  font=FONT_XL).pack(pady=(18, 6))
@@ -691,6 +784,7 @@ class App(tk.Tk):
             self.open_start_settings()
 
         self._lang_buttons(win, on_change=apply_lang)
+        self._music_row(win)
 
         def show_help():
             messagebox.showinfo(i18n.t("help_title"), i18n.t("help_text"))
@@ -2109,6 +2203,7 @@ class App(tk.Tk):
         me = core.Player("你", self.deck_nation, my_deck)
         foe = core.Player(foe_name, opp.get("nation", "德国"), opp_deck)
         self.game = GUIGame(me, foe, self.add_log, self.on_game_event)
+        self._music_play("battle")
         for attr in ("start_frame", "builder_frame"):
             fr = getattr(self, attr, None)
             if fr is not None and fr.winfo_exists():
@@ -2345,6 +2440,7 @@ class App(tk.Tk):
         p1 = core.Player("你", nation, deck if deck is not None else core.build_deck(nation, self.db))
         p2 = core.Player("AI", ai_nation, core.build_deck(ai_nation, self.db))
         self.game = GUIGame(p1, p2, self.add_log, self.on_game_event)
+        self._music_play("battle")
         if hasattr(self, "start_frame") and self.start_frame.winfo_exists():
             self.start_frame.destroy()
         if hasattr(self, "builder_frame") and self.builder_frame.winfo_exists():
@@ -2707,12 +2803,13 @@ class App(tk.Tk):
         win.role = "ingame_settings"
         win.title(i18n.t("settings_title"))
         win.configure(bg=BG)
-        win.geometry("340x460")
+        win.geometry("340x580")
         win.transient(self)
         tk.Label(win, text=i18n.t("settings_title"), bg=BG, fg=TEXT,
                  font=FONT_XL).pack(pady=(16, 6))
         # 对局中切语言：偏好立即保存，界面文本随下次界面重建生效
         self._lang_buttons(win, on_change=win.destroy)
+        self._music_row(win)
 
         def surrender():
             if messagebox.askyesno(i18n.t("surrender_title"), i18n.t("surrender_confirm")):
@@ -2814,6 +2911,7 @@ class App(tk.Tk):
             if fr is not None and fr.winfo_exists():
                 fr.destroy()
         self._build_start()
+        self._music_play("menu")
 
     # ---------------- 回合流转 ----------------
     def on_end_turn(self):
@@ -2957,6 +3055,7 @@ class App(tk.Tk):
         self._finishing = True
         g = self.game
         self._mp_game_over = True
+        self._music_play("result", fade_ms=900)
         if winner is None:
             # 交给引擎统一判定（区分平局 / 投降 / 被打死）。
             # 注意：winner_of() 在"没人死"时也返回 None，所以不能直接拿来
