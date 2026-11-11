@@ -54,7 +54,7 @@ APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 # a: 重要修复(1位数)  b: 卡牌更新(2位数)  c: 赛季更新(2位数)  d: 补丁修复(3位数)
 # 升位规则: 某位 +1 后, 其右侧所有位清零（如卡牌更新 1.01.00.000）
 # 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
-VERSION = (1, 6, 0, 0)
+VERSION = (1, 6, 1, 0)
 
 # 字族：客户机器可能没有微软雅黑（精简版/英文 Windows），tkinter 显式指定
 # 字族时不会跨族回退，中文会渲染成方块。App 启动时 ensure_tk_cjk_font()
@@ -607,9 +607,10 @@ class App(tk.Tk):
         self._refresh_music_btn()
 
     def _music_row(self, win):
-        """设置窗内的音乐区块：开关按钮 + 音量滑块 + 缺资源提示。
+        """设置窗内的音乐区块：开关 + 音量 + 三个场景各选一首曲子。
 
         做成共用方法，主菜单设置窗和对局内设置窗各调一次，避免两处逻辑漂移。
+        曲库来自 assets/music（随包）与玩家音乐目录（自选），见 kards_music。
         """
         tk.Label(win, text=i18n.t("settings_music"), bg=BG, fg=DIM,
                  font=FONT_S).pack(pady=(10, 2))
@@ -621,8 +622,7 @@ class App(tk.Tk):
 
         def flip():
             # 对局中关掉再开：续放对局曲；在菜单就续放菜单曲
-            scene = "battle" if self.game is not None else "menu"
-            music.toggle(resume_track=scene)
+            music.toggle(resume_track=self._music_scene())
             btn.configure(text=self._music_btn_text(),
                           bg="#4a5f7a" if music.is_enabled() else "#4a4f5a")
             self._refresh_music_btn()
@@ -645,10 +645,225 @@ class App(tk.Tk):
                          command=on_scale)
         scale.set(music.get_volume())
         scale.pack(side="left")
+
+        # ---- 三个场景各挑一首（菜单 / 对战 / 结算）----
+        self._music_scene_btns = {}
+        for scene in music.SCENES:
+            self._music_scene_row(win, scene, i18n.t("music_pick_" + scene))
+
+        foot = tk.Frame(win, bg=BG)
+        foot.pack(pady=(8, 0))
+        tk.Button(foot, text=i18n.t("music_open_dir"), bg=PANEL, fg=TEXT,
+                  font=FONT_S, bd=0, padx=10, pady=4, cursor="hand2",
+                  command=self._music_open_dir).pack()
+        tk.Label(win, text=i18n.t("music_fmt_hint"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(6, 0))
         if not music.available():
             tk.Label(win, text=i18n.t("music_no_files"), bg=BG, fg=DIM,
                      font=FONT_S, wraplength=320, justify="left").pack(pady=(2, 0))
+        else:
+            bad = music.scan_problems()
+            if bad:
+                tk.Label(win, text=i18n.t("music_bad_format", n=len(bad)),
+                         bg=BG, fg=GOLD, font=FONT_S, wraplength=320,
+                         justify="left").pack(pady=(2, 0))
         return btn
+
+    def _music_scene(self):
+        """当前界面属于哪个场景（决定切歌与试听回到哪里）。"""
+        return "battle" if self.game is not None else "menu"
+
+    def _music_scene_text(self, scene):
+        """按钮上显示的当前选曲文案。"""
+        choice = music.scene_choice(scene)
+        name = music.scene_track(scene)
+        if choice == music.PICK_NONE or not name:
+            return i18n.t("music_opt_none")
+        if choice == music.PICK_RANDOM:
+            return i18n.t("music_opt_random") + " · " + name
+        return name
+
+    def _music_scene_row(self, win, scene, label):
+        """一个场景一行：场景名 + 当前曲目（点击换）+ 试听。"""
+        row = tk.Frame(win, bg=BG)
+        row.pack(fill="x", padx=24, pady=1)
+        tk.Label(row, text=label, bg=BG, fg=TEXT, font=FONT_S,
+                 width=7, anchor="w").pack(side="left")
+        btn = tk.Button(row, text=self._music_scene_text(scene), bg=CARD_BG,
+                        fg=TEXT, font=FONT_S, bd=0, padx=8, pady=3,
+                        cursor="hand2", width=15, anchor="w")
+        btn.configure(command=lambda s=scene: self._music_pick_dialog(
+            s, on_done=lambda: self._music_refresh_row(s)))
+        btn.pack(side="left")
+        self._music_scene_btns[scene] = btn
+        tk.Button(row, text="\u25b6", bg=PANEL, fg=TEXT, font=FONT_S, bd=0,
+                  padx=8, pady=3, cursor="hand2",
+                  command=lambda s=scene: self._music_try_play(s)).pack(
+                      side="left", padx=(5, 0))
+        return row
+
+    def _music_refresh_row(self, scene):
+        btn = getattr(self, "_music_scene_btns", {}).get(scene)
+        if btn is None:
+            return
+        try:
+            if btn.winfo_exists():
+                btn.configure(text=self._music_scene_text(scene))
+        except tk.TclError:
+            pass
+
+    def _music_refresh_rows(self):
+        for scene in music.SCENES:
+            self._music_refresh_row(scene)
+
+    def _music_try_play(self, scene):
+        """试听该场景的曲子。当前场景直接切过去循环放；别的场景放一遍再收回来。"""
+        cur = self._music_scene()
+        if scene == cur:
+            music.play(scene, fade_ms=200, force=True)
+            return
+        name = music.scene_track(scene)
+        if not name or not music.preview(name):
+            return
+
+        def poll(n=[0]):
+            n[0] += 1
+            busy = music.status()["preview"] and music.status()["busy"]
+            if busy and n[0] < 600:            # 最多盯 5 分钟（一首歌足够）
+                self.after(500, poll)
+            else:
+                music.end_preview(cur)
+
+        self.after(500, poll)
+
+    def _music_open_dir(self):
+        """打开音乐文件夹（顺便重扫曲库，丢完歌切回来就能选）。"""
+        d = music.user_music_dir(create=True)
+        try:
+            os.startfile(d)                    # Windows
+        except Exception:                      # noqa: BLE001
+            try:
+                import subprocess
+                subprocess.Popen(["explorer", d])
+            except Exception:                  # noqa: BLE001
+                pass
+        music.refresh()
+        self._music_refresh_rows()
+
+    def _music_pick_dialog(self, scene, on_done=None):
+        """曲目选择器：默认 / 随机 / 静音 + 曲库全部曲目，可逐个试听。"""
+        # 同一场景不叠开多个选择窗
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "music_pick_%s" % scene:
+                try:
+                    w.deiconify()
+                    w.lift()
+                    w.focus_force()
+                    return
+                except tk.TclError:
+                    pass
+
+        lib = music.library()
+        items = [("", i18n.t("music_opt_default")),
+                 (music.PICK_RANDOM, i18n.t("music_opt_random")),
+                 (music.PICK_NONE, i18n.t("music_opt_none"))]
+        for e in lib:
+            label = e["name"]
+            if e["user"]:
+                label += "   " + i18n.t("music_tag_user")
+            items.append((e["name"], label))
+        cur = music.scene_choice(scene)
+
+        win = tk.Toplevel(self)
+        win.role = "music_pick_%s" % scene
+        win.title(i18n.t("music_pick_title"))
+        win.configure(bg=BG)
+        win.geometry("400x470")
+        win.transient(self)
+        tk.Label(win, text="%s · %s" % (i18n.t("music_pick_title"),
+                                        i18n.t("music_pick_" + scene)),
+                 bg=BG, fg=TEXT, font=FONT_B).pack(pady=(14, 8))
+
+        box = tk.Frame(win, bg=BG)
+        box.pack(fill="both", expand=True, padx=18)
+        lb = tk.Listbox(box, bg=PANEL, fg=TEXT, font=FONT_S, bd=0,
+                        highlightthickness=0, activestyle="none",
+                        selectbackground="#4a5f7a", selectforeground=TEXT,
+                        exportselection=False)
+        sb = tk.Scrollbar(box, command=lb.yview)
+        lb.configure(yscrollcommand=sb.set)
+        lb.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        for _, label in items:
+            lb.insert("end", "  " + label)
+        sel = 0
+        for i, (val, _) in enumerate(items):
+            if val == cur:
+                sel = i
+                break
+        lb.selection_set(sel)
+        lb.see(sel)
+
+        def picked():
+            try:
+                i = lb.curselection()[0]
+            except IndexError:
+                return None
+            return items[i][0]
+
+        def do_preview(_evt=None):
+            val = picked()
+            if val is None:
+                return
+            if val == music.PICK_NONE:
+                music.stop(fade_ms=150)
+                return
+            if val == music.PICK_RANDOM:
+                music.preview(music._pick_random())
+                return
+            if val == "":
+                music.preview(music.scene_track(scene))
+                return
+            music.preview(val)
+
+        def do_apply(_evt=None):
+            val = picked()
+            if val is None:
+                return "break"
+            music.set_scene_choice(scene, val)
+            self._music_refresh_row(scene)      # 设置窗里那行文案立刻跟着变
+            if on_done:
+                on_done()
+            music.end_preview(self._music_scene())
+            close()
+            return "break"
+
+        def close():
+            try:
+                music.end_preview(self._music_scene())
+            except Exception:                  # noqa: BLE001
+                pass
+            win.destroy()
+
+        lb.bind("<Double-Button-1>", do_apply)
+        lb.bind("<Return>", do_apply)
+
+        btns = tk.Frame(win, bg=BG)
+        btns.pack(pady=(10, 6))
+        tk.Button(btns, text=i18n.t("music_preview"), bg=PANEL, fg=TEXT,
+                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+                  command=do_preview).pack(side="left", padx=4)
+        tk.Button(btns, text=i18n.t("music_apply"), bg="#3a5a80", fg=TEXT,
+                  font=FONT_S, bd=0, padx=18, pady=6, cursor="hand2",
+                  command=do_apply).pack(side="left", padx=4)
+        tk.Button(btns, text=i18n.t("music_cancel"), bg="#4a4f5a", fg=TEXT,
+                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+                  command=close).pack(side="left", padx=4)
+        tk.Label(win, text=i18n.t("music_fmt_hint") + "  " + i18n.t("music_tracks", n=len(lib)),
+                 bg=BG, fg=DIM, font=FONT_S).pack(pady=(0, 10))
+        win.protocol("WM_DELETE_WINDOW", close)
+        win.bind("<Escape>", lambda e: close())
+        return win
 
     def _account_dialog(self, for_server=False):
         # 单实例：反复点击（或启动定时器与手动点击撞车）时不再叠开多个窗口
@@ -770,7 +985,7 @@ class App(tk.Tk):
         win.role = "start_settings"
         win.title(i18n.t("settings_title"))
         win.configure(bg=BG)
-        win.geometry("380x580")
+        win.geometry("380x700")
         win.transient(self)
         tk.Label(win, text=i18n.t("settings_title"), bg=BG, fg=TEXT,
                  font=FONT_XL).pack(pady=(18, 6))
@@ -2803,7 +3018,7 @@ class App(tk.Tk):
         win.role = "ingame_settings"
         win.title(i18n.t("settings_title"))
         win.configure(bg=BG)
-        win.geometry("340x580")
+        win.geometry("340x700")
         win.transient(self)
         tk.Label(win, text=i18n.t("settings_title"), bg=BG, fg=TEXT,
                  font=FONT_XL).pack(pady=(16, 6))
