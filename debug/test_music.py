@@ -132,15 +132,50 @@ def main():
     check("选「不放音乐」→ 该场景无曲", music.scene_track("battle") is None)
 
     music.set_scene_choice("battle", music.PICK_RANDOM)
-    picks = {music.scene_track("battle") for _ in range(12)}
-    check("随机模式落在曲库内",
-          picks <= set(music.library_names()) and all(picks), str(picks))
-    check("随机不会总挑同一首", len(picks) > 1, str(picks))
+    first = music.scene_track("battle")
+    check("随机模式落在曲库内", first in music.library_names(), str(first))
+    same = {music.scene_track("battle") for _ in range(12)}
+    check("随机在同一场景内固定（界面显示与播放一致，不跳歌）",
+          same == {first}, str(same))
+    seen = set()
+    for _ in range(20):
+        music._random_for("battle", new=True)
+        seen.add(music._state["picks"]["battle"])
+    check("点了重播 / 换场景才会重抽", len(seen) > 1, str(seen))
     avoid = music._pick_random("GP Demo")
     check("随机尽量避开正在放的那首", avoid != "GP Demo", avoid)
 
     music.set_scene_choice("battle", "")
     check("选「默认」→ 回到默认曲", music.scene_track("battle") == music.DEFAULT_PICK["battle"])
+
+    print("== 2b. 重载（同名替换 / 播放失败可诊断） ==")
+    sig1 = music._dirs_sig(music._music_dirs())
+    victim = os.path.join(user_dir, "GP Demo.ogg")
+    with open(victim, "wb") as fh:              # 同名替换内容（目录 mtime 不变）
+        fh.write(b"OggS" + b"\2" * 400)
+    sig2 = music._dirs_sig(music._music_dirs())
+    check("同名替换（只改内容）也能被曲库签名识别", sig1 != sig2)
+    music.refresh()
+    check("重扫后同名曲子仍在库里", music.find("GP Demo") is not None)
+    os.remove(victim)
+    music.refresh()
+    check("删掉自选同名曲后回落到随包那一首",
+          bool(music.find("GP Demo")) and not music.find("GP Demo")["user"],
+          str(music.find("GP Demo")))
+
+    bad = os.path.join(user_dir, "坏文件.ogg")
+    with open(bad, "wb") as fh:                 # 假 ogg：pygame 解不了
+        fh.write(b"not really an ogg" * 8)
+    music.refresh()
+    music.set_scene_choice("result", "坏文件")
+    okb = music.play("result", force=True)
+    check("坏文件播放返回 False 而不崩", okb is False)
+    check("坏文件被记进 last_error（设置窗可提示）",
+          music.last_error() == "坏文件.ogg", repr(music.last_error()))
+    os.remove(bad)
+    music.refresh()
+    music.set_scene_choice("result", "")
+    music.play("menu", force=True)
 
     print("== 3. 播放控制 ==")
     ok = music.play("menu")
@@ -170,6 +205,14 @@ def main():
           st["scene"] is None and music.end_preview("menu") is True)
     check("试听结束后接回场景曲",
           music.status()["scene"] == "menu", str(music.status()))
+
+    print("== 3b. 混音器被外部关掉后自愈 ==")
+    import pygame as _pg
+    music.play("menu", force=True)
+    _pg.mixer.quit()
+    healed = music.play("battle", force=True)
+    check("混音器被别处 quit 后仍能重载播放", healed is True, str(music.status()))
+    check("自愈后曲目正确", music.status()["scene"] == "battle", str(music.status()))
 
     print("== 4. 音量与开关（含落盘） ==")
     check("默认音量在合理区间", 0 <= music.get_volume() <= 100)

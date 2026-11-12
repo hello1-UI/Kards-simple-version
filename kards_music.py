@@ -66,7 +66,9 @@ _state = {
     "enabled": None,
     "choices": None,    # 场景选曲缓存 {scene: choice}
     "lib": None,        # 曲库缓存
-    "lib_sig": None,    # 曲库缓存对应的目录签名（目录变了就重扫）
+    "lib_sig": None,    # 曲库缓存对应的文件签名（任何音频文件变了就重扫）
+    "picks": {},        # 随机模式下每个场景当前抽中的曲子（不重复抽，界面/播放一致）
+    "play_error": "",   # 最近一次加载失败的曲子（设置界面据此提示）
 }
 
 
@@ -138,12 +140,25 @@ def _music_dirs():
 
 
 def _dirs_sig(dirs):
+    """曲库缓存签名：目录 + 每个文件的 (名字, mtime, 大小)。
+
+    只看目录 mtime 是不够的 —— 同名覆盖（换掉文件内容）、原地改写都不会
+    改目录 mtime，签名得细到文件才认得出"曲子被换了"。
+    """
     sig = []
     for d in dirs:
+        items = []
         try:
-            sig.append((d, os.path.getmtime(d)))
+            names = sorted(os.listdir(d))
         except OSError:
-            sig.append((d, 0))
+            names = []
+        for fn in names:
+            try:
+                st = os.stat(os.path.join(d, fn))
+            except OSError:
+                continue
+            items.append((fn, int(st.st_mtime), st.st_size))
+        sig.append((d, tuple(items)))
     return tuple(sig)
 
 
@@ -344,6 +359,22 @@ def _pick_random(avoid=None):
     return random.choice(lib)["name"]
 
 
+def _random_for(scene, new=False):
+    """随机模式：**同一场景内固定一首**，只有换场景 / 点了「使用」才重抽。
+
+    以前每次调用都重抽，导致设置界面显示的歌名和实际在放的不是同一首，
+    每次刷界面还会跳 —— 看上去就像"选曲没生效 / 音乐没重载"。
+    """
+    picks = _state["picks"]
+    name = None if new else picks.get(scene)
+    if name and find(name):
+        return name
+    name = _pick_random(_state["name"] if _state["scene"] == scene else None)
+    if name:
+        picks[scene] = name
+    return name
+
+
 def scene_track(scene):
     """解析该场景最终要放哪首曲子（曲名）；没有可放的返回 None。
 
@@ -355,7 +386,7 @@ def scene_track(scene):
     if choice == PICK_NONE:
         return None
     if choice == PICK_RANDOM:
-        return _pick_random(_state["name"] if _state["scene"] == scene else None)
+        return _random_for(scene)
     if choice:
         hit = find(choice)
         if hit:
@@ -387,7 +418,11 @@ def set_scene_choice(scene, choice):
         _pref_module().set_pref(_PREF_SCENE[scene], choice)
     except Exception:                                      # noqa: BLE001
         pass
-    if _state["scene"] == scene and not _state["preview"]:
+    # 这个场景就是玩家眼前的场景（正在放、或最近请求过）→ 立刻换过去，
+    # 点完就能听见换没换。用 wanted 兜底：音乐被关过 / 上次播放失败时
+    # scene 是 None，但它仍然是"当前界面该放的那首"。
+    target = _state["scene"] or _state["wanted"]
+    if target == scene and not _state["preview"]:
         if scene_track(scene) is None:
             # 选成「静音」/曲子被删：正在放的这首也要停下来，否则点了没反应
             stop(fade_ms=300)
@@ -399,16 +434,35 @@ def set_scene_choice(scene, choice):
 # ---------------------------------------------------------------- 播放控制
 
 def _play_file(path, fade_ms, loops=-1):
+    """加载并播放。失败时**自愈一次**：混音器若被别处 quit 掉，重新初始化再试。"""
     import pygame
-    try:
-        pygame.mixer.music.load(path)
-        pygame.mixer.music.set_volume(get_volume() / 100.0)
-        # loops=-1 无限循环；fade_ms 让进场景时不是"啪"一下起来
-        pygame.mixer.music.play(loops, fade_ms=max(0, int(fade_ms)))
-        return True
-    except Exception as exc:                               # noqa: BLE001
-        _state["error"] = "play-failed: %s" % exc
-        return False
+    _state["play_error"] = ""
+    for attempt in (0, 1):
+        try:
+            if not pygame.mixer.get_init():
+                raise RuntimeError("mixer not initialized")
+            pygame.mixer.music.load(path)
+            pygame.mixer.music.set_volume(get_volume() / 100.0)
+            # loops=-1 无限循环；fade_ms 让进场景时不是"啪"一下起来
+            pygame.mixer.music.play(loops, fade_ms=max(0, int(fade_ms)))
+            _state["ready"] = True
+            return True
+        except Exception as exc:                           # noqa: BLE001
+            if attempt == 0:
+                # 混音器被别的模块（或一次异常退出）关掉了：重开再试一次，
+                # 否则后面所有曲子都会静默失败 —— 表现就是"音乐不会重载"。
+                try:
+                    if not pygame.mixer.get_init():
+                        pygame.mixer.init(frequency=44100, size=-16,
+                                          channels=2, buffer=1024)
+                    _state["ready"] = True
+                    continue
+                except Exception:                          # noqa: BLE001
+                    pass
+            _state["error"] = "play-failed: %s" % exc
+            _state["play_error"] = os.path.basename(path)
+            return False
+    return False
 
 
 def play(scene, fade_ms=700, force=False):
@@ -425,13 +479,23 @@ def play(scene, fade_ms=700, force=False):
         return False
     if not _ensure_mixer():
         return False
+    if scene_choice(scene) == PICK_RANDOM and (force or _state["scene"] != scene):
+        _random_for(scene, new=True)      # 换场景 / 手动重播才换一首
     name = scene_track(scene)
     path = track_path(name)
     if path is None:
         return False
     if not force and not _state["preview"] and _state["scene"] == scene and _music_busy():
         return True
-    if _music_busy() and not _state["preview"]:
+    if force:
+        # 强制重载（用户点了「使用」/ 同一个文件被替换过）：先彻底停掉再打开，
+        # 否则某些平台会继续用已经打开的文件句柄，听不出新内容
+        try:
+            import pygame
+            pygame.mixer.music.stop()
+        except Exception:                                  # noqa: BLE001
+            pass
+    elif _music_busy() and not _state["preview"]:
         # 硬切之前先淡出：老的曲子往下走，新的淡入接上来，听感上像交叉淡化
         try:
             import pygame
@@ -562,13 +626,20 @@ def status():
         "tracks": len(library()),
         "busy": _music_busy(),
         "choices": dict(_choices()),
+        "play_error": _state["play_error"],
         "error": _state["error"],
         "mixer": _state["ready"],
     }
+
+
+def last_error():
+    """最近一次播放失败的曲子名（没有失败就是空串）。"""
+    return _state["play_error"]
 
 
 def reset_cache():
     """测试用：清掉运行期缓存（偏好重新从 settings.json 读、曲库重扫）。"""
     _state.update({"ready": None, "error": "", "scene": None, "name": None,
                    "wanted": None, "preview": False, "volume": None,
-                   "enabled": None, "choices": None, "lib": None, "lib_sig": None})
+                   "enabled": None, "choices": None, "lib": None, "lib_sig": None,
+                   "picks": {}, "play_error": ""})
