@@ -177,6 +177,37 @@ def main():
     music.set_scene_choice("result", "")
     music.play("menu", force=True)
 
+    print("== 2c. 选曲被改名后自动认领（不必每次重进手动换歌） ==")
+    check("归一化抹掉扩展名/标点/大小写",
+          music._norm("AvEtaDeltaV - 覺醒_H.OGG").startswith(music._norm("avetadeltav"))
+          and "." not in music._norm("GP Demo.ogg")
+          and " " not in music._norm("GP Demo.ogg"),
+          "%s | %s" % (music._norm("AvEtaDeltaV - 覺醒_H.OGG"),
+                       music._norm("avetadeltav")))
+    music.set_scene_choice("menu", "GP Demo - 副歌版 (Remaster)")
+    check("改过名的选曲能被宽松认出来", music.scene_track("menu") == "GP Demo",
+          str(music.scene_track("menu")))
+    check("认出来后偏好自动改写（下次启动精确命中）",
+          read_settings(tmp_settings).get("music_menu") == "GP Demo",
+          str(read_settings(tmp_settings).get("music_menu")))
+    music.reset_cache()
+    check("重开游戏（重载偏好）仍记得这首", music.scene_track("menu") == "GP Demo",
+          str(music.scene_track("menu")))
+    check("毫不相干的名字不会被乱认", music.find_loose("完全不相干的歌名") is None,
+          str(music.find_loose("完全不相干的歌名")))
+
+    music.set_all_choices("Captive")
+    check("「用到全部场景」三个场景一次设好",
+          all(music.scene_choice(s) == "Captive" for s in music.SCENES),
+          str({s: music.scene_choice(s) for s in music.SCENES}))
+    check("「用到全部场景」也落盘",
+          all(read_settings(tmp_settings).get(music._PREF_SCENE[s]) == "Captive"
+              for s in music.SCENES), str(read_settings(tmp_settings)))
+    music.set_all_choices("")
+    check("清空后三个场景都回默认",
+          all(music.scene_track(s) == music.DEFAULT_PICK[s] for s in music.SCENES),
+          str({s: music.scene_track(s) for s in music.SCENES}))
+
     print("== 3. 播放控制 ==")
     ok = music.play("menu")
     check("播放主菜单曲成功", ok and music.status()["scene"] == "menu", str(music.status()))
@@ -317,6 +348,25 @@ def main():
               app._music_scene_btns["menu"].cget("text") == target,
               str(app._music_scene_btns["menu"].cget("text")))
         check("选择器已关闭", not dlg.winfo_exists())
+
+        # 选择器里的「用到全部场景」：三个场景一次设成同一首
+        dlg2 = app._music_pick_dialog("battle")
+        lb2 = _find(dlg2, tk.Listbox)[0]
+        lb2.selection_clear(0, "end")
+        lb2.selection_set(3)
+        all_btns = [b for b in _find(dlg2, tk.Button)
+                    if b.cget("text") == i18n.t("music_apply_all")]
+        check("选择器里有「用到全部场景」按钮", bool(all_btns), str(dlg2))
+        if all_btns:
+            all_btns[0].invoke()
+            pick = music.library()[0]["name"]
+            check("「用到全部场景」一次写满三行",
+                  all(music.scene_choice(s) == pick for s in music.SCENES),
+                  str({s: music.scene_choice(s) for s in music.SCENES}))
+            check("三行按钮文案同步更新",
+                  all(app._music_scene_btns[s].cget("text") == pick for s in music.SCENES),
+                  str({s: app._music_scene_btns[s].cget("text") for s in music.SCENES}))
+        music.set_all_choices("")
         music.set_scene_choice("menu", "")
         if win:
             win.destroy()

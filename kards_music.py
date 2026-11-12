@@ -26,9 +26,12 @@
 ⚠ .m4a / .aac / .wma 这些 pygame 解不了（SDL_mixer 不带 AAC 解码），
 用 debug/convert_music.py（依赖 imageio-ffmpeg）转成 .ogg 即可。
 """
+import difflib
 import os
 import random
+import re
 import sys
+import unicodedata
 
 # 场景（顺序即设置界面的显示顺序）
 SCENES = ("menu", "battle", "result")
@@ -233,6 +236,60 @@ def track_path(name):
     return e["path"] if e else None
 
 
+# 归一化时要抹掉的分隔符（玩家改名最常见的几种花样）
+_JUNK = re.compile(r"[\s\-_·•.,，、/\\|+&\[\](){}（）【】「」《》<>!！?？'\"~`^:：;；]+")
+
+
+def _norm(name):
+    """曲名归一化：小写 + 去扩展名 + 去标点空格 + 全半角统一。
+
+    "AvEtaDeltaV - 覺醒_H.ogg" → "avetadeltav覺醒h"，
+    "AvEtaDeltaV.ogg" → "avetadeltav"，前者以后者开头，宽松匹配就能认出来。
+    """
+    s = unicodedata.normalize("NFKC", str(name or "")).strip().lower()
+    for ext in SUPPORTED_EXTS + UNSUPPORTED_EXTS:
+        if s.endswith(ext):
+            s = s[:-len(ext)]
+            break
+    return _JUNK.sub("", s)
+
+
+def find_loose(name):
+    """宽松找曲子：被玩家改过名字的选曲也能认出来（精确找不到时的兜底）。
+
+    真实场景：玩家把 "AvEtaDeltaV - 覺醒_H.ogg" 改名成 "AvEtaDeltaV.ogg"，
+    settings.json 里存的还是老名字 → 精确查找落空 → 每次进场景都回落默认曲，
+    玩家只能每次手动重选一遍。这里按 归一化完全相同 → 前缀包含 → 相似度
+    三档兜底；命中后 scene_track 会把偏好改写成新名字，下次启动就精确命中。
+    """
+    if not name:
+        return None
+    exact = find(name)
+    if exact:
+        return exact
+    key = _norm(name)
+    if not key:
+        return None
+    best, best_score = None, 0.0
+    for e in library():
+        cand = _norm(e["name"])
+        if not cand:
+            continue
+        if cand == key:
+            return e
+        if len(cand) >= 4 and key.startswith(cand):
+            score = 0.95 - (len(key) - len(cand)) / 100.0
+        elif len(key) >= 4 and cand.startswith(key):
+            score = 0.93 - (len(cand) - len(key)) / 100.0
+        else:
+            score = difflib.SequenceMatcher(None, key, cand).ratio()
+            if score < 0.82:
+                continue
+        if score > best_score:
+            best, best_score = e, score
+    return best
+
+
 def scan_problems():
     """列出目录里认得出但放不了的音频文件（如 .m4a），设置界面据此提示转换。"""
     bad = []
@@ -348,6 +405,18 @@ def scene_choice(scene):
     return _choices().get(scene, "")
 
 
+def _heal_choice(scene, name):
+    """把失效的选曲改写成实际认到的曲名（并落盘），免得每次启动都要重选。"""
+    ch = _choices()
+    if ch.get(scene) == name:
+        return
+    ch[scene] = name
+    try:
+        _pref_module().set_pref(_PREF_SCENE[scene], name)
+    except Exception:                                      # noqa: BLE001
+        pass
+
+
 def _pick_random(avoid=None):
     lib = library()
     if not lib:
@@ -391,7 +460,11 @@ def scene_track(scene):
         hit = find(choice)
         if hit:
             return hit["name"]
-        # 选的曲子被玩家删了：不明说也知道，静默回落到默认
+        loose = find_loose(choice)     # 文件被改名（加后缀 / 改大小写）：认下来
+        if loose:
+            _heal_choice(scene, loose["name"])   # 顺手把偏好改成新名字，下次不用重选
+            return loose["name"]
+        # 选的曲子真被删了：不明说也知道，静默回落到默认
     for cand in (DEFAULT_PICK.get(scene), scene):
         hit = find(cand) if cand else None
         if hit:
@@ -428,6 +501,24 @@ def set_scene_choice(scene, choice):
             stop(fade_ms=300)
         else:
             play(scene, fade_ms=350, force=True)
+    return True
+
+
+def set_all_choices(choice):
+    """同一首曲子设给全部场景（玩家只想听一首时，省得三行各点一遍）。"""
+    choice = "" if choice is None else str(choice)
+    for scene in SCENES:
+        _choices()[scene] = choice
+        try:
+            _pref_module().set_pref(_PREF_SCENE[scene], choice)
+        except Exception:                                  # noqa: BLE001
+            pass
+    target = _state["scene"] or _state["wanted"]
+    if target and not _state["preview"]:
+        if scene_track(target) is None:
+            stop(fade_ms=300)
+        else:
+            play(target, fade_ms=350, force=True)
     return True
 
 

@@ -859,6 +859,19 @@ class App(tk.Tk):
             close()
             return "break"
 
+        def do_apply_all(_evt=None):
+            """三个场景一次设成同一首：不必来回切场景手动换歌。"""
+            val = picked()
+            if val is None:
+                return "break"
+            music.set_all_choices(val)
+            self._music_refresh_rows()
+            if on_done:
+                on_done()
+            music.end_preview(self._music_scene())
+            close()
+            return "break"
+
         def close():
             try:
                 music.end_preview(self._music_scene())
@@ -877,6 +890,9 @@ class App(tk.Tk):
         tk.Button(btns, text=i18n.t("music_apply"), bg="#3a5a80", fg=TEXT,
                   font=FONT_S, bd=0, padx=18, pady=6, cursor="hand2",
                   command=do_apply).pack(side="left", padx=4)
+        tk.Button(btns, text=i18n.t("music_apply_all"), bg="#3a5a80", fg=TEXT,
+                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+                  command=do_apply_all).pack(side="left", padx=4)
         tk.Button(btns, text=i18n.t("music_cancel"), bg="#4a4f5a", fg=TEXT,
                   font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
                   command=close).pack(side="left", padx=4)
