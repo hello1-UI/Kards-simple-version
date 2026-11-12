@@ -309,6 +309,8 @@ class App(tk.Tk):
         self.mp_mode = False       # 组卡界面是否处于联机流程
         self.mp_opp = None         # 对手 hello 信息 {nation, deck}
         self.mp_my_deck = None     # 我方有序卡名列表
+        self._mp_me_ready = False  # 我方是否已点「准备」（对手可能先到，见 _start_mp）
+        self._mp_pending_seed = None  # 先收到种子、还没收到对手 ready 时暂存
         self._mp_game_over = False
         self._lobby_active = False
         # 服务器 / 大厅
@@ -2380,9 +2382,18 @@ class App(tk.Tk):
             return
         random.shuffle(deck)
         self.mp_my_deck = [c.name for c in deck]
-        self.mp_opp = None
+        # ⚠ 绝不能在这里把 mp_opp 清成 None：对手可能**先于我方**点了准备，
+        # 他的 ready 已经被 _mp_prep_watch / _lobby_drain_events 收进 mp_opp。
+        # 清掉之后对手不会重发 ready，主机就永远等不到"对手已就绪"，
+        # 双方一起卡在「等待对手准备」——典型症状就是"两边都准备了却开不了"。
+        self._mp_me_ready = True
         self.mp_link.send({"m": "ready", "nation": self.deck_nation,
                            "deck": self.mp_my_deck})
+        self._lobby_log(i18n.t("mp_log_ready_sent"))
+        if self.mp_opp:                      # 对手早就准备好了：主机立刻可以发种子
+            self._lobby_log(i18n.t("mp_log_opp_ready",
+                                   nation=self.mp_opp.get("nation", "?"),
+                                   n=len(self.mp_opp.get("deck") or [])))
         self.start_btn.configure(state="disabled", text=i18n.t("waiting_opponent"))
         self._cancel_timer("_t_prep")       # 交给 hello 轮询，看门狗退场
         self._schedule("_t_hello", 200, self._mp_poll_hello)
@@ -2406,8 +2417,10 @@ class App(tk.Tk):
                 if m.get("m") == "ready":
                     self.mp_opp = m
                 elif m.get("m") == "seed" and self.mp_role == "client":
-                    self._mp_launch(m["seed"])
-                    return
+                    # ⚠ 不在这里直接开局：对手的 ready 可能还没到（尤其是我方
+                    # "后点准备"时），此时 opp 为空会被误判成"对手卡组数量异常"。
+                    # 先暂存种子，等 ready 落地后再开局。
+                    self._mp_pending_seed = m.get("seed", 0)
                 elif m.get("m") == "peer_left":
                     messagebox.showerror(i18n.t("mp_title"), i18n.t("mp_peer_left_prep"))
                     self._mp_cleanup_to_menu()
@@ -2421,15 +2434,24 @@ class App(tk.Tk):
                     return
         except queue.Empty:
             pass
-        if self.mp_role == "host" and self.mp_opp is not None:
+        if (self.mp_role == "client" and self._mp_pending_seed is not None
+                and self.mp_opp is not None):
+            seed, self._mp_pending_seed = self._mp_pending_seed, None
+            self._mp_launch(seed)
+            return
+        if self.mp_role == "host" and self.mp_opp is not None and self._mp_me_ready:
             seed = random.SystemRandom().randrange(10 ** 9)
             self.mp_link.send({"m": "seed", "seed": seed})
+            self._lobby_log(i18n.t("mp_log_seed_host"))
             self._mp_launch(seed)
             return
         self._schedule("_t_hello", 200, self._mp_poll_hello)
 
     def _mp_launch(self, seed):
         """双方用同一种子同步开局：先手随机、发牌一致"""
+        self._mp_pending_seed = None
+        if self.mp_role == "client":
+            self._lobby_log(i18n.t("mp_log_seed_client"))
         opp = self.mp_opp or {}
         try:
             my_deck = [self.db[n] for n in self.mp_my_deck]
@@ -2440,7 +2462,9 @@ class App(tk.Tk):
             self._mp_cleanup_to_menu()
             return
         if len(opp_deck) != core.DECK_SIZE:
-            messagebox.showerror(i18n.t("mp_title"), i18n.t("mp_bad_deck"))
+            messagebox.showerror(i18n.t("mp_title"),
+                                 i18n.t("mp_bad_deck", n=len(opp_deck),
+                                        need=core.DECK_SIZE))
             self._mp_cleanup_to_menu()
             return
         # ⚠ 必须等上面所有提前 return 走完再激活：否则视图方法已被实例
@@ -2530,14 +2554,24 @@ class App(tk.Tk):
             return
         m = msg.get("m")
         if m == "ready":
+            first = self.mp_opp is None
             self.mp_opp = msg
+            if first:
+                self._lobby_log(i18n.t("mp_log_opp_ready",
+                                       nation=msg.get("nation", "?"),
+                                       n=len(msg.get("deck") or [])))
         elif m == "seed" and self.mp_role == "client":
-            self._mp_launch(msg.get("seed", 0))
+            # 同上：种子到了但对手 ready 可能还在路上，先存着
+            self._mp_pending_seed = msg.get("seed", 0)
         elif m in ("peer_left", "kick"):
             messagebox.showerror(i18n.t("mp_title"), i18n.t("mp_peer_left_prep"))
             self._mp_cleanup_to_menu()
         elif m == "concede":
             self._mp_cleanup_to_menu()
+        if (self.mp_role == "client" and self._mp_pending_seed is not None
+                and self.mp_opp is not None):
+            seed, self._mp_pending_seed = self._mp_pending_seed, None
+            self._mp_launch(seed)
 
     def _mp_handle(self, msg):
         g = self.game
@@ -2663,6 +2697,8 @@ class App(tk.Tk):
         self.mp_opp = None
         self.mp_opp_name = None
         self.mp_my_deck = None
+        self._mp_me_ready = False
+        self._mp_pending_seed = None
         self._lobby_active = False
         for attr in ("start_frame", "builder_frame"):
             fr = getattr(self, attr, None)
@@ -3145,6 +3181,8 @@ class App(tk.Tk):
         self.mp_opp = None
         self.mp_opp_name = None
         self.mp_my_deck = None
+        self._mp_me_ready = False
+        self._mp_pending_seed = None
         self.mp_matching = False
         self.mp_room_code = None
         self.game = None
