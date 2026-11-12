@@ -54,7 +54,7 @@ APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 # a: 重要修复(1位数)  b: 卡牌更新(2位数)  c: 赛季更新(2位数)  d: 补丁修复(3位数)
 # 升位规则: 某位 +1 后, 其右侧所有位清零（如卡牌更新 1.01.00.000）
 # 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
-VERSION = (1, 6, 1, 0)
+VERSION = (1, 6, 1, 1)
 
 # 字族：客户机器可能没有微软雅黑（精简版/英文 Windows），tkinter 显式指定
 # 字族时不会跨族回退，中文会渲染成方块。App 启动时 ensure_tk_cjk_font()
@@ -655,7 +655,11 @@ class App(tk.Tk):
         foot.pack(pady=(8, 0))
         tk.Button(foot, text=i18n.t("music_open_dir"), bg=PANEL, fg=TEXT,
                   font=FONT_S, bd=0, padx=10, pady=4, cursor="hand2",
-                  command=self._music_open_dir).pack()
+                  command=self._music_open_dir).pack(side="left", padx=(0, 6))
+        # 手动重扫：换过文件但想立刻生效时用（正常情况下丢了歌会自动扫到）
+        tk.Button(foot, text=i18n.t("music_rescan"), bg=PANEL, fg=TEXT,
+                  font=FONT_S, bd=0, padx=10, pady=4, cursor="hand2",
+                  command=self._music_rescan).pack(side="left")
         tk.Label(win, text=i18n.t("music_fmt_hint"), bg=BG, fg=DIM,
                  font=FONT_S).pack(pady=(6, 0))
         if not music.available():
@@ -667,6 +671,11 @@ class App(tk.Tk):
                 tk.Label(win, text=i18n.t("music_bad_format", n=len(bad)),
                          bg=BG, fg=GOLD, font=FONT_S, wraplength=320,
                          justify="left").pack(pady=(2, 0))
+        failed = music.last_error()
+        if failed:
+            tk.Label(win, text=i18n.t("music_play_failed", name=failed),
+                     bg=BG, fg=RED, font=FONT_S, wraplength=320,
+                     justify="left").pack(pady=(2, 0))
         return btn
 
     def _music_scene(self):
@@ -750,6 +759,18 @@ class App(tk.Tk):
         music.refresh()
         self._music_refresh_rows()
 
+    def _music_rescan(self):
+        """手动重扫曲库：换过文件、或系统把 mtime 归一时用它强制重载。"""
+        lib = music.refresh()
+        self._music_refresh_rows()
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "music_pick_menu":
+                w.destroy()                # 老旧的选择器列表已过期，关掉让玩家重开
+        try:
+            self._lobby_log(i18n.t("music_rescan_done", n=len(lib)))
+        except Exception:                  # noqa: BLE001
+            pass
+
     def _music_pick_dialog(self, scene, on_done=None):
         """曲目选择器：默认 / 随机 / 静音 + 曲库全部曲目，可逐个试听。"""
         # 同一场景不叠开多个选择窗
@@ -763,7 +784,7 @@ class App(tk.Tk):
                 except tk.TclError:
                     pass
 
-        lib = music.library()
+        lib = music.refresh()          # 每次打开都重扫：换过 / 新丢的曲子立刻可见
         items = [("", i18n.t("music_opt_default")),
                  (music.PICK_RANDOM, i18n.t("music_opt_random")),
                  (music.PICK_NONE, i18n.t("music_opt_none"))]
