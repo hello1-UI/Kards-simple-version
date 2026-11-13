@@ -22,11 +22,19 @@
 import json
 import os
 import re
+import http.client
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+# 本机代理对 GitHub 的大请求会 502 / 中途掐断，GitHub 域名一律直连
+_GH_HOSTS = ("api.github.com,uploads.github.com,github.com,"
+             "codeload.github.com,raw.githubusercontent.com,"
+             "objects.githubusercontent.com")
+for _k in ("no_proxy", "NO_PROXY"):
+    os.environ[_k] = ",".join(x for x in (os.environ.get(_k, ""), _GH_HOSTS) if x)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gh_dns                                        # noqa: E402
@@ -41,7 +49,7 @@ ROOT = os.path.dirname(HERE)
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-def api(method, url, payload=None, raw=None, ctype=None, timeout=60):
+def api(method, url, payload=None, raw=None, ctype=None, timeout=60, tries=3):
     data, headers = None, {}
     if raw is not None:
         data = raw
@@ -49,22 +57,35 @@ def api(method, url, payload=None, raw=None, ctype=None, timeout=60):
     elif payload is not None:
         data = json.dumps(payload).encode()
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("Authorization", f"Bearer {TOKEN}")
-    req.add_header("Accept", "application/vnd.github+json")
-    for k, v in headers.items():
-        req.add_header(k, v)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            body = r.read()
-            return r.status, (json.loads(body) if body else {})
-    except urllib.error.HTTPError as e:
-        body = e.read()
+    last = "?"
+    for i in range(1, tries + 1):
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Authorization", f"Bearer {TOKEN}")
+        req.add_header("Accept", "application/vnd.github+json")
+        req.add_header("Connection", "close")
+        for k, v in headers.items():
+            req.add_header(k, v)
         try:
-            body = json.loads(body)
-        except Exception:
-            body = body[:400]
-        return e.code, body
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                body = r.read()
+                return r.status, (json.loads(body) if body else {})
+        except urllib.error.HTTPError as e:
+            body = e.read()
+            try:
+                body = json.loads(body)
+            except Exception:
+                body = body[:400]
+            if e.code in (429, 500, 502, 503, 504) and i < tries:
+                last = f"HTTP {e.code}"
+            else:
+                return e.code, body
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
+            last = f"{type(e).__name__}: {e}"[:120]
+        if i < tries:
+            wait = min(2 * i, 15)
+            print(f"    网络异常（{last}），{wait}s 后重试 {i}/{tries - 1}")
+            time.sleep(wait)
+    return 0, f"连续 {tries} 次网络失败：{last}"
 
 
 def version_tag():
