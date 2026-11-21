@@ -38,33 +38,16 @@ import pygame
 
 import kards_engine as core
 import kards_i18n as i18n
+import kards_music as music
+# 配色/字体清单与 KARDS.py 共用一份真源。以前这里是「拷贝一份避免循环
+# import，改动需两边同步」—— 事实上已经悄悄不同步了（稀有度宝石恒灰）。
+from kards_theme import (BG, PANEL, CARD_BG, TEXT, DIM, RED, GREEN, GOLD,
+                         ROW_BG, ROW_EDGE, MID_BG, LOG_BG, HAND_AREA,
+                         NATION_COLOR, rarity_color,
+                         BUNDLED_FONT_FILES)
 
 # ---------------------------------------------------------------- 主题配色
-# 与 KARDS.py 保持一致（拷贝一份避免循环 import；改动需两边同步）
-
-BG = "#1a1d23"
-PANEL = "#242831"
-CARD_BG = "#2e3440"
-TEXT = "#e6e6e6"
-DIM = "#9aa0a8"
-RED = "#e05c5c"
-GREEN = "#6fbf73"
-GOLD = "#e0b45c"
-ROW_BG = "#1f232b"
-ROW_EDGE = "#2a2f3a"
-MID_BG = "#20242c"
-LOG_BG = "#161a20"
-HAND_AREA = "#242831"
-
-NATION_COLOR = {
-    "德国": "#6b7a8f", "苏联": "#a05a4c", "美国": "#4c7a6b",
-    "英国": "#7a6b8f", "日本": "#8f6b4c",
-    "意大利": "#6f8f6b", "法国": "#6b7a9f", "芬兰": "#8fb0c8",
-    "波兰": "#c8a06b", "澳新军团": "#8f9f6b", "中立": "#7a7a7a",
-}
-
-# 稀有度 → 宝石色（1 传说 / 2 史诗 / 3 普通 / 4 稀有，与主程序映射一致）
-RARITY_COLOR = {1: "#e0b45c", 2: "#b07ae0", 3: "#9aa0a8", 4: "#5c9ee0"}
+# 色值定义见 kards_theme.py（tkinter 与 pygame 共用）
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(_BASE, "assets")
@@ -152,8 +135,8 @@ _FONT_FILE_CANDIDATES = [
     "sourcehansanssc-regular.otf", "wqy-microhei.ttc",
     "arialuni.ttf",
 ]
-# 随游戏捆绑的开源中文字体（SIL OFL，见 assets/fonts/）
-_BUNDLED_FONTS = ["NotoSansCJKsc-Regular.otf", "NotoSansSC-Regular.otf"]
+# 随游戏捆绑的开源中文字体（SIL OFL，见 assets/fonts/）—— 清单在 kards_theme
+_BUNDLED_FONTS = BUNDLED_FONT_FILES
 
 
 def _resolve_cjk_font():
@@ -1189,9 +1172,12 @@ class PygameBoard:
     # ---- 暂停菜单 ----
 
     def _pause_items(self):
+        # 音乐项就地显示当前状态，点一下切换（对局中想安静不必翻设置）
+        music_lbl = t("music_on") if music.is_enabled() else t("music_off")
         return [("resume", t("btn_resume")),
                 ("concede", t("btn_surrender")),
                 ("leave", t("btn_to_menu")),
+                ("music", music_lbl),
                 ("quit", t("btn_quit"))]
 
     def _handle_pause(self, ev):
@@ -1218,6 +1204,11 @@ class PygameBoard:
                         self.on_intent({"k": "leave"})
                     else:
                         self.pause_confirm = "leave"
+                elif key == "music":
+                    try:
+                        music.toggle(resume_track="battle")
+                    except Exception:                      # noqa: BLE001
+                        pass
                 elif key == "quit":
                     self.result = "quit"
                     self.running = False
@@ -1598,7 +1589,9 @@ class PygameBoard:
             surf.blit(of.render(os_, True, C("#c8a44a")),
                       (r.x + 38, r.y + 11))
         # 稀有度宝石
-        gem = RARITY_COLOR.get(getattr(card, "rarity", None) or 3, C(DIM))
+        # ⚠ card.rarity 是中文名（"传说"/"史诗"…），不是 1~4 的档位号。
+        #   以前这里拿数字键的字典去查，永远命中不了 → 宝石恒为兜底灰。
+        gem = rarity_color(getattr(card, "rarity", ""), DIM)
         gx, gy = r.right - 14, r.y + 14
         pygame.draw.polygon(surf, C(gem),
                             [(gx, gy - 6), (gx + 6, gy), (gx, gy + 6), (gx - 6, gy)])

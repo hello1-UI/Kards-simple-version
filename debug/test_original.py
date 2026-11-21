@@ -304,7 +304,7 @@ def main():
 
     print("== 18. 卡池完整性/稀有度/卡组构建 ==")
     db = K.card_database()
-    check("卡池数量212", len(db) == 212, f"n={len(db)}")
+    check("卡池数量214", len(db) == 214, f"n={len(db)}")
     rar = {}
     for c in db.values():
         rar[c.rarity] = rar.get(c.rarity, 0) + 1

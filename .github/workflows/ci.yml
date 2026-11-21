@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # Windows 是主平台：程序用了 ctypes/AddFontResourceExW、winreg、PowerShell，
+    # 而且 tkinter 在 windows-latest 上开箱可用。
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    env:
+      SDL_VIDEODRIVER: dummy        # pygame 无窗口渲染
+      SDL_AUDIODRIVER: dummy
+      PYGAME_HIDE_SUPPORT_PROMPT: "1"
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: 语法检查（全部源码与调试脚本）
+        run: python -m compileall -q KARDS.py kards_*.py apk debug pyinst
+
+      - name: 引擎 / 规则对齐
+        run: |
+          python debug/test_original.py
+          python debug/test_tactics.py
+          python debug/test_concede.py
+          python debug/test_theme.py
+          python debug/test_deck_limits.py
+          python debug/test_keywords_move.py
+
+      - name: 对战棋盘（pygame，dummy 驱动）
+        run: |
+          python KARDS.py --board-smoke
+          python debug/test_board.py
+
+      - name: 联机与账号
+        run: |
+          python debug/test_server.py
+          python debug/test_client_net.py
+          python debug/test_account.py
+
+      - name: 自动更新与打包相关
+        run: |
+          python debug/test_update.py
+          python debug/test_host.py
+
+      - name: 多语言
+        run: python debug/test_i18n.py
+
+      - name: 背景音乐
+        run: python debug/test_music.py

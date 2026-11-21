@@ -275,6 +275,63 @@ def main():
     t.cancel()                                  # 未启动时取消也安全
     check("未启动时 cancel 不崩", True)
 
+    print("10b. SHA256 完整性校验（离线，用 file:// 当真源）")
+    import hashlib
+    H = "a" * 64
+    check("digest 'sha256:xxx' 归一化", up.digest_to_sha256("sha256:" + H) == H)
+    check("digest 全大写也认", up.digest_to_sha256("SHA256:" + H.upper()) == H)
+    check("digest 纯哈希也认", up.digest_to_sha256(H) == H)
+    check("不认识的算法 → 空（当作没校验值）", up.digest_to_sha256("md5:abc") == "")
+    check("None / 空串 → 空", up.digest_to_sha256(None) == "" and up.digest_to_sha256("") == "")
+    check("校验文件：标准两列", up.parse_sums(f"{H}  KARDS.zip", "KARDS.zip") == H)
+    check("校验文件：二进制标记 *", up.parse_sums(f"{H} *KARDS.zip", "KARDS.zip") == H)
+    check("校验文件：带目录前缀", up.parse_sums(f"{H}  dist/KARDS.zip", "KARDS.zip") == H)
+    check("校验文件：单行光杆哈希", up.parse_sums(H, "KARDS.zip") == H)
+    check("校验文件：注释与空行不干扰",
+          up.parse_sums(f"# sum\n\n{H}  KARDS.zip\n", "KARDS.zip") == H)
+    check("校验文件：没有自己的条目 → 空",
+          up.parse_sums(f"{H}  other.zip", "KARDS.zip") == "")
+    check("校验文件：多条光杆哈希不瞎猜",
+          up.parse_sums(f"{H}\n{'b' * 64}", "KARDS.zip") == "")
+
+    d = tempfile.mkdtemp(prefix="kards_sha_test_")
+    try:
+        src = os.path.join(d, "KARDS.zip")
+        payload = b"PK" + b"payload" * 900
+        with open(src, "wb") as f:
+            f.write(payload)
+        real = hashlib.sha256(payload).hexdigest()
+        check("_sha256_file 与 hashlib 一致", up._sha256_file(src) == real)
+        asset = {"name": "KARDS.zip",
+                 "url": "file:///" + src.replace(os.sep, "/"),
+                 "size": len(payload)}
+
+        out1 = os.path.join(d, "ok.zip")
+        ok, err, meta = up.download_ex(asset, out1, want_sha=real)
+        check("哈希对得上 → 成功且 verified=True",
+              ok and meta["verified"] and os.path.getsize(out1) == len(payload), err)
+        check("回传算出哈希便于排查", meta.get("sha256") == real)
+
+        out2 = os.path.join(d, "bad.zip")
+        ok, err, meta = up.download_ex(asset, out2, want_sha="b" * 64)
+        check("哈希对不上 → 失败", not ok and "SHA256" in err, err[:50])
+        check("校验失败不留下半成品",
+              not os.path.exists(out2) and not os.path.exists(out2 + ".part"))
+        check("校验失败标记 verified=False", meta["verified"] is False)
+
+        out3 = os.path.join(d, "noverify.zip")
+        ok, err, meta = up.download_ex(asset, out3)          # 没有校验值
+        check("无校验值也能下载（但标记未校验）",
+              ok and meta["verified"] is False and os.path.exists(out3))
+
+        def boom(_done, _total):
+            raise up.Cancelled()
+        out4 = os.path.join(d, "cancel.zip")
+        ok, err, _m = up.download_ex(asset, out4, progress=boom)
+        check("取消不是「换个源重试」", not ok and err == "已取消", err)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
     print("11. 真查一次 GitHub Release（网络不通则跳过，不算失败）")
     info = up.check_latest(timeout=12)
     if info.get("ok"):

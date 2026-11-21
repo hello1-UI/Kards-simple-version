@@ -12,7 +12,7 @@
   7. 界面元素齐备：服务器地址框 / 玩家列表 / 快速匹配 / 邀请码 / 日志
 
 必须用**系统 Python**（受管 Python 无 tkinter）：
-    C:\\Users\\freet\\AppData\\Local\\Programs\\Python\\Python313\\python.exe debug/test_lobby_gui.py
+    python debug/test_lobby_gui.py
 """
 import os
 import shutil

@@ -148,12 +148,6 @@ def start(port=DEFAULT_PORT, extra_args=None):
 def stop():
     """停掉我们拉起的服务器（游戏退出时调用；不是我们拉的不动）。"""
     global _PROC
-    # 先把公网端口映射收掉，否则路由器里会留一条指向本机的死条目
-    if _PUB.get("ok"):
-        try:
-            clear_public()
-        except Exception:
-            pass
     if _PROC is None:
         return
     try:
@@ -171,74 +165,3 @@ def local_addr(port=None):
     ips = kards_net.get_local_ips()
     host = ips[0] if ips else "127.0.0.1"
     return f"{host}:{port}"
-
-
-# ============================================================ 跨局域网（公网）
-
-# 公网映射的当前状态。GUI 直接读它渲染，不阻塞主线程。
-#   state: idle（还没做过）/ working（正在问路由器）/ done（有结果了）
-_PUB = {"state": "idle", "ok": False, "external_ip": "", "port": 0,
-        "local_ip": "", "gateway": "", "error": "", "cg_nat": False,
-        "double_nat": False, "manual": False, "direct": False}
-_PUB_THREAD = None
-
-
-def public_status():
-    """返回公网映射状态的一份拷贝（给 GUI 用）。"""
-    return dict(_PUB)
-
-
-def public_port(port=None):
-    return int(port or _PORT)
-
-
-def public_addr(port=None):
-    """能发给外网朋友的地址；没打通公网时返回 ""。"""
-    st = _PUB
-    if st.get("ok") and st.get("external_ip"):
-        return f"{st['external_ip']}:{st.get('port') or public_port(port)}"
-    return ""
-
-
-def map_public_async(port=None, on_done=None):
-    """后台向路由器申请端口映射（不阻塞 GUI）。
-
-    「不同局域网也能联机」的核心：把 TCP 端口从公网映射到本机。
-    ⚠ 结果可能是 cg_nat（运营商大内网）——那不是错误，是物理上不通，
-      必须换方案（公网服务器 / 内网穿透），文案要分开写。
-    """
-    global _PUB, _PUB_THREAD
-    import kards_upnp as upnp
-
-    port = public_port(port)
-    _PUB = {"state": "working", "ok": False, "external_ip": "", "port": port,
-            "local_ip": "", "gateway": "", "error": "", "cg_nat": False,
-            "double_nat": False, "manual": False, "direct": False}
-
-    def cb(res):
-        global _PUB
-        res = dict(res or {})
-        res["state"] = "done"
-        res.setdefault("port", port)
-        _PUB = res
-        if on_done is not None:
-            try:
-                on_done(res)
-            except Exception:
-                pass
-
-    _PUB_THREAD = upnp.map_port_async(port, callback=cb)
-    return _PUB_THREAD
-
-
-def clear_public(port=None):
-    """撤销映射（服务器停掉 / 退出游戏时调用，别给路由器留垃圾条目）。"""
-    global _PUB
-    try:
-        import kards_upnp as upnp
-        upnp.unmap_port(public_port(port))
-    except Exception:
-        pass
-    _PUB = {"state": "idle", "ok": False, "external_ip": "", "port": 0,
-            "local_ip": "", "gateway": "", "error": "", "cg_nat": False,
-            "double_nat": False, "manual": False, "direct": False}

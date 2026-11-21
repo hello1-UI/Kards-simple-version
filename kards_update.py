@@ -15,6 +15,19 @@
 
 更新包格式约定（与发行包一致）：
     KARDS.zip 里可能带一层 `KARDS/` 前缀，解压时要剥掉（安装器同款处理）。
+
+完整性校验（SHA256）
+    更新是「下载一个 zip → 覆盖程序目录」，等于把任意代码请进本机。
+    只比 Content-Length 是不够的（长度对得上、内容被换掉照样能过），
+    所以这里补一条哈希链，取值优先级：
+
+        1. Release API 给资产算的 digest（`sha256:xxxx`，官方替我们算的）
+        2. 同版本里发布的 `SHA256SUMS.txt` / `KARDS.zip.sha256`
+
+    ⚠ 校验值**只从官方源取**（api.github.com / github.com），zip 本体
+      允许走镜像 —— 镜像是传输通道，不是信任通道：哈希对不上就换源重下。
+      只有「一个校验值都拿不到」时才降级为「官方优先、镜像兜底」，
+      并把结果标记成未校验，让界面如实告诉玩家。
 """
 import json
 import os
@@ -24,6 +37,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -38,9 +52,21 @@ _ASSET_MIRRORS = (
     "https://ghfast.top/{url}",
 )
 
+# Release 里可能附带的校验文件名（全部小写比较）。
+# 前两个是 `sha256sum` 的通用输出；后两个是「单个文件 + 只有一列哈希」的写法。
+_SUMS_ASSET_NAMES = (
+    "sha256sums.txt", "sha256sums",
+    "kards.zip.sha256", "kards.zip.sha256.txt",
+)
+
 TIMEOUT_API = 12
 TIMEOUT_DL = 90
 _UA = "KARDS-SimpleVersion-Updater"
+
+
+class Cancelled(Exception):
+    """用户取消 —— **不能**当成一次"这个源失败了、换个源再试"。
+    进度回调里抛这个异常，download_ex() 会立刻收手并清掉半截文件。"""
 
 
 # ------------------------------------------------------------------ 版本比较
@@ -127,8 +153,12 @@ def check_latest(timeout=TIMEOUT_API):
 
     返回 dict：
         成功 → {"ok": True, "version": "1.2.0.4", "notes": "...", "page": "...",
-                 "assets": [{"name": ..., "url": ..., "size": ...}, ...]}
+                 "assets": [{"name": ..., "url": ..., "size": ..., "sha256": ...}, ...]}
         失败 → {"ok": False, "err": "原因"}
+
+    asset 里的 sha256 来自 GitHub 给资产算的 digest（形如 `sha256:abc…`）；
+    老版本 Release 的资产没有 digest，这里留空字符串，交给
+    resolve_checksum() 去同版本的校验文件里找。
     """
     try:
         with _get(API_LATEST, timeout) as resp:
@@ -147,6 +177,7 @@ def check_latest(timeout=TIMEOUT_API):
             "name": a.get("name") or "",
             "url": a.get("browser_download_url") or "",
             "size": a.get("size") or 0,
+            "sha256": digest_to_sha256(a.get("digest")),
         })
     return {"ok": True, "version": version_str(parse_version(tag)) or tag,
             "notes": data.get("body") or "",
@@ -166,6 +197,102 @@ def pick_asset(assets, prefer=("KARDS.zip",)):
     return None
 
 
+def digest_to_sha256(digest):
+    """API 的 `sha256:abc…` → `abc…`；不认识的格式返回 ""
+
+    ⚠ 宁可返回空串（= 当作没有校验值），也不要返回半截字符串：
+      一个残缺的哈希会让每次下载都「校验失败」，等于把更新功能整个搞挂。
+    """
+    d = (digest or "").strip().lower()
+    if d.startswith("sha256:"):
+        d = d.split(":", 1)[1].strip()
+    if len(d) == 64 and all(c in "0123456789abcdef" for c in d):
+        return d
+    return ""
+
+
+def _sha256_file(path, progress=None):
+    """算文件 SHA256（分块读，47 MB 的包也不吃内存）"""
+    import hashlib
+    h = hashlib.sha256()
+    try:
+        total = os.path.getsize(path) or 1
+    except OSError:
+        total = 1
+    done = 0
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(262144)
+            if not chunk:
+                break
+            h.update(chunk)
+            done += len(chunk)
+            _safe_progress(progress, done, total)
+    return h.hexdigest()
+
+
+def parse_sums(text, filename):
+    """从校验文件文本里挑出 filename 那一行的哈希；取不到返回 ""
+
+    兼容三种写法：
+        <64位hex>  <文件名>          ← sha256sum 的标准输出
+        <64位hex> *<文件名>          ← sha256sum -b（二进制模式）
+        <64位hex>                    ← 单文件校验（`KARDS.zip.sha256` 常见）
+    """
+    want = (filename or "").strip().lower()
+    want_base = os.path.basename(want)
+    lone = []                                  # 只有哈希、没有文件名的行
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.replace("\t", " ").split()
+        cand = parts[0].strip().lower()
+        if len(cand) != 64 or any(c not in "0123456789abcdef" for c in cand):
+            continue
+        if len(parts) == 1:
+            lone.append(cand)
+            continue
+        name = " ".join(parts[1:]).lstrip("*").strip().lstrip("./").lower()
+        if name == want or os.path.basename(name) == want_base:
+            return cand
+    # 整份文件只有一条「光杆哈希」时才敢当成是这个资产的校验值
+    return lone[0] if len(lone) == 1 else ""
+
+
+def _fetch_sums_text(asset, timeout=TIMEOUT_API):
+    """取回校验文件的文本（只走官方 URL，最多 64 KB）"""
+    try:
+        with _get(asset["url"], timeout, accept="application/octet-stream") as resp:
+            return resp.read(65536).decode("utf-8", "replace")
+    except Exception:                            # noqa: BLE001
+        return ""
+
+
+def resolve_checksum(assets, asset):
+    """定出这个资产该用哪个 SHA256 校验。→ (sha256_hex, source)
+
+    source: "digest"（API 算的）/ "sums"（发布页附带的校验文件）/ ""（没有）
+
+    ⚠ 校验文件本身**只从官方源取**：它要是也能从镜像拿，
+      「改 zip + 顺手改校验文件」就成了一个自洽的伪造包。
+    """
+    if not asset:
+        return "", ""
+    sha = digest_to_sha256(asset.get("sha256") or "")
+    if sha:
+        return sha, "digest"
+    for a in assets or []:
+        name = (a.get("name") or "").lower()
+        if name in _SUMS_ASSET_NAMES:
+            text = _fetch_sums_text(a)
+            got = parse_sums(text, asset.get("name") or "")
+            if got:
+                return got, "sums"
+            break                                # 找到校验文件但里面没我们的条目
+    return "", ""
+
+
 def _safe_progress(progress, done, total):
     """调用进度回调，**吞掉回调自身的异常**。
 
@@ -178,21 +305,52 @@ def _safe_progress(progress, done, total):
         return
     try:
         progress(done, total)
+    except Cancelled:
+        raise                                    # 取消不是"回调写错了"
     except Exception:                                # noqa: BLE001
         pass
 
 
-def download(asset, dest, progress=None, timeout=TIMEOUT_DL):
-    """下载资产到 dest。progress(done, total) 会被周期性调用。
+def _rm(path):
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
 
-    ⚠ 会依次尝试「官方直连 → 各镜像」。官方 assets 域名
-    (objects.githubusercontent.com) 在部分网络下不可达，镜像常能救回来。
+
+def download_ex(asset, dest, progress=None, timeout=TIMEOUT_DL, want_sha="",
+                on_verify=None):
+    """下载资产到 dest，按需校验 SHA256。→ (ok, err, meta)
+
+    meta = {"verified": bool, "sha256": 实际算出的哈希, "url": 真正成功的地址}
+
+    源的选择取决于**有没有校验值**：
+      · 有 want_sha：官方 → 镜像 都可以试。任何一个源下下来的包，哈希
+        对得上就收，对不上就删掉换下一个 —— 镜像是**传输**通道，不是
+        **信任**通道，这正是"镜像不可信但仍然可用"的正确解法。
+      · 没有 want_sha：先官方直连；官方失败才降级到镜像，并回传
+        verified=False，让界面如实告诉玩家"这一次没能校验"。
+
+    on_verify：下载完成、开始算哈希之前调一次，供界面把状态切到"校验中"
+    （47 MB 的包算哈希要零点几秒，进度条已经 100% 却不动会让人以为卡死）。
     """
     url = asset["url"]
-    urls = [url] + [m.format(url=url) for m in _ASSET_MIRRORS]
+    # 镜像只对「GitHub 托管的 http(s) 资产」有意义：
+    #   · file:// 之类的本地地址套镜像模板只会造出垃圾 URL
+    #   · 非 GitHub 的地址（比如自建更新源）套 gh-proxy 也没有意义
+    # 而且镜像站在部分网络下会让 DNS/连接干等很久，无谓地拖慢失败路径。
+    host = urllib.parse.urlsplit(url).netloc.lower()
+    githubish = (url.lower().startswith("http")
+                 and (host.endswith("github.com")
+                      or host.endswith("githubusercontent.com")))
+    mirrors = [m.format(url=url) for m in _ASSET_MIRRORS] if githubish else []
+    urls = [url] + mirrors if want_sha else [url]
     total = int(asset.get("size") or 0)
     last_err = "未知错误"
-    for i, u in enumerate(urls):
+    i = 0
+    while i < len(urls):
+        u = urls[i]
         tmp = dest + ".part"
         try:
             with _get(u, timeout, accept="application/octet-stream") as resp:
@@ -208,18 +366,38 @@ def download(asset, dest, progress=None, timeout=TIMEOUT_DL):
                         _safe_progress(progress, done, length)
             if length and done != length:
                 raise OSError(f"下载不完整：{done}/{length} 字节")
+            got = ""
+            if want_sha:
+                if on_verify:
+                    try:
+                        on_verify()
+                    except Exception:            # noqa: BLE001 — UI 回调不该拖垮下载
+                        pass
+                got = _sha256_file(tmp)
+                if got != want_sha:
+                    raise OSError(
+                        f"SHA256 不匹配（期望 {want_sha[:10]}…，实得 {got[:10]}…）")
             os.replace(tmp, dest)
-            return True, ""
-        except Exception as e:                   # noqa: BLE001
+            return True, "", {"verified": bool(want_sha), "sha256": got, "url": u}
+        except Cancelled:
+            _rm(tmp)
+            return False, "已取消", {"verified": False, "sha256": "", "url": u}
+        except Exception as e:                   # noqa: BLE001 — 换源继续试
             last_err = f"{type(e).__name__}: {e}"
-            try:
-                if os.path.exists(tmp):
-                    os.remove(tmp)
-            except OSError:
-                pass
+            _rm(tmp)
+            # 没有校验值时才允许在官方源失败后追加镜像（并保持 verified=False）
+            if not want_sha and i == len(urls) - 1 and mirrors:
+                urls.extend(mirrors)
             if i < len(urls) - 1:
-                time.sleep(0.4)                  # 换镜像前稍等一下
-    return False, last_err
+                time.sleep(0.4)                  # 换源前稍等一下
+        i += 1
+    return False, last_err, {"verified": False, "sha256": "", "url": ""}
+
+
+def download(asset, dest, progress=None, timeout=TIMEOUT_DL, want_sha=""):
+    """兼容旧签名的薄封装：只回 (ok, err)。要校验结果用 download_ex()。"""
+    ok, err, _meta = download_ex(asset, dest, progress, timeout, want_sha)
+    return ok, err
 
 
 # ------------------------------------------------------------------ 解压 / 安装
@@ -334,9 +512,12 @@ class UpdateTask:
         t = UpdateTask(local_version="1.2.0.3")
         t.start()
         # 主线程定时轮询：
-        t.state     # "checking"/"no_update"/"found"/"downloading"/"extracting"/"done"/"error"
+        t.state     # "checking"/"no_update"/"found"/"downloading"/"verifying"
+                    #   /"extracting"/"done"/"error"
         t.progress  # 0.0~1.0
         t.message   # 出错原因 / 版本号
+        t.verified  # True 已校验 / False 未校验 / None 还没下到
+        t.checksum_source  # "digest" / "sums" / ""
     """
 
     def __init__(self, local_version, auto_install=True, target_dir=None):
@@ -348,6 +529,9 @@ class UpdateTask:
         self.message = ""
         self.info = None
         self.asset = None
+        self.checksum = ""             # 期望的 SHA256（空 = 这个版本没提供校验值）
+        self.checksum_source = ""      # "digest" / "sums" / ""
+        self.verified = None           # 到手的包到底校验过没有
         self._stop = threading.Event()
         self._th = None
 
@@ -382,6 +566,10 @@ class UpdateTask:
             self.state, self.message = "error", "该版本没有可下载的 zip 资产"
             return
         self.asset = asset
+        # 定校验值要额外抓一次校验文件，可能慢几百毫秒 —— 放在确认「有新版本」
+        # 之后做，避免每次启动检查更新都白付这笔开销。
+        self.checksum, self.checksum_source = resolve_checksum(
+            info.get("assets") or [], asset)
         self.state = "found"
         if not self.auto_install:
             return
@@ -397,9 +585,14 @@ class UpdateTask:
             if total:
                 self.progress = min(0.99, done / total)
             if self._stop.is_set():
-                raise OSError("已取消")
+                raise Cancelled()
 
-        ok, err = download(asset, zpath, progress=on_dl)
+        def on_verify():
+            self.state, self.progress = "verifying", 1.0
+
+        ok, err, meta = download_ex(asset, zpath, progress=on_dl,
+                                    want_sha=self.checksum, on_verify=on_verify)
+        self.verified = bool(meta.get("verified"))
         if not ok:
             self.state, self.message = "error", f"下载失败：{err}"
             self._cleanup(tmpdir)

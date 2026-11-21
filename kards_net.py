@@ -124,15 +124,6 @@ class Acceptor:
             self.result = ("err", "已取消")
 
 
-def _keepalive(sock):
-    """开着 TCP keepalive：跨公网时运营商的 NAT 更容易掐断空连接，
-    有保活包就稳得多（服务器端还有 60 秒 ping，双保险）。"""
-    try:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-    except OSError:
-        pass
-
-
 def connect_async(ip, port, holder):
     """客户端：后台连接 ip:port，结果写入 holder["result"]。
 
@@ -144,7 +135,6 @@ def connect_async(ip, port, holder):
         sock.settimeout(6)
         try:
             sock.connect((ip, port))
-            _keepalive(sock)
             sock.settimeout(None)
             holder["result"] = (NetLink(sock, (ip, port)),)
         except OSError as e:
@@ -378,11 +368,6 @@ def _is_self_host(host):
         return False
 
 
-def is_self_host(host):
-    """对外别名：这个 host 是不是本机（大厅判断"我是不是主机"用）。"""
-    return _is_self_host(host)
-
-
 def same_server(a, b):
     """两个 "host:port" 是否指向**同一台服务器**。
 
@@ -424,7 +409,6 @@ def connect_server_async(addr, holder, timeout=6.0):
         sock.settimeout(timeout)
         try:
             sock.connect((host, port))
-            _keepalive(sock)
             sock.settimeout(None)
             holder["result"] = (ServerLink(sock, (host, port)),)
         except OSError as e:

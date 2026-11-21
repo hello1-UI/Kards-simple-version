@@ -13,6 +13,7 @@ pyinst/dist_tools/
 # 分发包（本地打包后自行上传 Release）
 KARDS.zip
 KARDS_SimpleVersion-Setup.zip
+SHA256SUMS.txt
 
 # ---- 运行时状态与日志 ----
 logs/
@@ -20,6 +21,7 @@ logs/
 settings.json
 accounts.json
 session.json
+currency.json
 kards_server.db*
 
 # 自组卡组（玩家数据）
@@ -29,3 +31,6 @@ decks_*/
 # ---- 工作区元数据 ----
 .workbuddy/
 debug/shots/
+
+# PyInstaller 默认工作目录（兜底）
+build/

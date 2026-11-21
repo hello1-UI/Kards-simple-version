@@ -7,7 +7,7 @@
 本测试把按钮行为逐条锁死。
 
 运行：
-    C:\\Users\\freet\\AppData\\Local\\Programs\\Python\\Python313\\python.exe \\
+    python \\
         debug/test_builder.py
 """
 import os
@@ -106,8 +106,8 @@ def main():
     total = app._deck_total()
     check("推荐卡组填满到 DECK_SIZE", total == core.DECK_SIZE,
           f"{total} / {core.DECK_SIZE}")
-    check("单卡不超过 MAX_COPIES",
-          all(n <= core.MAX_COPIES for n in app.deck_counts.values()),
+    check("单卡不超过稀有度上限",
+          all(n <= core.max_copies(app.db[name]) for name, n in app.deck_counts.items()),
           str(sorted(set(app.deck_counts.values()))))
     ally = app._deck_ally_count()
     check("盟国卡不超过 ALLY_LIMIT", ally <= core.ALLY_LIMIT,
@@ -132,13 +132,14 @@ def main():
     btn_clear.invoke()
     pump(app)
     card = core.allowed_cards(nat, app.db)[0]
-    for _ in range(core.MAX_COPIES + 2):
+    cap = core.max_copies(card)
+    for _ in range(cap + 2):
         app._add_card(card)
     pump(app)
-    check(f"单卡最多 {core.MAX_COPIES} 张",
-          app.deck_counts.get(card.name, 0) == core.MAX_COPIES,
+    check(f"{card.name}（{card.rarity}）最多 {cap} 张",
+          app.deck_counts.get(card.name, 0) == cap,
           f"{card.name}={app.deck_counts.get(card.name, 0)}")
-    for _ in range(core.MAX_COPIES + 1):
+    for _ in range(cap + 1):
         app._remove_card(card)
     pump(app)
     check("减到 0 后不再出现", card.name not in app.deck_counts,

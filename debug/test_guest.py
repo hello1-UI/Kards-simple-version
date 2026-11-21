@@ -9,7 +9,7 @@
   · 登录/注册成功后立刻脱离游客；登出回到游客
 
 必须用**系统 Python**（受控 Python 无 tkinter）：
-    C:\\Users\\freet\\AppData\\Local\\Programs\\Python\\Python313\\python.exe debug/test_guest.py
+    python debug/test_guest.py
 """
 import os
 import shutil

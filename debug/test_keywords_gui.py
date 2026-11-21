@@ -2,7 +2,7 @@
 """GUI：关键词说明窗口与按钮的实机验证（系统 Python + tkinter）
 
 运行：
-    C:\\Users\\freet\\AppData\\Local\\Programs\\Python\\Python313\\python.exe \\
+    python \\
         debug/test_keywords_gui.py
 
 注意：受管 Python 没有 tkinter，必须用系统 Python。
@@ -15,8 +15,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-# 本测试验证的是 tkinter 侧窗口（对战界面走经典引擎，避免 pygame 主循环阻塞）
-sys.argv.append("--legacy-board")
+# 只验证 tkinter 侧窗口：对局部分直接装配引擎 + pygame 棋盘，
+# 不走 new_game()（那条路径会阻塞跑棋盘主循环，测试会卡死/误判）
+sys.argv.append("--no-fullscreen")
 
 import kards_i18n as i18n          # noqa: E402
 import KARDS as gui                # noqa: E402
@@ -258,7 +259,20 @@ def main():
     pump(app2)
     app2.anim_enabled = False
     close_all_tops(app2)
-    app2.new_game("德国")
+    # ⚠ 不能调 new_game()：它在末尾 _run_pyboard() 阻塞跑 pygame 主循环，
+    # 测试里要么卡死、要么棋盘一退出就把主窗 destroy 掉（后续步骤全炸）。
+    # 这里按 test_finish.py 的做法直接装配：引擎对局 + pygame 棋盘。
+    db = gui.core.card_database()
+    p1 = gui.core.Player("我", "德国", [db["步兵班"]] * gui.core.DECK_SIZE)
+    p2 = gui.core.Player("敌", "苏联", [db["动员兵"]] * gui.core.DECK_SIZE)
+    game = gui.core.Game(p1, p2, interactive=False)
+    game.draw_cards(p1, 8)
+    game.draw_cards(p2, 8)
+    app2.game = game
+    board = app2._activate_pyboard()
+    check("pygame 棋盘已激活", board is not None)
+    if board is not None:
+        board.sync()
     pump(app2, 3)
     check("已进入对局", app2.game is not None)
     close_all_tops(app2)                      # F1 之前先清掉可能残留的弹窗

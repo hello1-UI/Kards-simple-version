@@ -5,7 +5,7 @@
 只验证界面反应正确（否则测试会拉起几十 MB 的下载）。
 
 必须用**系统 Python**（受控 Python 无 tkinter）：
-    C:\\Users\\freet\\AppData\\Local\\Programs\\Python\\Python313\\python.exe debug/test_update_gui.py
+    python debug/test_update_gui.py
 """
 import os
 import sys

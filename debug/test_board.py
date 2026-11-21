@@ -2,7 +2,7 @@
 """pygame 对战棋盘测试（SDL dummy 驱动，不需要真实窗口）
 
 运行：
-    C:\\Users\\freet\\AppData\\Local\\Programs\\Python\\Python313\\python.exe \\
+    python \\
         debug/test_board.py
 
 覆盖：
@@ -18,6 +18,7 @@
 """
 import os
 import sys
+import tempfile
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +36,12 @@ import pygame  # noqa: E402
 import kards_board as board  # noqa: E402
 import kards_engine as core  # noqa: E402
 import kards_i18n as i18n  # noqa: E402
+import kards_music as K_BOARD_MUSIC  # noqa: E402
+
+# 音乐偏好改写到临时文件：测试切换开关时不要动玩家真实的 settings.json
+i18n._SETTINGS_PATH = os.path.join(
+    tempfile.mkdtemp(prefix="kards_board_music_"), "settings.json")
+K_BOARD_MUSIC.reset_cache()
 
 PASS, FAIL = [], []
 SECTION = [""]
@@ -537,8 +544,8 @@ def test_pause_menu():
 
     b.pause = True
     items = b._pause_items()
-    check("暂停菜单含 继续/投降/主菜单/退出 四项",
-          [k for k, _ in items] == ["resume", "concede", "leave", "quit"],
+    check("暂停菜单含 继续/投降/主菜单/音乐/退出 五项",
+          [k for k, _ in items] == ["resume", "concede", "leave", "music", "quit"],
           str([k for k, _ in items]))
     check("暂停菜单文案已本地化（非键名）",
           all(lbl and not lbl.startswith("btn_") for _, lbl in items),
@@ -574,7 +581,15 @@ def test_pause_menu():
           app.intents == [{"k": "leave"}], str(app.intents))
 
     b.pause = True
+    before_music = K_BOARD_MUSIC.is_enabled()
     b.handle_event(Ev(pygame.MOUSEBUTTONDOWN, item_rect(3).center))
+    check("点「音乐」→ 开关翻转且不退出暂停",
+          K_BOARD_MUSIC.is_enabled() is not before_music and b.pause is True,
+          str(K_BOARD_MUSIC.status()))
+    K_BOARD_MUSIC.set_enabled(before_music, resume_track="battle")
+
+    b.pause = True
+    b.handle_event(Ev(pygame.MOUSEBUTTONDOWN, item_rect(4).center))
     check("退出 → result='quit' 且主循环停止",
           b.result == "quit" and b.running is False)
 
@@ -935,10 +950,15 @@ def test_app_wiring():
     app = K.App()
     app.update()
 
-    check("默认渲染引擎为 pygame（增强界面）",
-          K.i18n.get_pref("renderer", "pygame") == "pygame")
-    check("缺省（未写过偏好）也走 pygame",
-          K.i18n.get_pref("renderer_never_set_xyz", "pygame") == "pygame")
+    # 经典 tkinter 对战界面已删除：未激活棋盘时视图方法应全部有类级兜底
+    check("未激活时视图兜底齐全（不 AttributeError）",
+          all(callable(getattr(app, a, None)) for a in K.App._PY_VIEW_ATTRS))
+    try:
+        app.refresh()
+        app.show_banner("兜底", "#fff", 10)
+        check("未激活时兜底调用不报错", True)
+    except Exception as exc:                       # noqa: BLE001
+        check("未激活时兜底调用不报错", False, repr(exc))
 
     b = app._activate_pyboard()
     for a in K.App._PY_VIEW_ATTRS:
@@ -965,13 +985,10 @@ def test_app_wiring():
     check("停用后 unit_widgets 清空", app.unit_widgets == {})
     check("停用后 hq_widget 归 None", app.hq_widget is None)
 
-    # 设置项读写
-    K.i18n.set_pref("renderer", "tk")
-    check("renderer 偏好可持久化", K.i18n.get_pref("renderer") == "tk")
-    check("renderer=tk → 走经典 tkinter 界面", app._use_pyboard() is False)
-    K.i18n.set_pref("renderer", "pygame")
-    check("renderer=pygame → 走增强 pygame 界面", app._use_pyboard() is True)
-    check("--legacy-board 可强制回退经典界面", True)   # 命令行开关（见 debug/test_drag.py 用法）
+    # 渲染器偏好已随经典界面删除：偏好读写本身仍应工作
+    K.i18n.set_pref("lang_pref_probe_xyz", "1")
+    check("偏好读写仍可用（渲染器项已删）",
+          K.i18n.get_pref("lang_pref_probe_xyz") == "1")
 
     app.destroy()
 
@@ -989,7 +1006,6 @@ def test_app_hybrid_game():
     sys.argv.append("--no-update-check")
     import KARDS as K
 
-    K.i18n.set_pref("renderer", "pygame")
     app = K.App()
     app.update()
     for w in app.winfo_children():          # 清掉可能自动弹出的账号窗等
@@ -1063,11 +1079,8 @@ def test_app_hybrid_game():
     finally:
         app._deactivate_pyboard()
 
-    # 经典界面回退：切到 tk renderer 后应能正常开一局（tkinter 侧不被破坏）
-    K.i18n.set_pref("renderer", "tk")
-    check("renderer=tk 时 new_game 不再进 pygame 分支",
-          app._use_pyboard() is False)
-    K.i18n.set_pref("renderer", "pygame")
+    # 经典界面已删除：对局只有 pygame 一条路，new_game 后必然留下棋盘痕迹
+    check("对局结束后棋盘已停用", app._pyboard is None)
 
     app.destroy()
 

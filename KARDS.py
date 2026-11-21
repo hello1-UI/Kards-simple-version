@@ -4,7 +4,8 @@ KARDS 简化版 - 图形界面（tkinter，纯标准库）
 
 复用 kards.py 的游戏逻辑，提供点击式对战界面：
 - 开始界面：战斗（联机预留）/ 练习（人机对战）
-- 练习模式：5 大主国选阵营 → 自由组卡（39 张 + 总部卡，单卡≤3，盟国≤20）
+- 练习模式：5 大主国选阵营 → 自由组卡（39 张 + 总部卡，单卡上限按稀有度
+  普通4/稀有3/史诗2/传说1，盟国≤20）
   → 支持粘贴原版卡牌清单导入（中英文名均可）→ 随机匹配（可内战）→ 随机先手/后手
 - 对战中右上角「⚙ 设置/投降」：投降 / 返回主菜单 / 安全退出；Esc 快捷退出
 - 拖拽操作：手牌拖到「我方支援阵线」部署；我方单位拖到敌方单位/总部攻击；
@@ -37,24 +38,15 @@ import kards_net as net
 import kards_account as account
 import kards_host
 import kards_update as net_update
+import kards_music as music
+# 配色/字体清单的唯一真源（与 kards_board.py 共用，别再抄第二份）
+from kards_theme import (BG, PANEL, CARD_BG, CARD_SEL, TEXT, DIM,
+                         RED, GREEN, GOLD, NATION_COLOR,
+                         BUNDLED_FONT_FILES as _BUNDLED_FONT_FILES,
+                         BUNDLED_FONT_FAMILY as _BUNDLED_FONT_FAMILY)
 
 # ---------------------------------------------------------------- 主题配色
-
-BG = "#1a1d23"          # 背景
-PANEL = "#242831"       # 面板
-CARD_BG = "#2e3440"     # 卡牌
-CARD_SEL = "#4c6b8a"    # 选中
-TEXT = "#e6e6e6"
-DIM = "#9aa0a8"
-RED = "#e05c5c"
-GREEN = "#6fbf73"
-GOLD = "#e0b45c"
-NATION_COLOR = {
-    "德国": "#6b7a8f", "苏联": "#a05a4c", "美国": "#4c7a6b",
-    "英国": "#7a6b8f", "日本": "#8f6b4c",
-    "意大利": "#6f8f6b", "法国": "#6b7a9f", "芬兰": "#8fb0c8",
-    "波兰": "#c8a06b", "澳新军团": "#8f9f6b", "中立": "#7a7a7a",
-}
+# 色值定义见 kards_theme.py（tkinter 与 pygame 共用一份，改一处两边生效）
 
 APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 
@@ -62,7 +54,7 @@ APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 # a: 重要修复(1位数)  b: 卡牌更新(2位数)  c: 赛季更新(2位数)  d: 补丁修复(3位数)
 # 升位规则: 某位 +1 后, 其右侧所有位清零（如卡牌更新 1.01.00.000）
 # 升级工具: python debug/bump_version.py a|b|c|d （自动改此处并提交 git）
-VERSION = (1, 3, 0, 7)
+VERSION = (1, 6, 1, 3)
 
 # 字族：客户机器可能没有微软雅黑（精简版/英文 Windows），tkinter 显式指定
 # 字族时不会跨族回退，中文会渲染成方块。App 启动时 ensure_tk_cjk_font()
@@ -83,8 +75,6 @@ _TK_CJK_FAMILIES = [
     "microsoft jhenghei", "pmingliu", "mingliu",
     "yu gothic ui", "malgun gothic",
 ]
-_BUNDLED_FONT_FILES = ["NotoSansCJKsc-Regular.otf", "NotoSansSC-Regular.otf"]
-_BUNDLED_FONT_FAMILY = "Noto Sans CJK SC"
 
 
 def ensure_tk_cjk_font(root):
@@ -294,10 +284,16 @@ class App(tk.Tk):
         self.configure(bg=BG)
         self.geometry("1200x800")
         self.minsize(1024, 680)
+        # 启动即全屏（F11 随时切回窗口模式）。调试双开 / 自动化测试用
+        # --no-fullscreen 跳过，否则测试会把真机屏幕整个占掉。
+        if ("--debug-on-net" not in sys.argv
+                and "--no-fullscreen" not in sys.argv):
+            self.attributes("-fullscreen", True)
+        self.bind("<F11>", self._toggle_fullscreen)
         self.game = None
         self.busy = False          # AI 行动/动画期间锁定输入
-        self.anim_enabled = ("--smoke" not in sys.argv) or ("--anim-test" in sys.argv)
-        self.ai_step_ms = 0 if not self.anim_enabled else 850
+        self.anim_enabled = True     # 经典界面已删，动画一律由 pygame 棋盘播放
+        self.ai_step_ms = 850
         self.fast_ai = False
         self.unit_widgets = {}     # id(unit) -> 卡片控件
         self.enemy_widgets = []    # (unit, 卡片控件)，用于拖拽命中检测
@@ -305,9 +301,7 @@ class App(tk.Tk):
         self.my_hq_widget = None   # 我方总部控件（结算爆炸时也要炸）
         self.drag = None           # 当前拖拽状态
         self.pending_flash = []    # 刷新后待播放入场动画的单位 (unit, color)
-        self._last_drag_src = None # 最近一次拖拽起点坐标（部署入场动画的来源）
         self._anim_tokens = set()  # 存活的动画令牌（退出对局时清理）
-        self._anim_count = {"entry": 0, "move": 0, "attack": 0}  # 自测统计
         self._pyboard = None       # pygame 对战视图（非 None 时接管视图方法）
         # ---- 联机状态（服务器中转模式）----
         self.mp_link = None        # net.ServerLink（连上服务器后非 None）
@@ -315,12 +309,12 @@ class App(tk.Tk):
         self.mp_mode = False       # 组卡界面是否处于联机流程
         self.mp_opp = None         # 对手 hello 信息 {nation, deck}
         self.mp_my_deck = None     # 我方有序卡名列表
+        self._mp_me_ready = False  # 我方是否已点「准备」（对手可能先到，见 _start_mp）
+        self._mp_pending_seed = None  # 先收到种子、还没收到对手 ready 时暂存
         self._mp_game_over = False
         self._lobby_active = False
         # 服务器 / 大厅
         self.mp_server_addr = net.DEFAULT_SERVER   # 记住上次填的服务器地址
-        self._pub_addr = ""                        # 公网可连地址（打通才有）
-        self._pub_lan = ""                         # 局域网地址（复制用兜底）
         self.mp_user = None        # 服务器账号名（未登录为 None）
         self.mp_matching = False   # 快速匹配等待中
         self.mp_room_code = None   # 自己开的邀请码房间
@@ -356,6 +350,7 @@ class App(tk.Tk):
         self.bind_all("<Escape>", self.on_esc)
         self.bind_all("<F1>", self.on_f1)
         self._build_start()
+        self._music_play("menu", fade_ms=1200)   # 进来先淡入主菜单曲
         if not self.account and self.anim_enabled:
             self.after(300, self._account_dialog)
         # 启动后静默检查更新（后台线程，不阻塞界面；没更新就自己消失）
@@ -363,6 +358,13 @@ class App(tk.Tk):
         self._update_task = None
         if self.anim_enabled and "--no-update-check" not in sys.argv:
             self.after(1500, lambda: self.open_update_dialog(auto=True))
+
+    def _toggle_fullscreen(self, event=None):
+        """F11 全屏/窗口切换（attributes 返回 '1'/'0'，直接取非即可）"""
+        try:
+            self.attributes("-fullscreen", not self.attributes("-fullscreen"))
+        except tk.TclError:
+            pass
 
     def destroy(self):
         """退出前关闭联机连接"""
@@ -383,6 +385,10 @@ class App(tk.Tk):
         # 不是我们拉的不动（可能是别人开的、或玩家自己想留着）。
         try:
             kards_host.stop()
+        except Exception:                        # noqa: BLE001
+            pass
+        try:
+            music.stop(fade_ms=250)
         except Exception:                        # noqa: BLE001
             pass
         tk.Tk.destroy(self)
@@ -450,10 +456,9 @@ class App(tk.Tk):
     def add_log(self, msg):
         """对局日志。
 
-        ⚠ self.logbox 只在 _build_main()（对局界面）里创建，因此**主菜单 /
-        大厅 / 组卡阶段调用本方法时它并不存在** —— 直接 configure 会抛
-        AttributeError。大厅有自己的日志框（_lobby_log），这里的规则是：
-        对局中写对局框；不在对局中则回落到大厅日志框；都没有就静默丢弃。
+        对局中视图方法被 pygame 棋盘接管（实例属性覆盖），日志写进棋盘的
+        日志面板。**主菜单 / 大厅 / 组卡阶段**走本类方法：logbox 已不存在，
+        大厅有自己的日志框（_lobby_log），都没有就静默丢弃。
         """
         box = getattr(self, "logbox", None)
         if box is None or not box.winfo_exists():
@@ -500,7 +505,15 @@ class App(tk.Tk):
         self.account_btn.pack(side="left")
         self.guest_hint = tk.Label(box, text="", bg=BG, fg=DIM, font=FONT_S)
         self.guest_hint.pack(side="left", padx=8)
+        self.currency_lbl = tk.Label(box, text="", bg=BG, fg=GOLD, font=FONT_S)
+        self.currency_lbl.pack(side="left", padx=(16, 0))
+        # 一键静音：不想听音乐时不用翻设置窗
+        self.music_btn = tk.Button(box, text=self._music_btn_text(), bg="#4a4f5a",
+                                   fg=TEXT, font=FONT_S, bd=0, padx=10, pady=6,
+                                   cursor="hand2", command=self._toggle_music)
+        self.music_btn.pack(side="left", padx=(16, 0))
         self._refresh_account_btn()
+        self._refresh_music_btn()
 
     # ---------------- 账号管理 ----------------
     def _account_btn_text(self):
@@ -530,6 +543,25 @@ class App(tk.Tk):
             if hint is not None and hint.winfo_exists():
                 # 游客时给一行说明，登录后清空
                 hint.configure(text="" if self.account else i18n.t("guest_note"))
+            self._refresh_currency_lbl()
+        except tk.TclError:
+            pass
+
+    def _refresh_currency_lbl(self):
+        """主菜单的货币显示（金币/钻石）。
+
+        控件只在主菜单里创建，销毁后引用会变"幽灵"，同账号按钮一样要
+        winfo_exists() + 吞 TclError（见 _refresh_account_btn 的注释）。
+        """
+        lbl = getattr(self, "currency_lbl", None)
+        if lbl is None:
+            return
+        try:
+            if not lbl.winfo_exists():
+                return
+            c = account.get_currency(self.account)
+            lbl.configure(text=f"{i18n.t('currency_gold', n=c['gold'])}   "
+                               f"{i18n.t('currency_diamonds', n=c['diamonds'])}")
         except tk.TclError:
             pass
 
@@ -538,6 +570,339 @@ class App(tk.Tk):
         self.account = name
         core.set_decks_dir(account.deck_dir(name))
         self._refresh_account_btn()
+
+    # ---------------- 背景音乐 ----------------
+    # 播放/切歌统一走 kards_music（细节见该模块）。这里只做两件事：
+    # ① 把「界面」翻译成「场景曲目」；② 保证任何异常都不会冒到界面层。
+    def _music_play(self, scene, fade_ms=700):
+        """切换场景音乐。缺资源 / 没装 pygame / 声卡异常都静默降级。"""
+        try:
+            music.play(scene, fade_ms=fade_ms)
+        except Exception:                                  # noqa: BLE001
+            pass
+        self._refresh_music_btn()
+
+    def _music_btn_text(self):
+        if music.is_enabled():
+            return i18n.t("music_on")
+        return i18n.t("music_off")
+
+    def _refresh_music_btn(self):
+        """刷新主菜单的 ♪ 按钮（控件可能已随界面重建销毁，同货币标签的写法）"""
+        btn = getattr(self, "music_btn", None)
+        if btn is None:
+            return
+        try:
+            if not btn.winfo_exists():
+                return
+            btn.configure(text=self._music_btn_text(),
+                          fg=TEXT if music.is_enabled() else DIM)
+        except tk.TclError:
+            pass
+
+    def _toggle_music(self):
+        """主菜单一键开关音乐（开了就续放当前界面该放的曲子）"""
+        try:
+            music.toggle(resume_track="menu" if self.game is None else "battle")
+        except Exception:                                  # noqa: BLE001
+            pass
+        self._refresh_music_btn()
+
+    def _music_row(self, win):
+        """设置窗内的音乐区块：开关 + 音量 + 三个场景各选一首曲子。
+
+        做成共用方法，主菜单设置窗和对局内设置窗各调一次，避免两处逻辑漂移。
+        曲库来自 assets/music（随包）与玩家音乐目录（自选），见 kards_music。
+        """
+        tk.Label(win, text=i18n.t("settings_music"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(10, 2))
+        row = tk.Frame(win, bg=BG)
+        row.pack()
+        btn = tk.Button(row, bg="#4a5f7a" if music.is_enabled() else "#4a4f5a",
+                        fg=TEXT, font=FONT_S, bd=0, padx=12, pady=6,
+                        cursor="hand2", width=10)
+
+        def flip():
+            # 对局中关掉再开：续放对局曲；在菜单就续放菜单曲
+            music.toggle(resume_track=self._music_scene())
+            btn.configure(text=self._music_btn_text(),
+                          bg="#4a5f7a" if music.is_enabled() else "#4a4f5a")
+            self._refresh_music_btn()
+
+        btn.configure(text=self._music_btn_text(), command=flip)
+        btn.pack(side="left", padx=(0, 10))
+
+        tk.Label(row, text=i18n.t("music_volume"), bg=BG, fg=TEXT,
+                 font=FONT_S).pack(side="left", padx=(0, 6))
+
+        def on_scale(v):
+            try:
+                music.set_volume(int(float(v)))
+            except (TypeError, ValueError):
+                pass
+
+        scale = tk.Scale(row, from_=0, to=100, orient="horizontal", length=130,
+                         bg=BG, fg=TEXT, troughcolor="#2c313c", highlightthickness=0,
+                         bd=0, sliderrelief="flat", showvalue=0,
+                         command=on_scale)
+        scale.set(music.get_volume())
+        scale.pack(side="left")
+
+        # ---- 三个场景各挑一首（菜单 / 对战 / 结算）----
+        self._music_scene_btns = {}
+        for scene in music.SCENES:
+            self._music_scene_row(win, scene, i18n.t("music_pick_" + scene))
+
+        foot = tk.Frame(win, bg=BG)
+        foot.pack(pady=(8, 0))
+        tk.Button(foot, text=i18n.t("music_open_dir"), bg=PANEL, fg=TEXT,
+                  font=FONT_S, bd=0, padx=10, pady=4, cursor="hand2",
+                  command=self._music_open_dir).pack(side="left", padx=(0, 6))
+        # 手动重扫：换过文件但想立刻生效时用（正常情况下丢了歌会自动扫到）
+        tk.Button(foot, text=i18n.t("music_rescan"), bg=PANEL, fg=TEXT,
+                  font=FONT_S, bd=0, padx=10, pady=4, cursor="hand2",
+                  command=self._music_rescan).pack(side="left")
+        tk.Label(win, text=i18n.t("music_fmt_hint"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(6, 0))
+        if not music.available():
+            tk.Label(win, text=i18n.t("music_no_files"), bg=BG, fg=DIM,
+                     font=FONT_S, wraplength=320, justify="left").pack(pady=(2, 0))
+        else:
+            bad = music.scan_problems()
+            if bad:
+                tk.Label(win, text=i18n.t("music_bad_format", n=len(bad)),
+                         bg=BG, fg=GOLD, font=FONT_S, wraplength=320,
+                         justify="left").pack(pady=(2, 0))
+        failed = music.last_error()
+        if failed:
+            tk.Label(win, text=i18n.t("music_play_failed", name=failed),
+                     bg=BG, fg=RED, font=FONT_S, wraplength=320,
+                     justify="left").pack(pady=(2, 0))
+        return btn
+
+    def _music_scene(self):
+        """当前界面属于哪个场景（决定切歌与试听回到哪里）。"""
+        return "battle" if self.game is not None else "menu"
+
+    def _music_scene_text(self, scene):
+        """按钮上显示的当前选曲文案。"""
+        choice = music.scene_choice(scene)
+        name = music.scene_track(scene)
+        if choice == music.PICK_NONE or not name:
+            return i18n.t("music_opt_none")
+        if choice == music.PICK_RANDOM:
+            return i18n.t("music_opt_random") + " · " + name
+        return name
+
+    def _music_scene_row(self, win, scene, label):
+        """一个场景一行：场景名 + 当前曲目（点击换）+ 试听。"""
+        row = tk.Frame(win, bg=BG)
+        row.pack(fill="x", padx=24, pady=1)
+        tk.Label(row, text=label, bg=BG, fg=TEXT, font=FONT_S,
+                 width=7, anchor="w").pack(side="left")
+        btn = tk.Button(row, text=self._music_scene_text(scene), bg=CARD_BG,
+                        fg=TEXT, font=FONT_S, bd=0, padx=8, pady=3,
+                        cursor="hand2", width=15, anchor="w")
+        btn.configure(command=lambda s=scene: self._music_pick_dialog(
+            s, on_done=lambda: self._music_refresh_row(s)))
+        btn.pack(side="left")
+        self._music_scene_btns[scene] = btn
+        tk.Button(row, text="\u25b6", bg=PANEL, fg=TEXT, font=FONT_S, bd=0,
+                  padx=8, pady=3, cursor="hand2",
+                  command=lambda s=scene: self._music_try_play(s)).pack(
+                      side="left", padx=(5, 0))
+        return row
+
+    def _music_refresh_row(self, scene):
+        btn = getattr(self, "_music_scene_btns", {}).get(scene)
+        if btn is None:
+            return
+        try:
+            if btn.winfo_exists():
+                btn.configure(text=self._music_scene_text(scene))
+        except tk.TclError:
+            pass
+
+    def _music_refresh_rows(self):
+        for scene in music.SCENES:
+            self._music_refresh_row(scene)
+
+    def _music_try_play(self, scene):
+        """试听该场景的曲子。当前场景直接切过去循环放；别的场景放一遍再收回来。"""
+        cur = self._music_scene()
+        if scene == cur:
+            music.play(scene, fade_ms=200, force=True)
+            return
+        name = music.scene_track(scene)
+        if not name or not music.preview(name):
+            return
+
+        def poll(n=[0]):
+            n[0] += 1
+            busy = music.status()["preview"] and music.status()["busy"]
+            if busy and n[0] < 600:            # 最多盯 5 分钟（一首歌足够）
+                self.after(500, poll)
+            else:
+                music.end_preview(cur)
+
+        self.after(500, poll)
+
+    def _music_open_dir(self):
+        """打开音乐文件夹（顺便重扫曲库，丢完歌切回来就能选）。"""
+        d = music.user_music_dir(create=True)
+        try:
+            os.startfile(d)                    # Windows
+        except Exception:                      # noqa: BLE001
+            try:
+                import subprocess
+                subprocess.Popen(["explorer", d])
+            except Exception:                  # noqa: BLE001
+                pass
+        music.refresh()
+        self._music_refresh_rows()
+
+    def _music_rescan(self):
+        """手动重扫曲库：换过文件、或系统把 mtime 归一时用它强制重载。"""
+        lib = music.refresh()
+        self._music_refresh_rows()
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "music_pick_menu":
+                w.destroy()                # 老旧的选择器列表已过期，关掉让玩家重开
+        try:
+            self._lobby_log(i18n.t("music_rescan_done", n=len(lib)))
+        except Exception:                  # noqa: BLE001
+            pass
+
+    def _music_pick_dialog(self, scene, on_done=None):
+        """曲目选择器：默认 / 随机 / 静音 + 曲库全部曲目，可逐个试听。"""
+        # 同一场景不叠开多个选择窗
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "music_pick_%s" % scene:
+                try:
+                    w.deiconify()
+                    w.lift()
+                    w.focus_force()
+                    return
+                except tk.TclError:
+                    pass
+
+        lib = music.refresh()          # 每次打开都重扫：换过 / 新丢的曲子立刻可见
+        items = [("", i18n.t("music_opt_default")),
+                 (music.PICK_RANDOM, i18n.t("music_opt_random")),
+                 (music.PICK_NONE, i18n.t("music_opt_none"))]
+        for e in lib:
+            label = e["name"]
+            if e["user"]:
+                label += "   " + i18n.t("music_tag_user")
+            items.append((e["name"], label))
+        cur = music.scene_choice(scene)
+
+        win = tk.Toplevel(self)
+        win.role = "music_pick_%s" % scene
+        win.title(i18n.t("music_pick_title"))
+        win.configure(bg=BG)
+        win.geometry("400x470")
+        win.transient(self)
+        tk.Label(win, text="%s · %s" % (i18n.t("music_pick_title"),
+                                        i18n.t("music_pick_" + scene)),
+                 bg=BG, fg=TEXT, font=FONT_B).pack(pady=(14, 8))
+
+        box = tk.Frame(win, bg=BG)
+        box.pack(fill="both", expand=True, padx=18)
+        lb = tk.Listbox(box, bg=PANEL, fg=TEXT, font=FONT_S, bd=0,
+                        highlightthickness=0, activestyle="none",
+                        selectbackground="#4a5f7a", selectforeground=TEXT,
+                        exportselection=False)
+        sb = tk.Scrollbar(box, command=lb.yview)
+        lb.configure(yscrollcommand=sb.set)
+        lb.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        for _, label in items:
+            lb.insert("end", "  " + label)
+        sel = 0
+        for i, (val, _) in enumerate(items):
+            if val == cur:
+                sel = i
+                break
+        lb.selection_set(sel)
+        lb.see(sel)
+
+        def picked():
+            try:
+                i = lb.curselection()[0]
+            except IndexError:
+                return None
+            return items[i][0]
+
+        def do_preview(_evt=None):
+            val = picked()
+            if val is None:
+                return
+            if val == music.PICK_NONE:
+                music.stop(fade_ms=150)
+                return
+            if val == music.PICK_RANDOM:
+                music.preview(music._pick_random())
+                return
+            if val == "":
+                music.preview(music.scene_track(scene))
+                return
+            music.preview(val)
+
+        def do_apply(_evt=None):
+            val = picked()
+            if val is None:
+                return "break"
+            music.set_scene_choice(scene, val)
+            self._music_refresh_row(scene)      # 设置窗里那行文案立刻跟着变
+            if on_done:
+                on_done()
+            music.end_preview(self._music_scene())
+            close()
+            return "break"
+
+        def do_apply_all(_evt=None):
+            """三个场景一次设成同一首：不必来回切场景手动换歌。"""
+            val = picked()
+            if val is None:
+                return "break"
+            music.set_all_choices(val)
+            self._music_refresh_rows()
+            if on_done:
+                on_done()
+            music.end_preview(self._music_scene())
+            close()
+            return "break"
+
+        def close():
+            try:
+                music.end_preview(self._music_scene())
+            except Exception:                  # noqa: BLE001
+                pass
+            win.destroy()
+
+        lb.bind("<Double-Button-1>", do_apply)
+        lb.bind("<Return>", do_apply)
+
+        btns = tk.Frame(win, bg=BG)
+        btns.pack(pady=(10, 6))
+        tk.Button(btns, text=i18n.t("music_preview"), bg=PANEL, fg=TEXT,
+                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+                  command=do_preview).pack(side="left", padx=4)
+        tk.Button(btns, text=i18n.t("music_apply"), bg="#3a5a80", fg=TEXT,
+                  font=FONT_S, bd=0, padx=18, pady=6, cursor="hand2",
+                  command=do_apply).pack(side="left", padx=4)
+        tk.Button(btns, text=i18n.t("music_apply_all"), bg="#3a5a80", fg=TEXT,
+                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+                  command=do_apply_all).pack(side="left", padx=4)
+        tk.Button(btns, text=i18n.t("music_cancel"), bg="#4a4f5a", fg=TEXT,
+                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+                  command=close).pack(side="left", padx=4)
+        tk.Label(win, text=i18n.t("music_fmt_hint") + "  " + i18n.t("music_tracks", n=len(lib)),
+                 bg=BG, fg=DIM, font=FONT_S).pack(pady=(0, 10))
+        win.protocol("WM_DELETE_WINDOW", close)
+        win.bind("<Escape>", lambda e: close())
+        return win
 
     def _account_dialog(self, for_server=False):
         # 单实例：反复点击（或启动定时器与手动点击撞车）时不再叠开多个窗口
@@ -659,7 +1024,7 @@ class App(tk.Tk):
         win.role = "start_settings"
         win.title(i18n.t("settings_title"))
         win.configure(bg=BG)
-        win.geometry("380x460")
+        win.geometry("380x700")
         win.transient(self)
         tk.Label(win, text=i18n.t("settings_title"), bg=BG, fg=TEXT,
                  font=FONT_XL).pack(pady=(18, 6))
@@ -673,21 +1038,7 @@ class App(tk.Tk):
             self.open_start_settings()
 
         self._lang_buttons(win, on_change=apply_lang)
-
-        def toggle_renderer():
-            # 对战界面渲染引擎：pygame（增强）↔ tkinter（经典），下局生效
-            cur = i18n.get_pref("renderer", "pygame")
-            i18n.set_pref("renderer", "tk" if cur == "pygame" else "pygame")
-            win.destroy()
-            self.open_start_settings()
-
-        cur_r = i18n.get_pref("renderer", "pygame")
-        tk.Button(win, text=f"{i18n.t('renderer_label')}: "
-                  f"{i18n.t('renderer_py') if cur_r == 'pygame' else i18n.t('renderer_tk')}",
-                  bg="#4a6b8a", fg=TEXT, font=FONT_S, bd=0, padx=14, pady=8,
-                  cursor="hand2", command=toggle_renderer).pack(pady=(16, 4))
-        tk.Label(win, text=i18n.t("renderer_note"), bg=BG, fg=DIM,
-                 font=FONT_S, wraplength=330, justify="left").pack(padx=12)
+        self._music_row(win)
 
         def show_help():
             messagebox.showinfo(i18n.t("help_title"), i18n.t("help_text"))
@@ -746,6 +1097,12 @@ class App(tk.Tk):
                           wraplength=390, justify="left")
         status.pack(pady=(10, 4), padx=16)
 
+        # 完整性校验的说明行：整件事的重点是"玩家知道这次到底校验没校验"，
+        # 所以单独一行常驻，而不是塞进随时会被刷新的 status 里。
+        verify_lbl = tk.Label(win, text="", bg=BG, fg=DIM, font=FONT_S,
+                              wraplength=390, justify="left")
+        verify_lbl.pack(padx=16)
+
         bar_holder = tk.Frame(win, bg=BG)
         bar_holder.pack(fill="x", padx=16)
         bar = tk.Frame(bar_holder, bg="#2a2f38", height=10)
@@ -785,6 +1142,13 @@ class App(tk.Tk):
             if state["polling"]:
                 try:
                     status.configure(text=text, fg=fg)
+                except tk.TclError:
+                    state["polling"] = False
+
+        def set_verify(text, fg=DIM):
+            if state["polling"]:
+                try:
+                    verify_lbl.configure(text=text, fg=fg)
                 except tk.TclError:
                     state["polling"] = False
 
@@ -837,6 +1201,10 @@ class App(tk.Tk):
                 info = task.info or {}
                 set_status(i18n.t("update_new", ver=info.get("version", "?"),
                                   cur=net_update.version_str(VERSION)))
+                if task.checksum:
+                    set_verify(i18n.t("update_verify_will"), DIM)
+                else:
+                    set_verify(i18n.t("update_verify_none"), GOLD)
                 try:
                     notes_box.configure(state="normal")
                     notes_box.delete("1.0", "end")
@@ -871,9 +1239,11 @@ class App(tk.Tk):
                     tk.Button(btns, text=i18n.t("btn_close"), bg="#4a4f5a", fg=TEXT,
                               font=FONT_B, bd=0, padx=16, pady=7, cursor="hand2",
                               command=close).pack()
-            elif st in ("downloading", "extracting"):
+            elif st in ("downloading", "verifying", "extracting"):
                 pct = int(task.progress * 100)
-                key = "update_downloading" if st == "downloading" else "update_extracting"
+                key = {"downloading": "update_downloading",
+                       "verifying": "update_verifying",
+                       "extracting": "update_extracting"}[st]
                 set_status(i18n.t(key, done=pct))
                 try:
                     bar_fill.place_configure(relwidth=max(0.0, min(1.0, task.progress)))
@@ -887,6 +1257,10 @@ class App(tk.Tk):
                               cursor="hand2", command=close).pack()
             elif st == "done":
                 set_status(i18n.t("update_ready", ver=net_update.version_str(VERSION)), GREEN)
+                if task.verified:
+                    set_verify(i18n.t("update_verify_ok"), GREEN)
+                else:
+                    set_verify(i18n.t("update_verify_skip"), GOLD)
                 if not state.get("installed"):
                     state["installed"] = True
                     rebuild_buttons()
@@ -1125,17 +1499,6 @@ class App(tk.Tk):
         self.srv_status = tk.Label(box, text="", bg=PANEL, fg=GOLD, font=FONT_S,
                                    anchor="w", justify="left", wraplength=290)
         self.srv_status.pack(anchor="w", padx=14, pady=(2, 4))
-        # 公网地址行：「建立服务器」打通 UPnP 后把外网可连的地址放这儿。
-        # 默认是空的（连别人服务器时不该出现）。
-        self.srv_public_var = tk.StringVar(value="")
-        self.srv_public_lbl = tk.Label(box, textvariable=self.srv_public_var, bg=PANEL,
-                                       fg=GREEN, font=FONT_S, anchor="w",
-                                       justify="left", wraplength=290)
-        self.srv_public_lbl.pack(anchor="w", padx=14)
-        self.srv_copy_btn = tk.Button(box, text=i18n.t("btn_copy_addr"), bg="#2b3a4a",
-                                      fg=TEXT, font=FONT_S, bd=0, padx=10, pady=3,
-                                      cursor="hand2", command=self._lobby_copy_addr)
-        self._pub_addr = ""          # 当前可复制的地址（公网优先，其次局域网）
         # 游客（未登录）时给一个显眼的登录入口：联机按钮此时是灰的，
         # 光靠状态栏一行小字用户找不到出路（产品规则：游客不能联机）
         self.srv_login_btn = tk.Button(box, text=i18n.t("btn_login_or_reg"),
@@ -1327,8 +1690,6 @@ class App(tk.Tk):
             self.srv_addr_var.set(addr)
         # 局域网的其他人要连过来，得知道这个地址；顺带提醒防火墙
         self._lobby_log(i18n.t("host_firewall_hint"))
-        # 跨局域网：后台让路由器开公网端口（不阻塞 UI），结果用主线程轮询取
-        self._lobby_public_start(int(port) if port.isdigit() else 6000, addr)
         # ⚠ 已经连在同一台服务器上（本机开服时通常就是这台）→ **保持现有连接**。
         # 断链重连会让免密令牌失去意义（地址写法从 127.0.0.1:6000 变成
         # 192.168.x.x:6000），玩家会被打回登录框 —— 也就是用户报的
@@ -1343,99 +1704,6 @@ class App(tk.Tk):
         # 服务器进程刚起来时端口可能还没 listen 完，等一拍再连
         self.after(700, self._lobby_connect)
 
-    # ---- 跨局域网：公网地址 ----
-
-    def _lobby_public_start(self, port, lan_addr):
-        """开服后开始申请公网端口（后台线程），并起一个主线程轮询。"""
-        self._pub_addr = ""
-        self._pub_lan = lan_addr
-        try:
-            if not (self.srv_public_lbl.winfo_exists()):
-                return
-            self.srv_public_var.set(i18n.t("pub_working"))
-            self.srv_public_lbl.configure(fg=DIM)
-            self.srv_copy_btn.pack_forget()
-        except (AttributeError, tk.TclError):
-            return
-        kards_host.map_public_async(port)
-        self._schedule("_t_pub", 200, self._pub_poll)
-
-    def _pub_poll(self):
-        """主线程轮询映射结果（绝不能在后台线程里碰 tk 控件）。"""
-        st = kards_host.public_status()
-        if st.get("state") == "working":
-            self._schedule("_t_pub", 250, self._pub_poll)
-            return
-        self._lobby_public_render(st)
-
-    def _lobby_public_render(self, st):
-        try:
-            if not self.srv_public_lbl.winfo_exists():
-                return
-        except (AttributeError, tk.TclError):
-            return
-        lan = getattr(self, "_pub_lan", "") or kards_host.local_addr()
-        port = st.get("port") or 6000
-        local_ip = st.get("local_ip") or lan.split(":")[0]
-        lines = [i18n.t("pub_lan", addr=lan)]
-        fg = GREEN
-
-        if st.get("ok"):
-            # 地址要从**传进来的这份状态**拼，别再回头读 kards_host 的全局量
-            # —— 两者一旦不同步（刚完成映射、下一轮还没刷新），就会显示一个空地址。
-            pub = f"{st.get('external_ip')}:{port}"
-            key = "pub_direct" if st.get("direct") else "pub_ok"
-            lines.insert(0, i18n.t(key, addr=pub))
-            self._pub_addr = pub
-        elif st.get("cg_nat"):
-            lines.append(i18n.t("pub_cgnat", ip=st.get("external_ip") or "?",
-                                port=port))
-            fg = GOLD
-            self._pub_addr = lan
-        elif st.get("double_nat"):
-            lines.append(i18n.t("pub_double_nat", ip=st.get("external_ip") or "?",
-                                port=port, local=local_ip))
-            fg = GOLD
-            self._pub_addr = lan
-        else:
-            err = st.get("error") or ""
-            if err == "no_gateway":
-                lines.append(i18n.t("pub_fail_nogw", port=port, ip=local_ip))
-            else:
-                lines.append(i18n.t("pub_fail", err=err or "?", port=port,
-                                    ip=local_ip))
-            fg = GOLD
-            self._pub_addr = lan
-
-        try:
-            self.srv_public_var.set("\n".join(lines))
-            self.srv_public_lbl.configure(fg=fg)
-            self.srv_copy_btn.pack(anchor="w", padx=14, pady=(2, 6))
-        except tk.TclError:
-            pass
-
-    def _lobby_public_clear(self):
-        """连的是别人的服务器 → 自己这台没有公网入口，把那一行清掉。"""
-        self._pub_addr = ""
-        try:
-            if self.srv_public_lbl.winfo_exists():
-                self.srv_public_var.set("")
-                self.srv_copy_btn.pack_forget()
-        except (AttributeError, tk.TclError):
-            pass
-
-    def _lobby_copy_addr(self):
-        addr = getattr(self, "_pub_addr", "") or (
-            self.srv_addr_var.get() if getattr(self, "srv_addr_var", None) else "")
-        if not addr:
-            return
-        try:
-            self.clipboard_clear()
-            self.clipboard_append(addr)
-        except tk.TclError:
-            return
-        self._lobby_log(i18n.t("addr_copied", addr=addr))
-
     def _lobby_connect(self):
         parsed = net.parse_addr(self.srv_addr_var.get()
                                 if getattr(self, "srv_addr_var", None) else self.mp_server_addr)
@@ -1444,9 +1712,6 @@ class App(tk.Tk):
             return
         host, port = parsed
         addr = f"{host}:{port}"
-        # 连的若是别人的服务器，本机就没有"公网入口"这回事，别留上次开服的字样
-        if not net.is_self_host(host):
-            self._lobby_public_clear()
         self._close_server_link()
         self.mp_server_addr = addr
         self._srv_addr = addr
@@ -1640,6 +1905,10 @@ class App(tk.Tk):
         elif m == "join_err":
             self._lobby_log("⚠ " + str(msg.get("err") or "join_err"))
         elif m == "peer_left":
+            if self.mp_role is not None:
+                # 准备阶段：对手已经走了，别再傻等（否则永远卡在「等待对手准备」）
+                self._mp_route_in_game(msg)
+                return
             self._lobby_log(i18n.t("log_peer_left"))
         elif m == "kick":
             # 被服务器踢掉（同一账号在别处登录）。**不能**自动重连：
@@ -1648,6 +1917,8 @@ class App(tk.Tk):
             self._kicked = True
             self.mp_user = None
             self._lobby_log(i18n.t("log_kicked"))
+            if self.mp_role is not None:
+                self._mp_cleanup_to_menu()      # 准备阶段被踢：直接退出准备界面
         elif m == "err":
             self._lobby_log("⚠ " + str(msg.get("err") or "err"))
         elif m in ("act", "seed", "ready", "concede", "chat", "ping"):
@@ -1928,10 +2199,11 @@ class App(tk.Tk):
             w.destroy()
         for c in core.allowed_cards(self.deck_nation, self.db):
             n = self.deck_counts.get(c.name, 0)
+            full = n >= core.max_copies(c)      # 带满了（传说卡带 1 张就满）
             row = tk.Label(self.avail_inner, bg=CARD_BG if n else BG,
-                           fg=GOLD if n else TEXT, font=FONT_S, anchor="w",
-                           padx=10, pady=4,
-                           text=self._card_row_text(c) + i18n.t("copies", n=n, max=core.MAX_COPIES))
+                           fg=DIM if full else (GOLD if n else TEXT),
+                           font=FONT_S, anchor="w", padx=10, pady=4,
+                           text=self._card_row_text(c) + i18n.t("copies", n=n, max=core.max_copies(c)))
             row.pack(fill="x", pady=1)
             row.bind("<Button-1>", lambda e, card=c: self._add_card(card))
             bind_tooltip(row, lambda c=c: card_tooltip(c))
@@ -1961,7 +2233,7 @@ class App(tk.Tk):
 
     def _add_card(self, card):
         n = self.deck_counts.get(card.name, 0)
-        if n >= core.MAX_COPIES:
+        if n >= core.max_copies(card):
             return
         if self._deck_total() >= core.DECK_SIZE:
             return
@@ -2001,7 +2273,7 @@ class App(tk.Tk):
         while self._deck_total() < core.DECK_SIZE and guard < 100000:
             guard += 1
             c = random.choices(pool, weights=weights, k=1)[0]
-            if self.deck_counts.get(c.name, 0) >= core.MAX_COPIES:
+            if self.deck_counts.get(c.name, 0) >= core.max_copies(c):
                 continue
             if c.nation in core.ALLY_NATIONS and self._deck_ally_count() >= core.ALLY_LIMIT:
                 continue
@@ -2024,9 +2296,9 @@ class App(tk.Tk):
 
         def do_import():
             counts, unmatched = core.parse_deck_text(txt.get("1.0", "end"), self.db)
-            self.deck_counts = {}
-            for name, n in counts.items():
-                self.deck_counts[name] = min(n, core.MAX_COPIES)
+            # parse_deck_text 已经按稀有度截过；这里再走一遍 clamp_counts 是保险，
+            # 免得以后解析逻辑改动时漏掉上限。
+            self.deck_counts = core.clamp_counts(counts, self.db)[0]
             win.destroy()
             self._builder_refresh()
             msg = i18n.t("import_result", n=sum(counts.values()), m=self._deck_total())
@@ -2073,11 +2345,19 @@ class App(tk.Tk):
             if counts is None:
                 messagebox.showwarning(i18n.t("btn_load"), i18n.t("load_missing"))
                 return
+            counts, trimmed = core.clamp_counts(counts, self.db)
             self.deck_counts = dict(counts)
             self._builder_refresh()
-            messagebox.showinfo(i18n.t("btn_load"),
-                                i18n.t("load_ok", name=nm, n=self._deck_total(),
-                                       size=core.DECK_SIZE))
+            msg = i18n.t("load_ok", name=nm, n=self._deck_total(), size=core.DECK_SIZE)
+            if trimmed:
+                # 旧存档是按"单卡一律 3 张"存的，稀有度上限上线后传说/史诗 会超标。
+                # 不提示的话玩家只看到张数变少、开始按钮变灰，不知道为什么。
+                items = i18n.t("load_trimmed_sep").join(
+                    f"{n} ×{old}→×{new}" for n, old, new in trimmed[:5])
+                if len(trimmed) > 5:
+                    items += i18n.t("load_trimmed_more", k=len(trimmed) - 5)
+                msg += "\n\n" + i18n.t("load_trimmed", items=items)
+            messagebox.showinfo(i18n.t("btn_load"), msg)
 
         for nm in names:
             row = tk.Label(win, text=f"📄 {nm}", bg=PANEL, fg=TEXT, font=FONT,
@@ -2102,9 +2382,18 @@ class App(tk.Tk):
             return
         random.shuffle(deck)
         self.mp_my_deck = [c.name for c in deck]
-        self.mp_opp = None
+        # ⚠ 绝不能在这里把 mp_opp 清成 None：对手可能**先于我方**点了准备，
+        # 他的 ready 已经被 _mp_prep_watch / _lobby_drain_events 收进 mp_opp。
+        # 清掉之后对手不会重发 ready，主机就永远等不到"对手已就绪"，
+        # 双方一起卡在「等待对手准备」——典型症状就是"两边都准备了却开不了"。
+        self._mp_me_ready = True
         self.mp_link.send({"m": "ready", "nation": self.deck_nation,
                            "deck": self.mp_my_deck})
+        self._lobby_log(i18n.t("mp_log_ready_sent"))
+        if self.mp_opp:                      # 对手早就准备好了：主机立刻可以发种子
+            self._lobby_log(i18n.t("mp_log_opp_ready",
+                                   nation=self.mp_opp.get("nation", "?"),
+                                   n=len(self.mp_opp.get("deck") or [])))
         self.start_btn.configure(state="disabled", text=i18n.t("waiting_opponent"))
         self._cancel_timer("_t_prep")       # 交给 hello 轮询，看门狗退场
         self._schedule("_t_hello", 200, self._mp_poll_hello)
@@ -2128,8 +2417,10 @@ class App(tk.Tk):
                 if m.get("m") == "ready":
                     self.mp_opp = m
                 elif m.get("m") == "seed" and self.mp_role == "client":
-                    self._mp_launch(m["seed"])
-                    return
+                    # ⚠ 不在这里直接开局：对手的 ready 可能还没到（尤其是我方
+                    # "后点准备"时），此时 opp 为空会被误判成"对手卡组数量异常"。
+                    # 先暂存种子，等 ready 落地后再开局。
+                    self._mp_pending_seed = m.get("seed", 0)
                 elif m.get("m") == "peer_left":
                     messagebox.showerror(i18n.t("mp_title"), i18n.t("mp_peer_left_prep"))
                     self._mp_cleanup_to_menu()
@@ -2143,17 +2434,25 @@ class App(tk.Tk):
                     return
         except queue.Empty:
             pass
-        if self.mp_role == "host" and self.mp_opp is not None:
+        if (self.mp_role == "client" and self._mp_pending_seed is not None
+                and self.mp_opp is not None):
+            seed, self._mp_pending_seed = self._mp_pending_seed, None
+            self._mp_launch(seed)
+            return
+        if self.mp_role == "host" and self.mp_opp is not None and self._mp_me_ready:
             seed = random.SystemRandom().randrange(10 ** 9)
             self.mp_link.send({"m": "seed", "seed": seed})
+            self._lobby_log(i18n.t("mp_log_seed_host"))
             self._mp_launch(seed)
             return
         self._schedule("_t_hello", 200, self._mp_poll_hello)
 
     def _mp_launch(self, seed):
         """双方用同一种子同步开局：先手随机、发牌一致"""
+        self._mp_pending_seed = None
+        if self.mp_role == "client":
+            self._lobby_log(i18n.t("mp_log_seed_client"))
         opp = self.mp_opp or {}
-        use_py = self._use_pyboard()
         try:
             my_deck = [self.db[n] for n in self.mp_my_deck]
             opp_deck = [self.db[n] for n in opp.get("deck", [])]
@@ -2163,25 +2462,28 @@ class App(tk.Tk):
             self._mp_cleanup_to_menu()
             return
         if len(opp_deck) != core.DECK_SIZE:
-            messagebox.showerror(i18n.t("mp_title"), i18n.t("mp_bad_deck"))
+            messagebox.showerror(i18n.t("mp_title"),
+                                 i18n.t("mp_bad_deck", n=len(opp_deck),
+                                        need=core.DECK_SIZE))
             self._mp_cleanup_to_menu()
             return
-        if use_py:
-            # ⚠ 必须等上面所有提前 return 走完再激活：否则视图方法已被实例
-            # 覆盖，却没走到 _run_pyboard() 的还原逻辑 → 一直留在 pygame 视图。
-            # 先激活：开局日志要进棋盘日志面板；激活失败则退回 tkinter。
-            use_py = self._activate_pyboard() is not None
+        # ⚠ 必须等上面所有提前 return 走完再激活：否则视图方法已被实例
+        # 覆盖，却没走到 _run_pyboard() 的还原逻辑 → 一直留在 pygame 视图。
+        # 对战界面只有 pygame 一种；激活失败（缺 pygame）直接不开局。
+        if self._activate_pyboard() is None:
+            messagebox.showerror(i18n.t("msg_error"), i18n.t("err_need_pygame"))
+            self._mp_cleanup_to_menu()
+            return
         random.seed(seed)
         foe_name = self.mp_opp_name or f"对手·{opp.get('nation', '?')}"
         me = core.Player("你", self.deck_nation, my_deck)
         foe = core.Player(foe_name, opp.get("nation", "德国"), opp_deck)
         self.game = GUIGame(me, foe, self.add_log, self.on_game_event)
+        self._music_play("battle")
         for attr in ("start_frame", "builder_frame"):
             fr = getattr(self, attr, None)
             if fr is not None and fr.winfo_exists():
                 fr.destroy()
-        if not use_py:
-            self._build_main()
         # 先手按 host/client 角色判定：双方同种子 → 角色结果一致，不会都认为自己是先手
         first_role = random.choice(["host", "client"])
         i_am_first = (first_role == self.mp_role)
@@ -2202,9 +2504,8 @@ class App(tk.Tk):
             self.show_banner("你的回合", GREEN, 900)
         else:
             self.show_banner("敌方回合", RED, 900)
-        if use_py:
-            self._run_pyboard()       # 阻塞至对局结束（期间泵 Tk 事件跑网络轮询）
-            return
+        self._run_pyboard()       # 阻塞至对局结束（期间泵 Tk 事件跑网络轮询）
+        return
 
     # ---------------- 联机：网络轮询与行动应用 ----------------
     def _mp_send_act(self, act):
@@ -2241,9 +2542,36 @@ class App(tk.Tk):
         self._schedule("_t_net", 80, self._mp_poll_net)
 
     def _mp_route_in_game(self, msg):
-        """对局中的中转消息：交给 _mp_handle；准备阶段交给 hello 轮询"""
+        """中转消息路由：对局中交给 _mp_handle；准备阶段在此落地 ready/seed
+
+        ⚠ 准备阶段（game is None）**必须**处理 ready/seed：`_lobby_drain_events()`
+        会把 inbox 里的消息全部喂给本方法，若这里只认对局状态，双方点完准备
+        后对手的 ready 会被静默吞掉（主机永远等不到对手准备、永远不发种子）
+        → 两边一起卡在「等待对手准备」。用户实测踩过。
+        """
         if self.game is not None:
             self._mp_handle(msg)
+            return
+        m = msg.get("m")
+        if m == "ready":
+            first = self.mp_opp is None
+            self.mp_opp = msg
+            if first:
+                self._lobby_log(i18n.t("mp_log_opp_ready",
+                                       nation=msg.get("nation", "?"),
+                                       n=len(msg.get("deck") or [])))
+        elif m == "seed" and self.mp_role == "client":
+            # 同上：种子到了但对手 ready 可能还在路上，先存着
+            self._mp_pending_seed = msg.get("seed", 0)
+        elif m in ("peer_left", "kick"):
+            messagebox.showerror(i18n.t("mp_title"), i18n.t("mp_peer_left_prep"))
+            self._mp_cleanup_to_menu()
+        elif m == "concede":
+            self._mp_cleanup_to_menu()
+        if (self.mp_role == "client" and self._mp_pending_seed is not None
+                and self.mp_opp is not None):
+            seed, self._mp_pending_seed = self._mp_pending_seed, None
+            self._mp_launch(seed)
 
     def _mp_handle(self, msg):
         g = self.game
@@ -2369,6 +2697,8 @@ class App(tk.Tk):
         self.mp_opp = None
         self.mp_opp_name = None
         self.mp_my_deck = None
+        self._mp_me_ready = False
+        self._mp_pending_seed = None
         self._lobby_active = False
         for attr in ("start_frame", "builder_frame"):
             fr = getattr(self, attr, None)
@@ -2389,19 +2719,20 @@ class App(tk.Tk):
     # ---------------- 开新对局（随机匹配 + 随机先手）----------------
     def new_game(self, nation, deck=None):
         ai_nation = random.choice(core.MAIN_NATIONS)  # 随机匹配，可能内战
-        use_py = self._use_pyboard()
-        if use_py:
-            # 先激活：开局日志要进棋盘日志面板；激活失败则退回 tkinter
-            use_py = self._activate_pyboard() is not None
+        # 对战界面只有 pygame 一种（经典 tkinter 界面已删除）。必须先激活：
+        # 开局日志要进棋盘日志面板。激活失败说明 pygame 缺失/装坏 —— 直接
+        # 不开局并明确报错，好过开局后面对一个没有视图的控制器。
+        if self._activate_pyboard() is None:
+            messagebox.showerror(i18n.t("msg_error"), i18n.t("err_need_pygame"))
+            return
         p1 = core.Player("你", nation, deck if deck is not None else core.build_deck(nation, self.db))
         p2 = core.Player("AI", ai_nation, core.build_deck(ai_nation, self.db))
         self.game = GUIGame(p1, p2, self.add_log, self.on_game_event)
+        self._music_play("battle")
         if hasattr(self, "start_frame") and self.start_frame.winfo_exists():
             self.start_frame.destroy()
         if hasattr(self, "builder_frame") and self.builder_frame.winfo_exists():
             self.builder_frame.destroy()
-        if not use_py:
-            self._build_main()
 
         self.initiative = random.choice(["你", "AI"])
         second = p2 if self.initiative == "你" else p1
@@ -2421,70 +2752,9 @@ class App(tk.Tk):
         else:
             self.show_banner("你的回合", GREEN, 900)
             self.after(1000, self.begin_human_turn)
-        if use_py:
-            self._run_pyboard()       # 阻塞至对局结束（期间泵 Tk 事件）
-            return
+        self._run_pyboard()       # 阻塞至对局结束（期间泵 Tk 事件）
 
     # ---------------- 主界面布局 ----------------
-    def _build_main(self):
-        main = tk.Frame(self, bg=BG)
-        main.pack(fill="both", expand=True, padx=(12, 4), pady=10)
-        self.main_frame = main
-
-        left = tk.Frame(main, bg=BG)
-        left.pack(side="left", fill="both", expand=True)
-        right = tk.Frame(main, bg=BG)
-        right.pack(side="right", fill="y", padx=(4, 8))
-
-        self.foe_info = tk.Label(left, bg=BG, fg=RED, font=FONT_B, anchor="w")
-        self.foe_info.pack(fill="x")
-
-        # 五段式战场：敌支援阵线 / 敌前线 / ⚔前线条 / 我方前线 / 我方支援阵线
-        self.foe_rear_row = self._board_row(left, i18n.t("row_foe_rear"))
-        self.foe_front_row = self._board_row(left, i18n.t("row_foe_front"))
-        self.mid_frame = tk.Frame(left, bg="#20242c")
-        self.mid_frame.pack(fill="x", pady=6, ipady=5)
-        self.my_front_row = self._board_row(left, i18n.t("row_my_front"))
-        self.my_rear_row = self._board_row(left, i18n.t("row_my_rear"))
-
-        self.my_info = tk.Label(left, bg=BG, fg=TEXT, font=FONT_B, anchor="w")
-        self.my_info.pack(fill="x")
-
-        # 右侧：设置/投降 + 战场记录
-        tk.Button(right, text=i18n.t("btn_ingame_settings"), bg="#4a4f5a", fg=TEXT, font=FONT_S,
-                  bd=0, padx=12, pady=6, cursor="hand2",
-                  command=self.open_settings).pack(anchor="e", pady=(0, 8))
-        tk.Label(right, text=i18n.t("log_title"), bg=BG, fg=DIM, font=FONT).pack(anchor="w")
-        self.logbox = tk.Text(right, width=36, bg=PANEL, fg=TEXT, font=FONT_S,
-                              state="disabled", wrap="word", bd=0, padx=8, pady=6)
-        self.logbox.pack(fill="both", expand=True)
-
-        bottom = tk.Frame(self, bg=PANEL)
-        bottom.pack(fill="x", side="bottom")
-        self.bottom_frame = bottom
-        self.hand_frame = tk.Frame(bottom, bg=PANEL)
-        self.hand_frame.pack(side="left", fill="x", expand=True, padx=10, pady=8)
-        self.speed_btn = tk.Button(bottom, text=i18n.t("btn_slow"), bg="#4a4f5a", fg=TEXT,
-                                   font=FONT_S, bd=0, padx=12, pady=8, cursor="hand2",
-                                   command=self.toggle_speed)
-        self.speed_btn.pack(side="right", padx=(0, 10))
-        self.end_btn = tk.Button(bottom, text=i18n.t("btn_end_turn"), bg="#3a5a80", fg=TEXT,
-                                 font=FONT_B, bd=0, padx=22, pady=10,
-                                 activebackground="#4c6b8a", cursor="hand2",
-                                 command=self.on_end_turn)
-        self.end_btn.pack(side="right", padx=(10, 4))
-
-    def _board_row(self, parent, caption):
-        wrap = tk.Frame(parent, bg=BG)
-        wrap.pack(fill="x")
-        tk.Label(wrap, text=caption, bg=BG, fg=DIM,
-                 font=(FONT_FAMILY, 9), width=11,
-                 anchor="w").pack(side="left", fill="y")
-        row = tk.Frame(wrap, bg="#1f232b", highlightthickness=1,
-                       highlightbackground="#2a2f3a")
-        row.pack(side="left", fill="x", expand=True, padx=(0, 2), ipady=8)
-        return row
-
     def toggle_speed(self):
         self.fast_ai = not self.fast_ai
         self.ai_step_ms = 300 if self.fast_ai else 850
@@ -2497,519 +2767,8 @@ class App(tk.Tk):
                           else i18n.t("btn_slow"))
 
     # ---------------- 渲染 ----------------
-    def refresh(self):
-        g = self.game
-        if g is None:
-            return
-        # ⚠ after 队列竞态守卫：窗口销毁（对局收尾/退出）后仍可能有排定的
-        # refresh 回调触发，此时 foe_info 等已销毁，configure 会抛
-        # TclError: invalid command name —— 偶发 --smoke 崩溃 + 进程挂死
-        # （挂死又连锁导致卸载残留）的根因。控件已亡则直接放弃本次刷新。
-        try:
-            if not (self.foe_info.winfo_exists()
-                    and self.my_info.winfo_exists()
-                    and self.hand_frame.winfo_exists()):
-                return
-        except tk.TclError:
-            return
-        # 刷新会重建所有卡片控件，先清掉拖拽残留（高亮/幽灵卡），
-        # 否则旧控件的引用会留在 _hl_saved 里，且幽灵卡可能浮在死控件上
-        self._clear_highlights()
-        self._hl_saved = {}
-        self._lift_saved = {}
-        d = self.drag
-        if d is not None and d.get("ghost") is not None:
-            try:
-                if d["ghost"].winfo_exists():
-                    d["ghost"].destroy()
-            except tk.TclError:
-                pass
-            d["ghost"] = None
-        me, foe = g.players[0], g.players[1]   # 固定我方视角，AI 回合不泄露手牌
-        human_turn = g.current is me
-        fc = NATION_COLOR.get(foe.nation, "#666")
-        mc = NATION_COLOR.get(me.nation, "#666")
-        turn_tag = "" if human_turn else i18n.t("turn_tag")
-        self.foe_info.configure(
-            text=i18n.t("foe_info", name=foe.name, nation=foe.nation, hq=foe.hq,
-                        hand=len(foe.hand), kr=foe.kredits,
-                        cnt=len(foe.counters), tag=turn_tag), fg=RED)
-        counter_txt = (i18n.t("counter_zone") + " | ".join(c.name for c in me.counters)) if me.counters else ""
-        self.my_info.configure(
-            text=i18n.t("my_info", name=me.name, nation=me.nation, hq=me.hq,
-                        kr=me.kredits, deck=len(me.deck),
-                        perk=me.hq_card.perk_desc, counters=counter_txt), fg=TEXT)
-
-        for f in (self.foe_rear_row, self.foe_front_row, self.my_front_row,
-                  self.my_rear_row, self.hand_frame):
-            for w in f.winfo_children():
-                w.destroy()
-        self.unit_widgets = {}
-        self.enemy_widgets = []
-        self.hq_widget = None
-        self.my_hq_widget = None
-        # ---- 敌方支援阵线：总部 + 后排单位 ----
-        hq = CardWidget(self.foe_rear_row, title=i18n.t("foe_hq"),
-                        sub=i18n.t("hq_hint"), cost=None, color="#8a3a3a",
-                        draggable=True, defense=foe.hq)
-        hq.pack(side="left", padx=(8, 14), ipady=6)
-        self.hq_widget = hq
-        bind_tooltip_tree(hq, lambda f=foe: foe_hq_tooltip(f))
-        foe_front = [u for u in foe.board if u.position == "前线"]
-        foe_rear = [u for u in foe.board if u.position != "前线"]
-        if not foe.board:
-            tk.Label(self.foe_rear_row, text=i18n.t("foe_no_units"), bg="#1f232b", fg=DIM,
-                     font=FONT_S).pack(side="left", padx=8)
-        for u in foe_rear:
-            self._enemy_card(u, fc, self.foe_rear_row)
-        # ---- 敌方前线 ----
-        if not foe_front:
-            tk.Label(self.foe_front_row, text=i18n.t("foe_front_empty"), bg="#1f232b", fg="#5a616b",
-                     font=FONT_S).pack(side="left", padx=8)
-        for u in foe_front:
-            self._enemy_card(u, fc, self.foe_front_row)
-
-        # ---- ⚔ 前线占领状态条 ----
-        for w in self.mid_frame.winfo_children():
-            w.destroy()
-        owner = g.frontline_owner()
-        own_front = sum(1 for u in me.board if u.position == "前线")
-        if owner is None:
-            front_txt, front_fg = i18n.t("front_none"), DIM
-        elif owner is me:
-            front_txt, front_fg = i18n.t("front_mine", n=own_front, total=core.FRONTLINE_SLOTS), GOLD
-        else:
-            front_txt, front_fg = i18n.t("front_foe"), RED
-        tk.Label(self.mid_frame, text=front_txt, bg="#20242c", fg=front_fg,
-                 font=FONT).pack(expand=True)
-
-        # ---- 我方前线 / 支援阵线 ----
-        my_front = [u for u in me.board if u.position == "前线"]
-        my_rear = [u for u in me.board if u.position != "前线"]
-        # ---- 我方支援阵线：总部 + 后排单位（总部与敌方同款，蓝色调区分）----
-        my_hq = CardWidget(self.my_rear_row, title=i18n.t("my_hq"),
-                           sub=i18n.t("hq_hint"), cost=None, color="#3a5a7a",
-                           draggable=False, defense=me.hq)
-        my_hq.pack(side="left", padx=(8, 14), ipady=6)
-        self.my_hq_widget = my_hq
-        if not me.board:
-            tk.Label(self.my_rear_row, text=i18n.t("my_rear_empty"),
-                     bg="#1f232b", fg=DIM, font=FONT_S).pack(side="left", padx=8)
-        for u in my_front:
-            self._my_card(u, mc, self.my_front_row)
-        if not my_front:
-            tk.Label(self.my_front_row, text=i18n.t("my_front_empty"),
-                     bg="#1f232b", fg="#5a616b", font=FONT_S).pack(side="left", padx=8)
-        for u in my_rear:
-            self._my_card(u, mc, self.my_rear_row)
-
-        # ---- 入场动画：新部署单位先在牌桌外待命，等令牌飞到位再落地 ----
-        for u, _color in self.pending_flash:
-            w = self.unit_widgets.get(id(u))
-            if w is not None and w.winfo_exists():
-                w.pack_forget()
-
-        # ---- 手牌（仅我方回合显示，AI 手牌保密）----
-        if not human_turn:
-            tk.Label(self.hand_frame, text=i18n.t("hand_hidden"), bg=PANEL, fg=DIM,
-                     font=FONT_S).pack(side="left", padx=8)
-        elif not me.hand:
-            tk.Label(self.hand_frame, text=i18n.t("hand_empty"), bg=PANEL, fg=DIM,
-                     font=FONT_S).pack(side="left", padx=8)
-        else:
-            for i, c in enumerate(me.hand):
-                eff = g.get_cost(c, me)
-                playable = eff <= me.kredits
-                if c.kind == "unit":
-                    sub = f"{c.unit_type} {c.attack}/{c.defense} {kw_text(c.keywords)}"
-                    if eff != c.cost:
-                        sub += f"（原 {c.cost}）"
-                    can = playable and g.can_deploy(me)
-                elif c.kind == "counter":
-                    sub = f"【反制】{c.desc}"
-                    can = playable and len(me.counters) < core.COUNTER_SLOTS
-                else:
-                    sub = c.desc
-                    can = playable
-                cw = CardWidget(self.hand_frame, title=c.name, sub=sub, cost=eff,
-                                color=NATION_COLOR.get(c.nation, "#666") if can else "#555",
-                                draggable=True, rarity=c.rarity, dim=not can)
-                if not can:
-                    for child in cw.winfo_children():
-                        try:
-                            child.configure(fg="#777")
-                        except tk.TclError:
-                            pass
-                cw.pack(side="left", padx=4, ipady=4)
-                self._bind_drag(cw, ("hand", i))
-                bind_tooltip_tree(cw, lambda c=c, eff=eff: card_tooltip(c, eff))
-
-        # 入场动画补播（真身已在上面 pack_forget，令牌飞到位才落地）
-        for u, color in self.pending_flash:
-            self._anim_entry(u)
-        self.pending_flash = []
-
-    def _enemy_card(self, u, color, parent):
-        slot_tag = f"#{u.slot}⌂" if u.slot == 0 else f"#{u.slot}"
-        cw = CardWidget(parent, title=u.name,
-                        sub=f"{slot_tag} {u.unit_type} " + kw_text(u.keywords),
-                        cost=None, color=color, atk=u.attack, defense=u.defense,
-                        draggable=True, rarity=u.card.rarity)
-        cw.pack(side="left", padx=5, ipady=6)
-        self.enemy_widgets.append((u, cw))
-        self.unit_widgets[id(u)] = cw
-        bind_tooltip_tree(cw, lambda u=u: card_tooltip(u.card, unit=u))
-
-    def _my_card(self, u, color, parent):
-        ready = self.game.unit_ready(u) if self.game else u.can_attack
-        slot_tag = f"#{u.slot}⌂" if u.slot == 0 else f"#{u.slot}"
-        sub = f"{slot_tag} {u.unit_type} " + kw_text(u.keywords)
-        if u.operate:
-            sub += f" ⚡{u.operate}"
-        if ready:
-            sub += "（可攻击）"
-        cw = CardWidget(parent, title=u.name, sub=sub, cost=None, color=color,
-                        atk=u.attack, defense=u.defense, draggable=True,
-                        rarity=u.card.rarity, border=GREEN if ready else None)
-        cw.pack(side="left", padx=5, ipady=6)
-        self.unit_widgets[id(u)] = cw
-        self._bind_drag(cw, ("unit", u))
-        bind_tooltip_tree(cw, lambda u=u: card_tooltip(u.card, unit=u))
-
     # ---------------- 拖拽操作 ----------------
-    def _bind_drag(self, widget, payload):
-        """把拖拽事件绑定到卡片及其所有子控件。
-        卡片内部是标题/属性等子 Label，若只绑定外框，点在文字上就完全无法拖动。"""
-        def descendants(w):
-            for c in w.winfo_children():
-                yield c
-                yield from descendants(c)
-        targets = [widget] + list(descendants(widget))
-
-        def press(e, p=payload, ww=widget):
-            self._drag_start(p, e, ww)
-        for w in targets:
-            w.bind("<Button-1>", press)
-            w.bind("<B1-Motion>", self._drag_motion)
-            w.bind("<ButtonRelease-1>", self._drag_drop)
-            try:
-                w.configure(cursor="hand2")
-            except tk.TclError:
-                pass
-
-    def _drag_ok(self):
-        return (self.game is not None and not self.busy
-                and self.game.current is self.game.players[0])
-
     # ---- 拖拽：幽灵卡直接挂主窗口 ----
-    def _drop_zones(self):
-        """返回 [(widget, 类型)] —— 拖拽时可以落下的区域。
-
-        类型用于判定合法性：
-          "deploy" 部署单位（我方支援阵线）
-          "front"  我方前线（移动 / 部署到前线）
-          "enemy"  敌方单位卡（攻击目标）
-          "hq"     敌方总部（攻击目标）
-        """
-        zones = []
-        for attr, kind in (("foe_rear_row", "enemy"),
-                           ("foe_front_row", "enemy"),
-                           ("my_front_row", "front"),
-                           ("my_rear_row", "deploy")):
-            w = getattr(self, attr, None)
-            if w is not None and w.winfo_exists():
-                zones.append((w, kind))
-        if self.hq_widget is not None and self.hq_widget.winfo_exists():
-            zones.append((self.hq_widget, "hq"))
-        for _u, w in self.enemy_widgets:
-            if w.winfo_exists():
-                zones.append((w, "enemy_card"))
-        return zones
-
-    def _drag_start(self, payload, e, widget=None):
-        if not self._drag_ok():
-            return
-        if widget is not None:
-            self._last_drag_src = self._wcenter(widget)   # 部署入场动画的起飞点
-        self.drag = {"payload": payload, "ghost": None,
-                     "sx": e.x_root, "sy": e.y_root,
-                     "widget": widget, "hot": None,
-                     "unbind": None}
-        # 抬起效果：源卡描边高亮，明确"这张正在被拖动"
-        # 注意：这是拖拽的基本反馈，不受 anim_enabled（动画开关）影响
-        if widget is not None:
-            self._lift_widget(widget)
-
-    def _lift_widget(self, w):
-        """拖拽中的源卡加一圈金色描边（松手/刷新时自动还原）"""
-        try:
-            if not w.winfo_exists():
-                return
-            if not hasattr(self, "_lift_saved"):
-                self._lift_saved = {}
-            if w not in self._lift_saved:
-                # 同时记下原描边色和原描边宽度，还原时一模一样放回去
-                self._lift_saved[w] = (w.cget("highlightbackground"),
-                                       w.cget("highlightthickness"))
-            w.configure(highlightbackground=GOLD, highlightthickness=3)
-        except tk.TclError:
-            pass
-
-    def _unlift_all(self):
-        for w, saved in list(getattr(self, "_lift_saved", {}).items()):
-            try:
-                if w.winfo_exists():
-                    bg, th = saved if isinstance(saved, tuple) else (saved, 2)
-                    w.configure(highlightbackground=bg, highlightthickness=th)
-            except tk.TclError:
-                pass
-        self._lift_saved = {}
-
-    def _ghost_text(self, payload):
-        """拖动时显示的文案 + 颜色（非法操作给出不同配色）"""
-        g = self.game
-        p = payload
-        if p[0] == "hand":
-            if p[1] >= len(g.players[0].hand):
-                return None, None
-            card = g.players[0].hand[p[1]]
-            eff = g.get_cost(card, g.players[0])
-            playable = eff <= g.players[0].kredits
-            if card.kind == "unit":
-                ok = playable and g.can_deploy(g.players[0])
-                return f"{card.name}  ◆{eff}  拖到支援阵线", (GOLD if ok else "#8a5a3a")
-            return f"{card.name}  ◆{eff}  拖到桌面", (GOLD if playable else "#8a5a3a")
-        if p[0] == "unit" and p[1] in g.players[0].board:
-            u = p[1]
-            return f"{u.name}  {u.attack}/{u.defense}  拖到目标或阵线", GOLD
-        return None, None
-
-    def _valid_drop(self, payload, x, y):
-        """当前落点是否是可执行的操作（决定高亮颜色）"""
-        g = self.game
-        if g is None:
-            return False
-        me = g.players[0]
-        for w, kind in self._drop_zones():
-            if not self._hit(x, y, w):
-                continue
-            if payload[0] == "hand":
-                idx = payload[1]
-                if idx >= len(me.hand):
-                    return False
-                card = me.hand[idx]
-                if card.kind == "unit":
-                    # 单位只能落在支援阵线（部署）
-                    return kind == "deploy"
-                return kind in ("deploy", "front")
-            unit = payload[1]
-            if unit not in me.board:
-                return False
-            if kind == "enemy_card":
-                u = next((uu for uu, ww in self.enemy_widgets if ww is w), None)
-                return u is not None and g.unit_ready(unit) \
-                    and u in g.attack_targets(unit)
-            if kind == "hq":
-                # 支援线步兵/坦克不能直击总部（必须上前线；空军/炮兵可以）
-                return g.unit_ready(unit) and g.can_hit_hq(unit)[0]
-            if kind in ("front", "deploy"):
-                return True     # 机动不要求"可攻击"，引擎内部会再校验
-            return False
-        return False
-
-    def _drag_motion(self, e):
-        d = self.drag
-        if d is None:
-            return
-        if d["ghost"] is None:
-            # 阈值放宽到 4px，兼顾"轻点"与"随手拖"
-            if abs(e.x_root - d["sx"]) < 4 and abs(e.y_root - d["sy"]) < 4:
-                return
-            txt, color = self._ghost_text(d["payload"])
-            if txt is None:
-                # 这张牌当前打不出去（费用/回合等），静默放弃，
-                # 但要撤掉源卡的金描边，否则会一直亮着
-                self.drag = None
-                self._drag_cancel()
-                return
-            # 幽灵卡的父级必须是主窗口（self），**不能**放原容器里
-            # （会被手牌区裁剪），也**不能**套一层铺满窗口的遮罩 Frame ——
-            # 那样会把整个界面盖成黑屏并吃掉所有点击（v1.3.0.2 前的
-            # 「拖卡黑屏」事故）。place() 的绝对坐标以父容器为基准，
-            # 挂在主窗口上就等于全窗口自由定位，且 lift() 后压在所有
-            # 兄弟控件之上，无需任何中间层。
-            ghost = tk.Label(self, text=txt, bg=color,
-                             fg="#15171c", font=FONT_B, bd=0, padx=12, pady=7)
-            ghost.place(x=-500, y=-500)
-            ghost.lift()
-            d["ghost"] = ghost
-            d["base_color"] = color
-        # 幽灵卡跟随鼠标，并做边界收拢，保证始终可见
-        gh = d["ghost"]
-        if not gh.winfo_exists():        # 幽灵卡被 refresh() 意外销毁
-            self.drag = None
-            self._drag_cancel()
-            return
-        w, h = gh.winfo_reqwidth(), gh.winfo_reqheight()
-        gx = min(max(0, e.x_root - self.winfo_rootx() - w // 2),
-                 max(0, self.winfo_width() - w))
-        gy = min(max(0, e.y_root - self.winfo_rooty() - h // 2),
-                 max(0, self.winfo_height() - h))
-        gh.place(x=gx, y=gy)
-
-        # 高亮当前落点：绿=可执行，红=不可执行
-        ok = self._valid_drop(d["payload"], e.x_root, e.y_root)
-        zone = self._zone_at(e.x_root, e.y_root)
-        if zone is not d["hot"]:
-            self._unhighlight(d["hot"])
-            d["hot"] = zone
-            self._highlight(zone, GREEN if ok else RED)
-        gh.configure(bg=GOLD if ok else "#7a4a4a")
-
-    def _zone_at(self, x, y):
-        """落点命中的区域控件（用于高亮）"""
-        for w, _kind in self._drop_zones():
-            if self._hit(x, y, w):
-                return w
-        return None
-
-    def _highlight(self, w, color):
-        if w is None or not w.winfo_exists():
-            return
-        try:
-            if not hasattr(self, "_hl_saved"):
-                self._hl_saved = {}
-            if w not in self._hl_saved:
-                self._hl_saved[w] = (w.cget("highlightbackground"),
-                                     w.cget("highlightthickness"))
-            w.configure(highlightbackground=color, highlightthickness=3)
-        except tk.TclError:
-            pass
-
-    def _unhighlight(self, w):
-        if w is None:
-            return
-        try:
-            if w.winfo_exists():
-                orig = getattr(self, "_hl_saved", {}).pop(w, None)
-                if orig:
-                    w.configure(highlightbackground=orig[0],
-                                highlightthickness=orig[1])
-                else:
-                    w.configure(highlightthickness=0)
-        except tk.TclError:
-            pass
-
-    def _clear_highlights(self):
-        for w in list(getattr(self, "_hl_saved", {}).keys()):
-            self._unhighlight(w)
-
-    def _drag_drop(self, e):
-        d = self.drag
-        self.drag = None
-        if d is None:
-            return
-        # 注意：这里不要清高亮/抬起。_resolve_drop 里可能需要给"被拒绝的落点"
-        # 闪一下红框（_shake_widget），先还原再闪会看到闪不出来。
-        # 真正打出/移动时 refresh() 会统一清场，取消时会走下面的 _drag_cancel。
-        if d["ghost"] is not None and d["ghost"].winfo_exists():
-            d["ghost"].destroy()
-        self._resolve_drop(d["payload"], e.x_root, e.y_root)
-
-    def _drag_cancel(self):
-        """没有真的打出/移动（拖到桌外、非法落点、或状态被打断）→ 恢复视觉"""
-        self._clear_highlights()
-        self._unlift_all()
-
-    def _hit(self, x, y, widget):
-        try:
-            wx, wy = widget.winfo_rootx(), widget.winfo_rooty()
-            return (wx <= x < wx + widget.winfo_width()
-                    and wy <= y < wy + widget.winfo_height())
-        except tk.TclError:
-            return False
-
-    def _resolve_drop(self, payload, x, y):
-        g = self.game
-        if g is None or self.busy:
-            self._drag_cancel()
-            return
-        me = g.players[0]
-        # 记录落点命中的区域与合法性，便于给出"为什么没反应"的提示
-        hit_kind, hit_widget = None, None
-        for w, kind in self._drop_zones():
-            if self._hit(x, y, w):
-                hit_kind, hit_widget = kind, w
-                break
-        ok = self._valid_drop(payload, x, y)
-
-        if payload[0] == "hand":
-            idx = payload[1]
-            if idx >= len(me.hand):
-                return
-            card = me.hand[idx]
-            if hit_kind is None:
-                # 拖到牌桌外 = 取消，但给一句回馈，避免用户以为卡丢了
-                self.add_log("  已取消（把卡拖到支援阵线即可部署）。")
-                self._drag_cancel()
-                return
-            if not ok:
-                if card.kind == "unit":
-                    self.add_log("  新单位只能部署在我方支援阵线（绿色高亮处）。")
-                else:
-                    self.add_log("  该落点无法使用这张牌。")
-                # 顺序很重要：先撤掉全部高亮/抬起，让落点回到"出厂描边"，
-                # 再闪红。否则 _shake_widget 记下的"原值"其实是红色高亮，
-                # 320ms 后会把红框又还原成红色——看起来像卡住了。
-                self._drag_cancel()
-                self._shake_widget(hit_widget)
-                return
-            self._act_play(idx)      # 与 pygame 意图共用（含联机转发）
-            return
-        unit = payload[1]
-        if unit not in me.board:
-            self._drag_cancel()
-            return
-        if hit_kind == "enemy_card":
-            u = next((uu for uu, ww in self.enemy_widgets if ww is hit_widget), None)
-            if u is not None:
-                self._attack_unit(unit, u)
-            return
-        if hit_kind == "hq":
-            self._attack_hq(unit)
-            return
-        if hit_kind in ("front", "deploy"):
-            dest = "前线" if hit_kind == "front" else "后方"
-            self._act_move(unit, dest)   # 与 pygame 意图共用（含联机转发）
-            return
-        # 拖回自己的阵线以外 → 取消
-        self.add_log("  已取消机动。")
-        self._drag_cancel()
-
-    def _shake_widget(self, w):
-        """无效落点时，给目标区域一个轻微的左右抖动，替代沉默失败"""
-        if not self.anim_enabled or w is None:
-            return
-        try:
-            if not w.winfo_exists():
-                return
-            # 记下原值（颜色 + 宽度），闪完原样还回去。
-            # 不能写死 1：手牌 CardWidget 静止态是 2px，写死会把它永久改坏。
-            base = (w.cget("highlightbackground"), w.cget("highlightthickness"))
-            w.configure(highlightbackground=RED, highlightthickness=3)
-        except tk.TclError:
-            return
-
-        def restore():
-            try:
-                if w.winfo_exists():
-                    w.configure(highlightbackground=base[0],
-                                highlightthickness=base[1])
-            except tk.TclError:
-                pass
-
-        self.after(320, restore)
-
     def _refresh_unlock(self):
         """动画落地后的统一收尾：刷新棋盘并解锁输入"""
         if self.game:
@@ -3088,21 +2847,72 @@ class App(tk.Tk):
                       "flash_widget", "_shake_widget", "_wcenter", "_anim_entry",
                       "_anim_move", "_anim_attack", "shake", "show_end_animation")
 
-    def _use_pyboard(self):
-        """是否用 pygame 画对战界面（设置项 renderer，--board 强开 / --legacy-board 强关）"""
-        if "--legacy-board" in sys.argv:
-            return False
-        if "--board" in sys.argv:
-            return True
-        if i18n.get_pref("renderer", "pygame") != "pygame":
-            return False
-        # pygame 缺失/装坏时自动降级到经典界面 —— 宁可少点特效，
-        # 也不能因为一个可选依赖让玩家开不了局。
-        try:
-            import pygame  # noqa: F401
-        except Exception:
-            return False
-        return True
+    # ---------------- 视图兜底 ----------------
+    # 经典 tkinter 对战界面已删除：下列方法正常由 _activate_pyboard() 用
+    # pygame 棋盘的实现做**实例覆盖**，对局期间不会走到这里。保留类级兜底
+    # 是为了主菜单/大厅阶段的偶发调用（比如断线提示路径上的 refresh /
+    # show_banner）不再 AttributeError —— 没有对战视图时，唯一正确的动作
+    # 就是安静地什么都不画。
+
+    def refresh(self):
+        b = self._pyboard
+        if b is not None:
+            b.refresh()
+
+    def show_banner(self, text, color=None, ms=900):
+        b = self._pyboard
+        if b is not None:
+            b.show_banner(text, color, ms)
+
+    def float_text(self, anchor, text, color, ms=900):
+        b = self._pyboard
+        if b is not None:
+            b.float_text(anchor, text, color, ms)
+
+    def flash_widget(self, ref, color=RED, times=3, interval=110):
+        b = self._pyboard
+        if b is not None:
+            b.flash_widget(ref, color, times, interval)
+
+    def shake(self):
+        b = self._pyboard
+        if b is not None:
+            b.shake_screen()
+
+    def _shake_widget(self, ref):
+        b = self._pyboard
+        if b is not None:
+            b._shake_widget(ref)
+
+    def _wcenter(self, ref):
+        b = self._pyboard
+        return b.wcenter(ref) if b is not None else None
+
+    def _anim_entry(self, u):
+        b = self._pyboard
+        if b is not None:
+            b.anim_entry(u)
+
+    def _anim_move(self, u, on_done=None):
+        b = self._pyboard
+        if b is not None:
+            b.anim_move(u, on_done=on_done)
+        elif on_done is not None:
+            on_done()          # 无视图也要解锁输入，否则对局卡死
+
+    def _anim_attack(self, att, tgt_ref, on_done=None):
+        b = self._pyboard
+        if b is not None:
+            b.anim_attack(att, tgt_ref, on_done=on_done)
+        elif on_done is not None:
+            on_done()
+
+    def show_end_animation(self, won, on_done=None, nation=None):
+        b = self._pyboard
+        if b is not None:
+            b.show_end_animation(won, on_done=on_done, nation=nation)
+        elif on_done is not None:
+            on_done()          # 没有结算动画可放，直接收尾回菜单
 
     def _activate_pyboard(self):
         """把视图方法切到 pygame 棋盘（实例属性覆盖类方法，back 时删除即还原）。
@@ -3111,12 +2921,12 @@ class App(tk.Tk):
         hq_widget 是棋盘的 Ref 替身 —— 有 winfo_exists()，语义与控件一致，
         所以这些代码零改动。
 
-        返回棋盘对象；**失败返回 None**（调用方须据此退回 tkinter 界面）。
+        返回棋盘对象；**失败返回 None**（pygame 缺失/装坏时，调用方不开局）。
         """
         try:
             import kards_board
         except Exception as exc:                      # noqa: BLE001
-            self.add_log(f"[界面] 增强渲染不可用，已切回经典界面：{exc}")
+            self.add_log(f"[界面] pygame 对战界面不可用：{exc}")
             return None
         b = kards_board.PygameBoard(self)
         self._pyboard = b
@@ -3244,365 +3054,8 @@ class App(tk.Tk):
     def _guard(self):
         return self.busy or self.game is None
 
-    def flash_widget(self, w, color=RED, times=3, interval=110):
-        if not self.anim_enabled or w is None:
-            return
-        try:
-            orig = w.cget("highlightbackground")
-        except tk.TclError:
-            return
-
-        def tick(i):
-            if not w.winfo_exists():
-                return
-            if i < times * 2:
-                w.configure(highlightbackground=color if i % 2 == 0 else orig)
-                self.after(interval, lambda: tick(i + 1))
-            else:
-                w.configure(highlightbackground=orig)
-
-        tick(0)
-
-    def float_text(self, anchor, text, color, ms=900):
-        if not self.anim_enabled or anchor is None:
-            return
-        try:
-            x = anchor.winfo_rootx() + anchor.winfo_width() // 2 - self.winfo_rootx()
-            y = anchor.winfo_rooty() - self.winfo_rooty()
-        except tk.TclError:
-            return
-        lbl = tk.Label(self, text=text, bg=BG, fg=color,
-                       font=(FONT_FAMILY, 16, "bold"))
-        lbl.place(x=max(0, x - 40), y=max(0, y - 20), width=80, height=26)
-        steps = 10
-
-        def tick(i):
-            if not lbl.winfo_exists():
-                return
-            if i < steps:
-                lbl.place(y=max(0, y - 20 - i * 3))
-                self.after(ms // steps, lambda: tick(i + 1))
-            else:
-                lbl.destroy()
-
-        tick(0)
-
-    def shake(self, times=6, amp=7, interval=40):
-        if not self.anim_enabled:
-            return
-        gx, gy = self.winfo_x(), self.winfo_y()
-
-        def tick(i):
-            dx = amp if i % 2 == 0 else -amp
-            self.geometry(f"+{gx + dx}+{gy}")
-            if i + 1 < times:
-                self.after(interval, lambda: tick(i + 1))
-            else:
-                self.geometry(f"+{gx}+{gy}")
-
-        tick(0)
-
-    def show_banner(self, text, color, ms=900):
-        if not self.anim_enabled:
-            return
-        lbl = tk.Label(self, text=text, bg="#10131a", fg=color,
-                       font=(FONT_FAMILY, 28, "bold"),
-                       padx=48, pady=18, bd=2, relief="solid")
-        lbl.place(relx=0.5, rely=0.45, anchor="center")
-        shades = [color, "#8a93a5", "#4a5260"]
-
-        def fade(i=0):
-            if not lbl.winfo_exists():
-                return
-            if i < len(shades):
-                lbl.configure(fg=shades[i])
-                self.after(ms // 3, lambda: fade(i + 1))
-            else:
-                lbl.destroy()
-
-        self.after(ms // 3, fade)
-
     # ---------------- 战术动画：部署入场 / 行军 / 进攻冲刺 ----------------
     UNIT_ICON = {"步兵": "🚶", "坦克": "🚜", "战斗机": "✈", "轰炸机": "🛩", "炮兵": "💣"}
-
-    def _wcenter(self, w):
-        """控件中心相对主窗口的坐标（动画令牌用绝对定位）"""
-        try:
-            return (w.winfo_rootx() - self.winfo_rootx() + w.winfo_width() // 2,
-                    w.winfo_rooty() - self.winfo_rooty() + w.winfo_height() // 2)
-        except tk.TclError:
-            return None
-
-    def _profile(self, u):
-        """按兵种选运动风格"""
-        return {"步兵": "infantry", "坦克": "tank",
-                "战斗机": "air", "轰炸机": "air"}.get(u.unit_type, "flat")
-
-    def _spawn_token(self, text, color):
-        lbl = tk.Label(self, text=text, bg=color, fg="#f2f4f8",
-                       font=(FONT_FAMILY, 10, "bold"), bd=0, padx=8, pady=3)
-        lbl.place(x=-300, y=-300)
-        lbl.lift()
-        self._anim_tokens.add(lbl)
-        return lbl
-
-    def _fly(self, lbl, path, step_ms=28, on_done=None):
-        """令牌沿路径点移动，走完销毁并回调（坐标为令牌中心点）"""
-        self._anim_tokens.add(lbl)
-
-        def cleanup():
-            self._anim_tokens.discard(lbl)
-            if lbl.winfo_exists():
-                lbl.destroy()
-            if on_done:
-                on_done()
-
-        if not self.anim_enabled or not path:
-            cleanup()
-            return
-        hw, hh = lbl.winfo_reqwidth() / 2, lbl.winfo_reqheight() / 2
-
-        def step(i):
-            if not lbl.winfo_exists():
-                self._anim_tokens.discard(lbl)
-                return
-            if i >= len(path):
-                cleanup()
-                return
-            x, y = path[i]
-            lbl.place(x=int(x - hw), y=int(y - hh))
-            self.after(step_ms, lambda: step(i + 1))
-
-        step(0)
-
-    def _path(self, src, dst, profile, n=14):
-        """按兵种生成路径点：步兵颠簸跑动 / 坦克震动推进 / 空军弧线 / 炮弹抛物线"""
-        (x1, y1), (x2, y2) = src, dst
-        pts = []
-        for i in range(n + 1):
-            t = i / n
-            x = x1 + (x2 - x1) * t
-            y = y1 + (y2 - y1) * t
-            if profile == "infantry":
-                y -= abs(math.sin(t * math.pi * 4)) * 8     # 跑步上下颠簸
-            elif profile == "tank":
-                x += math.sin(t * math.pi * 12) * 1.5       # 引擎震动
-            elif profile in ("air", "artillery"):
-                y -= math.sin(t * math.pi) * (55 if profile == "air" else 40)
-            pts.append((x, y))
-        return pts
-
-    def _land(self, u, w, color, text):
-        """部署落地：单位现身 + 闪光"""
-        if self.game is None or u not in u.owner.board or not w.winfo_exists():
-            return
-        w.pack(side="left", padx=5, ipady=6)
-        self.flash_widget(w, color)
-        if text:
-            self.float_text(w, text, color)
-
-    def _anim_entry(self, u):
-        """部署入场：令牌从来源飞到部署位，落地亮绿框。
-        新单位必在行尾，藏起真身不会挤动同排其他卡"""
-        if not self.anim_enabled:
-            return
-        w = self.unit_widgets.get(id(u))
-        dst = self._wcenter(w) if w is not None else None
-        if w is None or dst is None:
-            return
-        src = self._deploy_source(u, dst)
-        self._anim_count["entry"] += 1
-        w.pack_forget()
-        token = self._spawn_token(f"{self.UNIT_ICON.get(u.unit_type, '⚔')} {u.name}",
-                                  NATION_COLOR.get(u.card.nation, "#4a5260"))
-        self._fly(token, self._path(src, dst, self._profile(u)), step_ms=28,
-                  on_done=lambda: self._land(u, w, GREEN, "部署！"))
-
-    def _deploy_source(self, u, dst):
-        """部署动画起点：我方=手牌拖拽起点，敌方=从屏幕上方压入"""
-        if u.owner is self.game.players[0]:
-            if self._last_drag_src is not None:
-                src = self._last_drag_src
-                self._last_drag_src = None
-                return src
-            c = self._wcenter(self.hand_frame)
-            if c is not None:
-                return c
-            return (dst[0], self.winfo_height() - 40)
-        return (dst[0], -30)
-
-    def _anim_move(self, u, on_done=None):
-        """行军动画：令牌从原位置开到目标行，落地后刷新棋盘（刷新前先藏起原控件）"""
-        if not self.anim_enabled:
-            if on_done:
-                on_done()
-            return
-        w = self.unit_widgets.get(id(u))
-        src = self._wcenter(w) if w is not None and w.winfo_exists() else None
-        dst = None
-        if src is not None and self.game is not None:
-            mine = u.owner is self.game.players[0]
-            row_attr = ("my_front_row" if u.position == "前线" else "my_rear_row") \
-                if mine else ("foe_front_row" if u.position == "前线" else "foe_rear_row")
-            dst = self._wcenter(getattr(self, row_attr))
-        if src is None or dst is None:
-            if on_done:
-                on_done()
-            return
-        if w is not None and w.winfo_exists():
-            w.pack_forget()
-        self._anim_count["move"] += 1
-        token = self._spawn_token(f"{self.UNIT_ICON.get(u.unit_type, '⚔')} {u.name}",
-                                  NATION_COLOR.get(u.card.nation, "#4a5260"))
-        self._fly(token, self._path(src, dst, self._profile(u)), step_ms=28,
-                  on_done=on_done)
-
-    def _anim_attack(self, att, tgt_w, on_done=None):
-        """进攻动画：坦克两段冲刺（咣咣），步兵冲锋颠簸，空军俯冲，
-        炮兵原地开火发射抛物线炮弹。命中后闪红 + 震动 + 💥，再回调"""
-        if not self.anim_enabled:
-            if on_done:
-                on_done()
-            return
-        aw = self.unit_widgets.get(id(att))
-        src = self._wcenter(aw) if aw is not None and aw.winfo_exists() else None
-        dst = self._wcenter(tgt_w) if tgt_w is not None and tgt_w.winfo_exists() else None
-        if src is None or dst is None:
-            if on_done:
-                on_done()
-            return
-        if aw is not None and aw.winfo_exists():
-            self.flash_widget(aw, GOLD)
-        self._anim_count["attack"] += 1
-        if att.unit_type == "炮兵":
-            shell = self._spawn_token("●", "#ff9c54")
-            self._fly(shell, self._path(src, dst, "artillery", n=8), step_ms=22,
-                      on_done=lambda: self._impact(tgt_w, on_done))
-            return
-
-        def seg(a, b, n=7):
-            return [(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n)
-                    for i in range(1, n + 1)]
-
-        if att.unit_type == "坦克":
-            p70 = (src[0] + (dst[0] - src[0]) * 0.7, src[1] + (dst[1] - src[1]) * 0.7)
-            p45 = (src[0] + (dst[0] - src[0]) * 0.45, src[1] + (dst[1] - src[1]) * 0.45)
-            path = seg(src, p70, 6) + seg(p70, p45, 3) + seg(p45, dst, 6)
-        else:
-            profile = "air" if att.unit_type in ("战斗机", "轰炸机") else "infantry"
-            path = self._path(src, dst, profile, n=12)
-        token = self._spawn_token(f"{self.UNIT_ICON.get(att.unit_type, '⚔')} {att.name}",
-                                  NATION_COLOR.get(att.card.nation, "#4a5260"))
-        self._fly(token, path, step_ms=24, on_done=lambda: self._impact(tgt_w, on_done))
-
-    def _impact(self, tgt_w, on_done=None):
-        """命中效果：目标闪红 + 💥 + 短促震动，然后回调"""
-        if tgt_w is not None and tgt_w.winfo_exists():
-            self.flash_widget(tgt_w, RED)
-            self.float_text(tgt_w, "💥", "#ffb347")
-            if tgt_w is self.hq_widget:
-                self.shake()
-            else:
-                self.shake(times=2, amp=3, interval=30)
-        if on_done:
-            on_done()
-
-    def _draw_end_emblem(self, cv, nation, won):
-        """国家专属徽章：英国皇冠 / 美国白鹰 / 德国黑鹰 / 苏联锤子镰刀 / 日本太阳。
-        胜利：金色调 + 脉冲光环；失败：灰色 + 裂纹贯穿 + 缓缓倾塌"""
-        gold, gold_hi, gold_lo = "#d4af37", "#fff1b8", "#8a6a1a"
-        gray, gray_hi, gray_lo = "#6a7076", "#9aa2ad", "#3a3f45"
-        cx, cy = 100, 88
-        main = gold if won else gray
-        hi = gold_hi if won else gray_hi
-        lo = gold_lo if won else gray_lo
-
-        if nation == "日本":
-            # 太阳：白底圆盘 + 红日
-            disc = "#f2f2f2" if won else "#8a919b"
-            sun = "#d9453d" if won else "#5a616b"
-            cv.create_oval(cx - 52, cy - 52, cx + 52, cy + 52, fill=disc, outline=lo, width=3)
-            cv.create_oval(cx - 30, cy - 30, cx + 30, cy + 30, fill=sun, outline=lo)
-        elif nation == "苏联":
-            # 锤子镰刀：红底圆盘 + 金色交叉
-            disc = "#b03a34" if won else "#5a616b"
-            tools = gold if won else gray_lo
-            cv.create_oval(cx - 52, cy - 52, cx + 52, cy + 52, fill=disc, outline=lo, width=3)
-            cv.create_oval(cx - 32, cy - 36, cx + 20, cy + 16, fill=tools, outline="")
-            cv.create_oval(cx - 20, cy - 26, cx + 32, cy + 26, fill=disc, outline="")
-            cv.create_line(cx - 20, cy + 24, cx + 0, cy + 42, fill=tools,
-                           width=6, capstyle="round")
-            cv.create_polygon([cx - 36, cy - 4, cx - 18, cy - 22, cx - 4, cy - 8,
-                               cx - 22, cy + 10], fill=tools, outline="")
-            cv.create_line(cx - 14, cy - 2, cx + 26, cy + 38, fill=tools,
-                           width=7, capstyle="round")
-        elif nation in ("德国", "美国"):
-            # 鹰：德国黑鹰 / 美国白鹰（展开双翼）
-            if nation == "美国":
-                body_c = "#f2f2f2" if won else gray
-                beak = gold if won else gray_lo
-            else:
-                body_c = "#1a1d22"
-                beak = gold if won else gray
-            for s in (-1, 1):
-                wing = [cx + s * 8, cy - 16, cx + s * 34, cy - 40, cx + s * 30, cy - 26,
-                        cx + s * 52, cy - 24, cx + s * 40, cy - 12, cx + s * 56, cy - 4,
-                        cx + s * 34, cy + 2, cx + s * 10, cy - 4]
-                cv.create_polygon(wing, fill=body_c, outline=beak, width=2)
-            cv.create_polygon([cx, cy - 34, cx + 10, cy - 14, cx + 8, cy + 22,
-                               cx, cy + 42, cx - 8, cy + 22, cx - 10, cy - 14],
-                              fill=body_c, outline=beak, width=2)
-            cv.create_oval(cx - 9, cy - 48, cx + 9, cy - 30, fill=body_c,
-                           outline=beak, width=2)
-            cv.create_polygon([cx + 7, cy - 44, cx + 20, cy - 39, cx + 7, cy - 34],
-                              fill=beak, outline="")
-        elif nation == "英国":
-            # 皇冠：底座 + 五尖 + 顶珠 + 宝石
-            cv.create_rectangle(cx - 46, cy + 14, cx + 46, cy + 34,
-                                fill=main, outline=lo, width=2)
-            for px in (-40, -20, 0, 20, 40):
-                h = 34 if px == 0 else (26 if abs(px) == 20 else 20)
-                cv.create_polygon([cx + px - 8, cy + 14, cx + px + 8, cy + 14,
-                                   cx + px, cy + 14 - h], fill=main, outline=lo, width=2)
-                cv.create_oval(cx + px - 5, cy + 4 - h, cx + px + 5, cy + 14 - h,
-                               fill=hi, outline=lo)
-            for jx in (-24, 0, 24):
-                cv.create_oval(cx + jx - 5, cy + 19, cx + jx + 5, cy + 29,
-                               fill="#b03a34" if won else gray_lo, outline=lo)
-        else:
-            # 兜底：盾形 + 首字
-            pts = [cx - 64, cy - 54, cx + 64, cy - 54, cx + 64, cy + 10,
-                   cx, cy + 66, cx - 64, cy + 10]
-            cv.create_polygon(pts, fill=main, outline=hi, width=4)
-            cv.create_text(cx, cy, text=nation[0], fill=lo,
-                           font=(FONT_FAMILY, 46, "bold"))
-
-        if not won:
-            # 裂纹贯穿 + 徽章缓缓倾塌
-            cv.create_line([cx - 56, cy - 50, cx - 24, cy - 16, cx - 38, cy + 8,
-                            cx - 6, cy + 38, cx + 6, cy + 70],
-                           fill="#23262b", width=3, smooth=True)
-            cv.create_line([cx + 50, cy - 48, cx + 22, cy - 14, cx + 38, cy + 6,
-                            cx + 12, cy + 30],
-                           fill="#23262b", width=3, smooth=True)
-
-            def sag(i=0):
-                if not cv.winfo_exists() or i >= 8:
-                    return
-                cv.move("all", 0, 2)
-                cv.after(120, lambda: sag(i + 1))
-            cv.after(400, sag)
-        else:
-            # 胜利：金色脉冲光环
-            glow = cv.create_oval(cx - 80, cy - 74, cx + 80, cy + 84,
-                                  outline=gold_hi, width=3)
-
-            def pulse(i=0):
-                if not cv.winfo_exists():
-                    return
-                cv.itemconfigure(glow, outline=[gold_hi, gold, gold_lo][i % 3])
-                cv.after(220, lambda: pulse(i + 1))
-            pulse()
 
     def on_game_event(self, ev):
         if not self.anim_enabled:
@@ -3638,12 +3091,13 @@ class App(tk.Tk):
         win.role = "ingame_settings"
         win.title(i18n.t("settings_title"))
         win.configure(bg=BG)
-        win.geometry("340x460")
+        win.geometry("340x700")
         win.transient(self)
         tk.Label(win, text=i18n.t("settings_title"), bg=BG, fg=TEXT,
                  font=FONT_XL).pack(pady=(16, 6))
         # 对局中切语言：偏好立即保存，界面文本随下次界面重建生效
         self._lang_buttons(win, on_change=win.destroy)
+        self._music_row(win)
 
         def surrender():
             if messagebox.askyesno(i18n.t("surrender_title"), i18n.t("surrender_confirm")):
@@ -3727,6 +3181,8 @@ class App(tk.Tk):
         self.mp_opp = None
         self.mp_opp_name = None
         self.mp_my_deck = None
+        self._mp_me_ready = False
+        self._mp_pending_seed = None
         self.mp_matching = False
         self.mp_room_code = None
         self.game = None
@@ -3745,6 +3201,7 @@ class App(tk.Tk):
             if fr is not None and fr.winfo_exists():
                 fr.destroy()
         self._build_start()
+        self._music_play("menu")
 
     # ---------------- 回合流转 ----------------
     def on_end_turn(self):
@@ -3888,6 +3345,7 @@ class App(tk.Tk):
         self._finishing = True
         g = self.game
         self._mp_game_over = True
+        self._music_play("result", fade_ms=900)
         if winner is None:
             # 交给引擎统一判定（区分平局 / 投降 / 被打死）。
             # 注意：winner_of() 在"没人死"时也返回 None，所以不能直接拿来
@@ -3904,11 +3362,15 @@ class App(tk.Tk):
         else:
             won = winner is me
             self.add_log(f"战斗结束！{winner.name} 获胜！")
-        # 账号战绩
+        # 账号战绩 + 货币奖励。游客也发币（存 guest 键）：输了也有 30 金币
+        # 保底，胜利才给钻石，让"再来一局"始终有个看得见的进账。
+        result = "draw" if won is None else ("win" if won else "lose")
         if self.account:
-            account.stats_add(self.account,
-                              "draw" if won is None else ("win" if won else "lose"))
+            account.stats_add(self.account, result)
             self._refresh_account_btn()
+        rw = account.currency_reward(result, name=self.account)
+        self.add_log(i18n.t("currency_reward", gold=rw["gold"],
+                            diamonds=rw["diamonds"]))
         self.refresh()
 
         def after_click():
@@ -3918,348 +3380,127 @@ class App(tk.Tk):
         self.show_end_animation(won, after_click, nation=me.nation)
 
     # ---------------- 胜利 / 失败结算动画 ----------------
-    def show_end_animation(self, won, on_done=None, nation=None):
-        """全屏结算动画：**先炸总部，再出胜负大字**。
-        胜利金色大字放大+粒子庆祝；失败暗场震动+裂纹徽章。
-        顶部绘制国家专属徽章（胜利金色发光 / 失败灰色裂开）。
-        动画播完后出现提示，点击屏幕任意处才执行 on_done 回到大厅"""
-        if not self.anim_enabled:
-            if on_done:
-                on_done()
-            return
-        # ---- 阶段一：总部爆炸（先让玩家看清是哪边总部被摧毁）----
-        self._play_hq_explode(won, lambda: self._end_fullscreen(won, on_done, nation))
-
     HQ_EXPLODE_MS = 1400        # 总部爆炸阶段时长
 
-    def _hq_targets_for(self, won):
-        """按胜负决定哪个总部爆炸：(控件, 文案键)
-
-        投降要区分：总部没被打掉、是主动认输 → 文案换成「举旗投降」。
-        判断依据是引擎的 g.conceded（finish 里已记好投降方）。
-        """
-        g = self.game
-        conceded = getattr(g, "conceded", None) if g is not None else None
-        me_sur = conceded is not None and g is not None and conceded is g.players[0]
-        foe_sur = conceded is not None and g is not None and conceded is g.players[1]
-        if won is True:
-            key = "hq_fall_foe_surrender" if foe_sur else "hq_fall_foe"
-            return [(self.hq_widget, key)]
-        if won is False:
-            key = "hq_fall_me_surrender" if me_sur else "hq_fall_me"
-            return [(self.my_hq_widget, key)]
-        return [(self.hq_widget, "hq_fall_both"), (self.my_hq_widget, "hq_fall_both")]
-
-    def _play_hq_explode(self, won, on_done):
-        """在总部控件上播放爆炸：闪白 + 💥 碎片 + 震动 + 中部提示条，
-        结束后回调（进入全屏结算画面）。"""
-        targets = [(w, k) for w, k in self._hq_targets_for(won)
-                   if w is not None and w.winfo_exists()]
-        if not targets:
-            on_done()
-            return
-        label = {"hq_fall_foe": i18n.t("hq_fall_foe"),
-                 "hq_fall_me": i18n.t("hq_fall_me"),
-                 "hq_fall_both": i18n.t("hq_fall_both")}[targets[0][1]]
-        tip = tk.Label(self, text=label, bg="#2a1a12",
-                       fg="#ffb347", font=(FONT_FAMILY, 26, "bold"),
-                       padx=36, pady=14, bd=2, relief="solid")
-        tip.place(relx=0.5, rely=0.16, anchor="center")
-        tip.lift()
-        self.shake(times=10, amp=12, interval=38)
-        for w, _key in targets:
-            self.flash_widget(w, "#ffb347", times=5, interval=90)
-            for k in range(5):
-                self.after(k * 90, lambda ww=w: (
-                    self.float_text(ww, "💥", "#ff9c54")
-                    if ww.winfo_exists() else None))
-        self._hq_tip = tip
-
-        def done():
-            if tip.winfo_exists():
-                tip.destroy()
-            self._hq_tip = None
-            on_done()
-        self.after(self.HQ_EXPLODE_MS, done)
-
-    def _end_fullscreen(self, won, on_done=None, nation=None):
-        overlay = tk.Frame(self, bg="#0d1017")
-        overlay.place(x=0, y=0, relwidth=1, relheight=1)
-        cv = tk.Canvas(overlay, width=200, height=180, bg="#0d1017",
-                       highlightthickness=0)
-        cv.place(relx=0.5, rely=0.16, anchor="center")
-        self._draw_end_emblem(cv, nation or "国", won)
-        if won is None:
-            txt, color = i18n.t("draw_big"), DIM
-        else:
-            txt, color = (i18n.t("win_big"), GOLD) if won else (i18n.t("lose_big"), RED)
-        lbl = tk.Label(overlay, text=txt, bg="#0d1017", fg=color,
-                       font=(FONT_FAMILY, 12, "bold"))
-        lbl.place(relx=0.5, rely=0.42, anchor="center")
-        sub = tk.Label(overlay,
-                       text=i18n.t("win_sub") if won is True
-                       else (i18n.t("lose_sub") if won is False else i18n.t("draw_sub")),
-                       bg="#0d1017", fg=DIM, font=FONT_B)
-        sub.place(relx=0.5, rely=0.60, anchor="center")
-        parts = []
-        self._end_click_ready = False   # 动画播完前点击无效
-
-        def show_click_hint():
-            hint = tk.Label(overlay, text=i18n.t("click_hint"), bg="#0d1017",
-                            fg=DIM, font=FONT_B)
-            hint.place(relx=0.5, rely=0.78, anchor="center")
-            self._end_click_ready = True
-
-            def blink(i=0):
-                if not self._end_click_ready or not hint.winfo_exists():
-                    return
-                hint.configure(fg=[DIM, TEXT][i % 2])
-                self.after(600, lambda: blink(i + 1))
-            blink()
-
-        def on_click(event=None):
-            if not self._end_click_ready:
-                return                      # 动画播放中：忽略点击
-            self._end_click_ready = False
-            try:
-                self.unbind_all("<Button-1>")
-            except tk.TclError:
-                pass
-            if overlay.winfo_exists():
-                overlay.destroy()
-            if on_done:
-                on_done()
-
-        self.bind_all("<Button-1>", on_click, add="+")
-
-        def cleanup_star(star):
-            if star.winfo_exists():
-                star.destroy()
-
-        if won is None:
-            pass                      # 平局：无庆祝/无震动
-        elif won:
-            # 粒子庆祝：小星星从下往上飘散
-            rng = random.Random()
-            marks = ("✦", "★", "✧", "✨")
-            wh = max(200, self.winfo_height())
-            for k in range(16):
-                x = rng.randint(40, max(60, self.winfo_width() - 40))
-                star = tk.Label(overlay, text=rng.choice(marks),
-                                fg=rng.choice([GOLD, "#e8c96a", "#fff1b8"]),
-                                bg="#0d1017", font=("Microsoft YaHei UI", rng.randint(12, 22)))
-                star.place(x=x, y=wh)
-                parts.append(star)
-
-                def rise(star=star, y0=wh, x0=x, delay=k * 120):
-                    def step(i=0):
-                        if not star.winfo_exists():
-                            return
-                        if i < 22:
-                            star.place(x=x0 + (i - 8) * 2, y=y0 - i * (y0 // 26))
-                            star.configure(fg=["#fff1b8", GOLD, "#8a6a1a"][i // 8])
-                            self.after(55, lambda: step(i + 1))
-                        else:
-                            cleanup_star(star)
-                    self.after(delay, step)
-                rise()
-        else:
-            self.shake(times=8, amp=9, interval=50)
-
-        sizes = [14, 20, 27, 34, 41, 47, 52]
-
-        def grow(i=0):
-            if not overlay.winfo_exists():
-                return
-            if i < len(sizes):
-                lbl.configure(font=("Microsoft YaHei UI", sizes[i], "bold"))
-                self.after(85, lambda: grow(i + 1))
-            else:
-                self.after(2200, show_click_hint)
-
-        grow()
-
     # ---------------- 冒烟测试 ----------------
-    def smoke_test(self):
-        """自动完整对局：双方都用 AI 策略，验证 GUI 渲染与逻辑无异常"""
-        self.new_game_smoke()
-        g = self.game
-        rounds = 0
-        while not g.over and rounds < 500:
-            g.start_turn()
-            g.ai_turn()
-            g.end_turn()
-            self.selected = None
-            self.refresh()
-            self.update()
-            rounds += 1
-        self.after(50, self.destroy)
-        self.mainloop()
-        print(f"SMOKE OK: {rounds} rounds")
-
-    def anim_test(self, seed=20261002):
-        """动画链路自测：开启动画跑 AI 对战回放（部署入场/行军/进攻冲刺全链路）
-
-        必须固定随机种子：随机牌组下 AI 有可能 40 秒内一次都不移动/进攻，
-        导致"未触发 move/attack"的假失败（也偶发卡死跑不完）。
-        固定种子后每次牌局一致，结果可复现。
-        """
-        random.seed(seed)
-        self.ai_step_ms = 120
-        self.new_game_smoke()
-        self._ai_replay = self._run_ai_replay
-        self.after(150, self._ai_replay)
-        self.after(60000, self.destroy)
-        self.mainloop()
-        self._ai_replay = None
-        c = self._anim_count
-        total = c["entry"] + c["move"] + c["attack"]
-        print(f"ANIM TEST OK: 入场 {c['entry']} / 行军 {c['move']} / 进攻 {c['attack']}，共 {total} 次")
-        missing = [k for k in ("entry", "move", "attack") if c[k] == 0]
-        if missing:
-            raise SystemExit(f"[FAIL] 未触发动画类型: {missing}（检查 anim_enabled / 事件钩子 / _anim_* 调用链）")
-
-    def _run_ai_replay(self):
-        """双方都由 AI 驱动、开启动画：用于自测部署/行军/进攻全链路"""
-        g = self.game
-        if g is None or g.over or g.players[0].hq <= 0:
-            self.finish()
-            return
-        self.busy = True
-        self._ai_iter = g.ai_steps()
-        self.after(80, self._ai_play_next)
-
-    def new_game_smoke(self):
-        nations = random.choices(core.MAIN_NATIONS, k=2)
-        p1 = core.Player("AI-红军", nations[0], core.build_deck(nations[0], self.db))
-        p2 = core.Player("AI-蓝军", nations[1], core.build_deck(nations[1], self.db))
-        self.game = GUIGame(p1, p2, lambda m: None, self.on_game_event)
-        self.start_frame.destroy()
-        self._build_main()
-        self.game.draw_cards(p1, core.START_HP)
-        self.game.draw_cards(p2, core.START_HP + 1)
-        self.refresh()
+def _debug_addr(addr=None):
+    """解析 --debug-on-net / --debug-auto 的服务器地址参数"""
+    if addr:
+        return addr
+    for arg in sys.argv[1:]:
+        if arg.startswith("--"):
+            continue
+        if net.parse_addr(arg) is not None:
+            return arg
+    return net.DEFAULT_SERVER
 
 
 def run_debug_net(addr=None):
-    """--debug-on-net：本机双开自战（一个进程跑两个窗口，自动连同一服务器）
+    """--debug-on-net：本机双开自战（**两个独立进程**，各自一个窗口）
 
-    用于在一台电脑上体验/调试**服务器中转**联机流程：
-    两个窗口各注册一个临时账号 → 自动匹配 → 各自组卡 → 开局对打。
+    为什么必须是两个进程：
+      对战界面只有 pygame，而 `pygame.display.set_mode()` 在同一进程里
+      第二次调用会让前一个 Surface 失效（实测报 Surface is not
+      initialized）——单进程双窗口再也跑不起来。分开进程还顺带消灭了
+      session.json 共享导致「后连的把先连的顶下线」的老坑。
+      这样做和玩家真实场景（两个人各开一个客户端）完全一致。
+
     前提：先启动 `python kards_server.py`（默认 6000 端口）。
-
-    地址也可从命令行给：`python KARDS.py --debug-on-net 127.0.0.1:6001`
-    （自动化测试就是这么带着随机端口起服务器的）。
+    用法：python KARDS.py --debug-on-net 127.0.0.1:6000
     """
-    import time as _time
-    core.setup_error_log()
-    if addr is None:
-        # 找 --debug-on-net 后面那个「长得像 host:port」的参数
-        for arg in sys.argv[1:]:
-            if arg.startswith("--"):
-                continue
-            if net.parse_addr(arg) is not None:
-                addr = arg
-                break
-    addr = addr or net.DEFAULT_SERVER
-    print(f"[调试自战] 正在启动两个窗口，服务器 {addr} …")
-    a = App()
-    a.title("KARDS 联机调试 · 窗口A")
-    a.geometry("+60+60")
-    b = App()
-    b.title("KARDS 联机调试 · 窗口B")
-    b.geometry("+780+60")
+    import tempfile
 
-    def pump(n=1):
-        for _ in range(n):
-            for w in (a, b):
-                try:
-                    if w.winfo_exists():
-                        w.update()
-                except tk.TclError:
-                    return False
-            _time.sleep(0.01)
-        return True
-
-    a.on_battle()
-    b.on_battle()
-    pump(3)
-    # ⚠ kards_account 的会话缓存(session.json)是**模块级全局**。两个窗口
-    # 同进程自战，如果不作废缓存：窗口B 连上后 `_lobby_poll` 会用窗口A
-    # 刚拿到的令牌自动 resume，服务器判「同账号异地登录」把 A 踢下线
-    # → A 的 mp_link.alive 变 False → 匹配静默失败（探针已实证）。
-    # 真实游戏一个进程只有一个窗口，不会遇到；自战模式必须手动处理。
-    for app in (a, b):
-        account._drop_session()
-        app.srv_addr_var.set(addr)
-        app._lobby_connect()
-        # 等到「连上并且自动 resume 判定结束」再动下一个窗口，
-        # 否则两个窗口的 resume 会互相踩
-        t0 = _time.time()
-        while app.mp_link is None and _time.time() - t0 < 8:
-            if not pump(1):
-                return
-    # 等两个窗口都连上服务器
-    t0 = _time.time()
-    while (a.mp_link is None or b.mp_link is None) and _time.time() - t0 < 12:
-        if not pump(1):
-            return
-    if a.mp_link is None or b.mp_link is None:
-        print("[调试自战] 连不上服务器，请先运行 python kards_server.py")
-        return
-
-    # 两个窗口各自注册临时账号（登录框会自动弹出，这里直接走账号模块）
-    for app, who in ((a, "DebugA"), (b, "DebugB")):
-        account.set_remote(app.mp_link, addr)
-        pw = "debug1234"
-        ok, err = account.login(who, pw)
-        if not ok:
-            ok, err = account.register(who, pw)
-        if not ok:
-            print(f"[调试自战] {who} 账号失败：{err}")
-            return
-        app.mp_user = account.current()
-        app._apply_account(app.mp_user)
-        app._srv_send({"m": "lobby"})
-    # 关掉可能弹出的账号窗（避免挡住调试视线）
-    pump(20)
-    for app in (a, b):
-        for w in app.winfo_children():
-            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "account":
-                w.destroy()
-    pump(3)
-
-    a._mp_quick_match()
-    pump(2)
-    b._mp_quick_match()
-
-    # 等匹配成功（_lobby_poll 收到 matched 后自动进入选阵营）
-    t0 = _time.time()
-    while (a.mp_role is None or b.mp_role is None) and _time.time() - t0 < 15:
-        if not pump(1):
-            return
-    pump(60)   # 等 after(500ms) 调度选阵营界面
-
-    for app, nation in ((a, "德国"), (b, "苏联")):
-        app._build_deck_builder(nation, mp=True)
-        deck = core.build_deck(nation, app.db)
-        app.deck_counts = {}
-        for c in deck:
-            app.deck_counts[c.name] = app.deck_counts.get(c.name, 0) + 1
-        app._start_mp()
-
-    t0 = _time.time()
-    while (a.game is None or b.game is None) and _time.time() - t0 < 15:
-        if not pump(1):
-            return
-    print("[调试自战] 就绪！两个窗口分属联机双方，自己操作两边即可对打。")
-
+    addr = _debug_addr(addr)
+    print(f"[调试自战] 启动两个独立进程，服务器 {addr} …")
+    base = os.environ.get("KARDS_DATA_DIR") or tempfile.mkdtemp(prefix="kards_dbgnet_")
+    script = ([sys.executable] if getattr(sys, "frozen", False)
+              else [sys.executable, os.path.abspath(__file__)])
+    procs = []
+    for tag in ("A", "B"):
+        env = dict(os.environ)
+        env["KARDS_DATA_DIR"] = os.path.join(base, tag)
+        os.makedirs(env["KARDS_DATA_DIR"], exist_ok=True)
+        procs.append(subprocess.Popen(
+            script + ["--debug-auto", addr, tag, "--no-fullscreen"],
+            env=env, cwd=os.path.dirname(os.path.abspath(__file__))))
+    print("[调试自战] 两个窗口已拉起：A=DebugA(德国) / B=DebugB(苏联)，"
+          "自动登录→匹配→组卡→开局。")
     try:
-        while pump(1):
-            pass
-    except tk.TclError:
+        for p in procs:
+            p.wait()
+    except KeyboardInterrupt:
         pass
-    print("[调试自战] 已退出。")
+    finally:
+        for p in procs:
+            if p.poll() is None:
+                p.terminate()
+
+
+def run_debug_auto(addr=None, tag="A"):
+    """--debug-auto：调试自战的子进程（一个窗口跑完 连服→登录→匹配→组卡→开局）"""
+    addr = _debug_addr(addr)
+    me = "DebugA" if tag == "A" else "DebugB"
+    nation = "德国" if tag == "A" else "苏联"
+    try:
+        # 子进程 stdout 被父进程接管时默认是缓冲的，被 taskkill 会丢日志
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError, OSError):
+        pass
+    app = App()
+    app.title(f"KARDS 联机调试 · 窗口{tag}")
+    app.geometry("+60+60" if tag == "A" else "+780+60")
+    app.on_battle()                 # 先进联机大厅：地址框/日志框在这里才建出来
+    st = {"n": 0, "deck": False, "said": False}
+
+    def tick():
+        st["n"] += 1
+        n = st["n"]
+        try:
+            if app.game is not None:
+                if not st["said"]:
+                    st["said"] = True
+                    print(f"[窗口{tag}] 就绪！联机对局已开始。")
+                app.after(500, tick)
+                return
+            if n == 2:
+                app.srv_addr_var.set(addr)
+                app._lobby_connect()
+            elif n == 6:
+                if app.mp_link is None:
+                    print(f"[窗口{tag}] 连不上服务器 {addr}，请先运行 kards_server.py")
+                    return
+                account.set_remote(app.mp_link, addr)
+                ok, err = account.login(me, "debug1234")
+                if not ok:
+                    ok, err = account.register(me, "debug1234")
+                if not ok:
+                    print(f"[窗口{tag}] 账号失败：{err}")
+                    return
+                app.mp_user = account.current()
+                app._apply_account(app.mp_user)
+                app._srv_send({"m": "lobby"})
+                # 关掉自动弹出的账号窗，别挡视线
+                for w in app.winfo_children():
+                    if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "account":
+                        w.destroy()
+            elif n == 9:
+                app._mp_quick_match()
+            elif (app.mp_role is not None and not st["deck"]
+                  and getattr(app, "start_frame", None) is not None
+                  and app.start_frame.winfo_exists()):
+                st["deck"] = True
+                app._build_deck_builder(nation, mp=True)
+                deck = core.build_deck(nation, app.db)
+                app.deck_counts = {}
+                for c in deck:
+                    app.deck_counts[c.name] = app.deck_counts.get(c.name, 0) + 1
+                app._start_mp()
+        except Exception as exc:                       # noqa: BLE001
+            print(f"[窗口{tag}] 异常：{exc!r}")
+        app.after(300, tick)
+
+    app.after(300, tick)
+    app.mainloop()
 
 
 def _another_instance_running():
@@ -4484,17 +3725,33 @@ def main():
     if "--debug-on-net" in sys.argv:
         run_debug_net()
         return
-    if "--smoke" not in sys.argv and "--anim-test" not in sys.argv and _another_instance_running():
+    if "--debug-auto" in sys.argv:
+        # 调试自战的子进程入口：单实例互斥体不能拦（同一台机器要开两个窗口）
+        i = sys.argv.index("--debug-auto")
+        rest = sys.argv[i + 1:]
+        run_debug_auto(rest[0] if rest else None,
+                       rest[1] if len(rest) > 1 else "A")
         return
-    app = App()
+    if "--smoke" not in sys.argv and _another_instance_running():
+        return
     if "--smoke" in sys.argv:
-        app.after(100, app.smoke_test)
-        app.mainloop()
-    elif "--anim-test" in sys.argv:
-        app.after(100, app.anim_test)
-        app.mainloop()
-    else:
-        app.mainloop()
+        # 无界面整局冒烟：原 smoke_test 依赖经典 tkinter 对战视图，已随视图
+        # 一起删除。现在改跑纯引擎 AI vs AI 整局（不创建 App，无 Tk/pygame），
+        # 校验卡池完整、推荐卡组合法、整局能正常打到结束。
+        db = core.card_database()
+        nat1 = random.choice(core.MAIN_NATIONS)
+        nat2 = random.choice(core.MAIN_NATIONS)
+        g = core.Game(core.Player("甲", nat1, core.build_deck(nat1, db)),
+                      core.Player("乙", nat2, core.build_deck(nat2, db)),
+                      interactive=False)
+        winner = g.run()
+        finished = g.over or g.conceded is not None
+        played = getattr(g, "turn_num", 0)
+        print(f"[smoke] {nat1} vs {nat2} → "
+              f"胜者={winner.name if winner else '平局'} 回合={played}")
+        sys.exit(0 if finished else 1)
+    app = App()
+    app.mainloop()
 
 
 if __name__ == "__main__":
