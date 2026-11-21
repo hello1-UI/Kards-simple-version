@@ -53,12 +53,15 @@ class FakeLink:
         self.alive = False
 
 
-def make_app():
+def make_app(role="host"):
     app = gui.App()
     app.mp_link = FakeLink()
-    app.mp_role = "host"
+    app.mp_role = role
     app.mp_opp = None
     app.mp_opp_name = None
+    # v1.6.1.3 语义：主机必须自己点过「准备」（_mp_me_ready）才发 seed；
+    # 客户端必须同时有暂存 seed 和对手 ready 才开局（防止卡组数量误判）。
+    app._mp_me_ready = True
     launched = []
     app._mp_launch = lambda seed: launched.append(seed)   # 不真开棋盘
     return app, app.mp_link, launched
@@ -85,12 +88,22 @@ def main():
           f"{launched} vs {seeds}")
     app.destroy()
 
-    print("-- 3. 客户端收到 seed → 同种子开局 --")
-    app, link, launched = make_app()
-    app.mp_role = "client"
+    print("-- 3. 客户端收到 seed + 对手 ready → 同种子开局 --")
+    app, link, launched = make_app(role="client")
     link.inbox.put({"m": "seed", "seed": 20261110})
+    link.inbox.put({"m": "ready", "nation": "苏联", "deck": ["步兵班"] * 39})
     app._lobby_drain_events()
+    app._mp_poll_hello()
     check("客户端按收到的 seed 开局", launched == [20261110], str(launched))
+
+    print("-- 3b. seed 先到、ready 未到 → 暂存不开局 --")
+    app, link, launched = make_app(role="client")
+    link.inbox.put({"m": "seed", "seed": 555})
+    app._lobby_drain_events()
+    check("只有 seed 不开局", not launched, str(launched))
+    link.inbox.put({"m": "ready", "nation": "苏联", "deck": ["步兵班"] * 39})
+    app._mp_poll_hello()
+    check("ready 落地后按暂存 seed 开局", launched == [555], str(launched))
     app.destroy()
 
     print("-- 4. 准备阶段对手离开 → 提示并回菜单 --")
