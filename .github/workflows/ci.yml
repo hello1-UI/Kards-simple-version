@@ -64,5 +64,8 @@ jobs:
       - name: 多语言
         run: python debug/test_i18n.py
 
+      - name: 界面主题（预设/主色/对比度/换肤生效）
+        run: python debug/test_ui_theme.py
+
       - name: 背景音乐
         run: python debug/test_music.py

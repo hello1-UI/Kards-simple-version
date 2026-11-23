@@ -307,7 +307,8 @@ def main():
         app._toggle_music()
         check("再点一次回到原状态", music.is_enabled() == before)
 
-        app.open_start_settings()
+        # 设置窗分页后，音乐控件在「声音」页（默认打开的是「外观」页）
+        app.open_start_settings(tab="sound")
         win = None
         for w in app.winfo_children():
             if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "start_settings":
@@ -374,8 +375,9 @@ def main():
         # 结算 / 回菜单切歌：真棋盘 + 真引擎（与 test_finish 同款打法）
         import kards_engine as K
         db = K.card_database()
-        p1 = K.Player("我", "德国", [db["步兵班"]] * K.DECK_SIZE)
-        p2 = K.Player("敌", "苏联", [db["动员兵"]] * K.DECK_SIZE)
+        # 「步兵班/动员兵」在卡池替换时删掉了，换用现役卡（卡名只在夹具里用）
+        p1 = K.Player("我", "德国", [db["近卫步兵"]] * K.DECK_SIZE)
+        p2 = K.Player("敌", "苏联", [db["近卫步兵"]] * K.DECK_SIZE)
         g = K.Game(p1, p2, interactive=False)
         g.draw_cards(p1, 8)
         g.draw_cards(p2, 8)

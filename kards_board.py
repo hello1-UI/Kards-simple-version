@@ -41,7 +41,10 @@ import kards_i18n as i18n
 import kards_music as music
 # 配色/字体清单与 KARDS.py 共用一份真源。以前这里是「拷贝一份避免循环
 # import，改动需两边同步」—— 事实上已经悄悄不同步了（稀有度宝石恒灰）。
-from kards_theme import (BG, PANEL, CARD_BG, TEXT, DIM, RED, GREEN, GOLD,
+import kards_theme as theme
+from kards_theme import (BG, BG_ALT, PANEL, PANEL_ALT, CARD_BG, TEXT, DIM,
+                         MUTE, BORDER, RED, GREEN, GOLD,
+                         BTN, PRIMARY, DANGER,
                          ROW_BG, ROW_EDGE, MID_BG, LOG_BG, HAND_AREA,
                          NATION_COLOR, rarity_color,
                          BUNDLED_FONT_FILES)
@@ -353,6 +356,10 @@ class PygameBoard:
     HQ_W, HQ_H = 108, 118           # 总部尺寸
 
     def __init__(self, app=None, game=None, on_intent=None, me_index=0):
+        # 颜色是绘制时读**模块全局**的（C(BG) 之类），所以换主题只需要把新值
+        # 灌回本模块命名空间 —— 见 apply_theme()。这里先同步一次，保证
+        # 从主菜单选好主题后进对局，棋盘第一帧就是对的。
+        theme.sync(globals())
         self.app = app
         self.game = game
         self.on_intent = on_intent or (app.pyboard_intent if app is not None
@@ -405,6 +412,14 @@ class PygameBoard:
         except Exception:
             pass
 
+    def apply_theme(self):
+        """运行中换主题：把当前 token 灌回本模块命名空间。
+
+        绘制函数里全是 C(BG) / C(PANEL) 这种**运行时**取全局的写法，
+        所以不需要重建任何缓存，下一帧自然就是新配色。
+        """
+        theme.sync(globals())
+
     # ================= 视图接口（与 KARDS.App 鸭子兼容） =================
 
     def refresh(self):
@@ -430,7 +445,8 @@ class PygameBoard:
         self.floats.append({"text": text, "color": color,
                             "x": x, "y": y, "t0": self.t_now, "dur": ms})
 
-    def flash_widget(self, ref, color=RED, times=3, interval=110):
+    def flash_widget(self, ref, color=None, times=3, interval=110):
+        color = color or RED
         if not self._anim_on() or ref is None:
             return
         total = times * 2 * interval
@@ -1568,12 +1584,12 @@ class PygameBoard:
 
     def _draw_card(self, surf, card, r, g, me, playable, eff_cost=None):
         nat = NATION_COLOR.get(card.nation, "#666")
-        border = C(nat) if playable else C("#555555")
+        border = C(nat) if playable else C(BORDER)
         rr(surf, r, C(CARD_BG), radius=8, border_color=border)
         if eff_cost is None:
             eff_cost = g.get_cost(card, me)
         # 费用圆
-        pygame.draw.circle(surf, C("#10131a"), (r.x + 20, r.y + 20), 14)
+        pygame.draw.circle(surf, C(BG_ALT), (r.x + 20, r.y + 20), 14)
         pygame.draw.circle(surf, C(GOLD), (r.x + 20, r.y + 20), 14, 2)
         cf = font(15, True)
         cs = str(eff_cost)
@@ -1612,7 +1628,7 @@ class PygameBoard:
             ch = (card.unit_type[:1] if card.kind == "unit"
                   else ("反" if card.kind == "counter" else "令"))
             bf = font(30, True)
-            surf.blit(bf.render(ch, True, C("#15171c")),
+            surf.blit(bf.render(ch, True, C(theme.best_fg(nat))),
                       (art.centerx - bf.size(ch)[0] // 2,
                        art.centery - bf.size(ch)[1] // 2))
         # 底部：单位攻/防；指令/反制描述
@@ -1657,7 +1673,7 @@ class PygameBoard:
 
     def _draw_buttons(self, surf, L, g, human_turn):
         # 结束回合
-        col = "#3a5a80" if human_turn else "#333a44"
+        col = PRIMARY if human_turn else PANEL_ALT
         rr(surf, L["end_btn"], C(col), radius=8)
         f = font(16, True)
         label = t("btn_end_turn")
@@ -1665,7 +1681,7 @@ class PygameBoard:
                   (L["end_btn"].centerx - f.size(label)[0] // 2,
                    L["end_btn"].centery - 11))
         # 速度
-        rr(surf, L["speed_btn"], C("#4a4f5a"), radius=8)
+        rr(surf, L["speed_btn"], C(BTN), radius=8)
         fast = getattr(self.app, "fast_ai", False) if self.app else False
         label = t("btn_fast") if fast else t("btn_slow")
         f2 = font(13)
@@ -1673,7 +1689,7 @@ class PygameBoard:
                   (L["speed_btn"].centerx - f2.size(label)[0] // 2,
                    L["speed_btn"].centery - 9))
         # 菜单
-        rr(surf, L["menu_btn"], C("#4a4f5a"), radius=8)
+        rr(surf, L["menu_btn"], C(BTN), radius=8)
         label = t("btn_board_menu")
         f3 = font(13)
         surf.blit(f3.render(label, True, C(TEXT)),
@@ -1749,7 +1765,7 @@ class PygameBoard:
         pad = 18
         rect = pygame.Rect(self.W // 2 - w // 2 - pad, self.H // 3 - h,
                            w + pad * 2, h + pad)
-        rr(surf, rect, C("#10131a"), radius=10, border_color=C(b["color"]))
+        rr(surf, rect, C(BG_ALT), radius=10, border_color=C(b["color"]))
         surf.blit(f.render(b["text"], True, C(b["color"])),
                   (rect.centerx - w // 2, rect.centery - h // 2))
 
@@ -1791,7 +1807,7 @@ class PygameBoard:
         x = min(self.mouse[0] + 18, self.W - w - 8)
         y = min(self.mouse[1] + 18, self.H - h - 8)
         panel = pygame.Rect(x, y, w, h)
-        rr(surf, panel, C("#10131a"), radius=8, border_color=C(GOLD))
+        rr(surf, panel, C(BG_ALT), radius=8, border_color=C(GOLD))
         yy = y + 10
         for text, color, bold in lines:
             f = font(13, bold)
@@ -1813,9 +1829,9 @@ class PygameBoard:
         for i, (key, label) in enumerate(items):
             r = pygame.Rect(x0 + 20, y0 + 70 + i * 60, w - 40, 46)
             confirm = self.pause_confirm == key
-            col = "#8a3a3a" if key in ("concede",) else "#3a5a80"
+            col = DANGER if key in ("concede",) else PRIMARY
             if key == "quit":
-                col = "#4a4f5a"
+                col = BTN
             rr(surf, r, C(col), radius=8)
             txt = (t("confirm_again") if confirm else label)
             bf = font(15, True)
@@ -1884,7 +1900,7 @@ class PygameBoard:
                   (self.W // 2 - f2.size(sub)[0] // 2, int(self.H * 0.52)))
         # 国家徽章（简化版：圆盘 + 首字）
         nation = self.end_state.get("nation") or ""
-        main = C(GOLD) if won else C("#6a7076")
+        main = C(GOLD) if won else C(DIM)
         cx, cy = self.W // 2, int(self.H * 0.24)
         pygame.draw.circle(surf, main, (cx, cy), 56, 4)
         nf = font(40, True)

@@ -40,13 +40,21 @@ import kards_host
 import kards_update as net_update
 import kards_music as music
 # 配色/字体清单的唯一真源（与 kards_board.py 共用，别再抄第二份）
-from kards_theme import (BG, PANEL, CARD_BG, CARD_SEL, TEXT, DIM,
-                         RED, GREEN, GOLD, NATION_COLOR,
+import kards_theme as theme
+from kards_theme import (BG, BG_ALT, PANEL, PANEL_ALT, CARD_BG, CARD_DIM,
+                         CARD_SEL, TEXT, DIM, MUTE, BORDER, BORDER_HI,
+                         RED, GREEN, GOLD,
+                         BTN, BTN_HOVER, PRIMARY, PRIMARY_HOVER, PRIMARY_FG,
+                         SUCCESS, SUCCESS_HOVER, DANGER, DANGER_HOVER,
+                         WARN, WARN_HOVER, INFO, INFO_HOVER,
+                         ACCENT, ACCENT_DIM, ACCENT_FG,
+                         NATION_COLOR,
                          BUNDLED_FONT_FILES as _BUNDLED_FONT_FILES,
                          BUNDLED_FONT_FAMILY as _BUNDLED_FONT_FAMILY)
 
 # ---------------------------------------------------------------- 主题配色
 # 色值定义见 kards_theme.py（tkinter 与 pygame 共用一份，改一处两边生效）
+# 运行中换主题：theme.apply() → theme.sync(globals())，然后重建当前界面。
 
 APP_TITLE = "KARDS 简化版 - 二战卡牌对战"
 
@@ -119,6 +127,62 @@ def kw_text(keywords):
     return " ".join(f"[{k}]" for k in keywords)
 
 
+# ---------------------------------------------------------------- 悬停反馈
+# tkinter 的 Button 没有 CSS 那种 :hover —— 默认只有按下时变色，鼠标扫过去
+# 毫无反应，一整屏按钮看着像静态图片。这里统一补上悬停高亮。
+#
+# ⚠ 悬停色**按进入时的实际底色现算**（不是建控件时算），因为按钮颜色会
+#   随状态变（比如「快速匹配」在等待中变红、公网按钮在打通中变灰）。
+#   若用建控件时的快照，恢复时会把旧颜色塞回去，状态色就被抹掉了。
+
+def bind_hover(widget, amount=0.12, fg_hover=None):
+    """给控件加悬停高亮（幂等，重复绑定无副作用）。"""
+    state = {}
+
+    def on_enter(_e=None):
+        try:
+            if str(widget.cget("state")) == "disabled":
+                return
+            base = widget.cget("bg")
+            state["bg"] = base
+            state["fg"] = widget.cget("fg")
+        except tk.TclError:
+            return
+        try:
+            widget.configure(bg=theme.hover_of(base, amount))
+            if fg_hover:
+                widget.configure(fg=fg_hover)
+        except tk.TclError:
+            pass
+
+    def on_leave(_e=None):
+        try:
+            if "bg" in state:
+                widget.configure(bg=state.pop("bg"))
+            if "fg" in state:
+                widget.configure(fg=state.pop("fg"))
+        except tk.TclError:
+            pass
+
+    widget.bind("<Enter>", on_enter, add="+")
+    widget.bind("<Leave>", on_leave, add="+")
+    return widget
+
+
+def bind_hover_tree(widget):
+    """给容器和它的全部子控件加悬停（卡牌这种「整块都能点」的控件用）。
+
+    子控件自己会遮挡鼠标事件，只绑父控件的话，鼠标压在子 Label 上
+    就收不到 <Enter> 了。
+    """
+    bind_hover(widget)
+    for child in widget.winfo_children():
+        bind_hover(child)
+        if child.winfo_children():
+            bind_hover_tree(child)
+    return widget
+
+
 def bind_tooltip(widget, get_text, delay=420):
     """给单个控件挂悬停提示（延迟弹出，跟随鼠标）"""
     state = {"after": None, "tip": None}
@@ -148,7 +212,7 @@ def bind_tooltip(widget, get_text, delay=420):
         tip.wm_overrideredirect(True)
         box = tk.Frame(tip, bg=GOLD, padx=1, pady=1)
         box.pack()
-        tk.Label(box, text=text, bg="#10131a", fg=TEXT, font=FONT_S,
+        tk.Label(box, text=text, bg=BG_ALT, fg=TEXT, font=FONT_S,
                  justify="left", wraplength=340, padx=9, pady=6).pack()
         tip.wm_geometry(f"+{widget.winfo_pointerx() + 16}+{widget.winfo_pointery() + 18}")
         state["tip"] = tip
@@ -226,10 +290,10 @@ class GUIGame(core.Game):
 class CardWidget(tk.Frame):
     def __init__(self, master, title, sub, cost, color, on_click=None,
                  atk=None, defense=None, big=False, selected=False, draggable=False,
-                 rarity=None, border=None, dim=False):
-        w, h = (180, 210) if big else (130, 150)
-        bg = CARD_SEL if selected else ("#252a33" if dim else CARD_BG)
-        hl = GOLD if selected else (border or "#111318")
+                 rarity=None, border=None, dim=False, hint=None):
+        w, h = (200, 230) if big else (130, 150)
+        bg = CARD_SEL if selected else (CARD_DIM if dim else CARD_BG)
+        hl = GOLD if selected else (border or BORDER)
         super().__init__(master, width=w, height=h, bg=bg, bd=0,
                          highlightthickness=2,
                          highlightbackground=hl, highlightcolor=hl,
@@ -255,12 +319,18 @@ class CardWidget(tk.Frame):
             tk.Label(mid, text=sub or "", bg=bg, fg=DIM, font=FONT_S,
                      wraplength=inner_w, justify="center").pack(expand=True)
 
+        # 入口卡底部的一行小字（例如「联机 / 邀请码」），普通卡牌不传就不显示
+        if hint:
+            tk.Label(self, text=hint, bg=bg, fg=MUTE, font=(FONT_FAMILY, 9)
+                     ).pack(side="bottom", pady=(0, 2))
+
         if cost is not None:
             tk.Label(self, text=f"◆{cost}", bg=bg,
                      fg=RED if dim else GOLD,
                      font=FONT_B).pack(side="bottom")
         if rarity:
-            tk.Label(self, text=rarity, bg=core.RARITY_COLORS[rarity], fg="#15171c",
+            rc = core.RARITY_COLORS[rarity]
+            tk.Label(self, text=rarity, bg=rc, fg=theme.best_fg(rc),
                      font=(FONT_FAMILY, 8, "bold"), padx=3).place(
                 relx=1.0, x=-3, y=3, anchor="ne")
         if color:
@@ -280,6 +350,10 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         ensure_tk_cjk_font(self)   # 缺中文字体的机器：切到自带字体（必须在建 UI 前）
+        # 恢复上次选的主题，并把新色值灌回本模块的命名空间（必须在建 UI 前，
+        # 否则第一屏还是默认配色，切主题时才"跳"一下）。
+        theme.load()
+        theme.sync(globals())
         self.title(APP_TITLE)
         self.configure(bg=BG)
         self.geometry("1200x800")
@@ -480,48 +554,104 @@ class App(tk.Tk):
 
     # ---------------- 开始界面：战斗 / 练习 ----------------
     def _build_start(self):
+        """主菜单。
+
+        视觉分层（自上而下）：顶部强调条 → 账号/工具条 → 标题区 → 两张入口卡
+        → 底部版本水印。所有颜色都走主题 token，换主题时整体跟着变。
+        """
         self.start_frame = tk.Frame(self, bg=BG)
         self.start_frame.pack(expand=True, fill="both")
-        tk.Label(self.start_frame, text=i18n.t("app_title"), bg=BG, fg=TEXT,
-                 font=FONT_XL).pack(pady=(100, 8))
-        tk.Label(self.start_frame, text=i18n.t("app_subtitle"), bg=BG, fg=DIM,
-                 font=FONT).pack(pady=(0, 40))
-        tk.Button(self.start_frame, text=i18n.t("btn_settings"), bg="#4a4f5a", fg=TEXT,
-                  font=FONT_S, bd=0, padx=12, pady=6, cursor="hand2",
-                  command=self.open_start_settings).pack(anchor="ne", padx=16, pady=10)
-        row = tk.Frame(self.start_frame, bg=BG)
-        row.pack()
-        CardWidget(row, title=i18n.t("battle_title"), sub=i18n.t("battle_sub"),
-                   cost=None, color="#8a3a3a", big=True,
-                   on_click=self.on_battle).pack(side="left", padx=14, ipady=8)
-        CardWidget(row, title=i18n.t("practice_title"), sub=i18n.t("practice_sub"),
-                   cost=None, color="#3a5a80", big=True,
-                   on_click=lambda: self._build_nation_select()).pack(
-            side="left", padx=14, ipady=8)
-        # 主页下端：版本号
-        tk.Label(self.start_frame, text="v" + ".".join(map(str, VERSION)),
-                 bg=BG, fg=DIM, font=FONT_S).pack(side="bottom", pady=(0, 14))
-        # 左上角：账号入口
-        # 游客规则（产品指定）：未登录即游客 —— 能打人机，不能联机。
-        # 界面上显式写出「游客」并给出「登录」按钮，避免用户不知道自己在什么状态。
-        box = tk.Frame(self.start_frame, bg=BG)
-        box.pack(anchor="nw", padx=16)
-        self.account_btn = tk.Button(box, text=self._account_btn_text(),
-                                     bg="#4a4f5a", fg=TEXT, font=FONT_S, bd=0,
-                                     padx=12, pady=6, cursor="hand2",
+
+        # 顶部强调条：一像素级别的"贵气"，成本极低但整屏不再是一块死板的底
+        tk.Frame(self.start_frame, bg=ACCENT, height=4).pack(fill="x")
+
+        # ---- 工具条：左账号、右设置/主题/音乐 ----
+        top = tk.Frame(self.start_frame, bg=BG)
+        top.pack(fill="x", padx=18, pady=(12, 0))
+        left = tk.Frame(top, bg=BG)
+        left.pack(side="left")
+        self.account_btn = tk.Button(left, text=self._account_btn_text(),
+                                     bg=BTN, fg=TEXT, font=FONT_S, bd=0,
+                                     padx=14, pady=7, cursor="hand2",
+                                     activebackground=BTN_HOVER,
+                                     activeforeground=TEXT,
                                      command=self._account_dialog)
         self.account_btn.pack(side="left")
-        self.guest_hint = tk.Label(box, text="", bg=BG, fg=DIM, font=FONT_S)
+        bind_hover(self.account_btn)
+        self.guest_hint = tk.Label(left, text="", bg=BG, fg=DIM, font=FONT_S)
         self.guest_hint.pack(side="left", padx=8)
-        self.currency_lbl = tk.Label(box, text="", bg=BG, fg=GOLD, font=FONT_S)
+        self.currency_lbl = tk.Label(left, text="", bg=BG, fg=GOLD, font=FONT_S)
         self.currency_lbl.pack(side="left", padx=(16, 0))
-        # 一键静音：不想听音乐时不用翻设置窗
-        self.music_btn = tk.Button(box, text=self._music_btn_text(), bg="#4a4f5a",
-                                   fg=TEXT, font=FONT_S, bd=0, padx=10, pady=6,
-                                   cursor="hand2", command=self._toggle_music)
-        self.music_btn.pack(side="left", padx=(16, 0))
+
+        right = tk.Frame(top, bg=BG)
+        right.pack(side="right")
+        self.music_btn = tk.Button(right, text=self._music_btn_text(), bg=BTN,
+                                   fg=TEXT, font=FONT_S, bd=0, padx=11, pady=7,
+                                   cursor="hand2", activebackground=BTN_HOVER,
+                                   activeforeground=TEXT, command=self._toggle_music)
+        self.music_btn.pack(side="right")
+        tk.Button(right, text=i18n.t("btn_theme"), bg=BTN, fg=TEXT,
+                  font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
+                  activebackground=BTN_HOVER, activeforeground=TEXT,
+                  command=self._home_theme_switch).pack(side="right", padx=(0, 8))
+        tk.Button(right, text=i18n.t("btn_settings"), bg=BTN, fg=TEXT,
+                  font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
+                  activebackground=BTN_HOVER, activeforeground=TEXT,
+                  command=self.open_start_settings).pack(side="right", padx=(0, 8))
+        for w in right.winfo_children():
+            bind_hover(w)
+
+        # ---- 标题区 ----
+        hero = tk.Frame(self.start_frame, bg=BG)
+        hero.pack(expand=True)
+        tk.Label(hero, text=i18n.t("app_title"), bg=BG, fg=TEXT,
+                 font=(FONT_FAMILY, 46, "bold")).pack()
+        # 强调下划线：Canvas 画两段，左粗右细，比一根纯色横线有层次
+        line = tk.Canvas(hero, width=220, height=5, bg=BG,
+                         highlightthickness=0, bd=0)
+        line.create_rectangle(0, 0, 150, 3, fill=ACCENT, outline="")
+        line.create_rectangle(156, 0, 220, 3, fill=theme.mix(ACCENT, BG, 0.55),
+                              outline="")
+        line.pack(pady=(6, 10))
+        tk.Label(hero, text=i18n.t("app_subtitle"), bg=BG, fg=DIM,
+                 font=FONT).pack(pady=(0, 34))
+
+        # ---- 两张入口卡 ----
+        row = tk.Frame(hero, bg=BG)
+        row.pack()
+        battle = CardWidget(row, title=i18n.t("battle_title"),
+                            sub=i18n.t("battle_sub"), cost=None,
+                            color=DANGER, big=True, on_click=self.on_battle,
+                            hint=i18n.t("home_card_battle_hint"))
+        battle.pack(side="left", padx=16, ipady=10)
+        practice = CardWidget(row, title=i18n.t("practice_title"),
+                              sub=i18n.t("practice_sub"), cost=None,
+                              color=PRIMARY, big=True,
+                              on_click=lambda: self._build_nation_select(),
+                              hint=i18n.t("home_card_practice_hint"))
+        practice.pack(side="left", padx=16, ipady=10)
+        bind_hover_tree(battle)
+        bind_hover_tree(practice)
+
+        tk.Label(hero, text=i18n.t("home_hint"), bg=BG, fg=MUTE,
+                 font=FONT_S).pack(pady=(26, 0))
+
+        # ---- 底部：版本水印 ----
+        foot = tk.Frame(self.start_frame, bg=BG)
+        foot.pack(side="bottom", fill="x", pady=(0, 12))
+        badge = tk.Frame(foot, bg=PANEL_ALT, padx=10, pady=3)
+        badge.pack()
+        tk.Label(badge, text="v" + ".".join(map(str, VERSION)), bg=PANEL_ALT,
+                 fg=DIM, font=FONT_S).pack()
+
         self._refresh_account_btn()
         self._refresh_music_btn()
+        # 立即应用一次主题（重建界面时也要走到，保证新控件拿到当前配色）
+        theme.sync(globals())
+
+    def _home_theme_switch(self):
+        """主菜单直接换主题：打开设置窗并停在「外观」页。"""
+        self.open_start_settings(tab="appearance")
 
     # ---------------- 账号管理 ----------------
     def _account_btn_text(self):
@@ -626,7 +756,7 @@ class App(tk.Tk):
                  font=FONT_S).pack(pady=(10, 2))
         row = tk.Frame(win, bg=BG)
         row.pack()
-        btn = tk.Button(row, bg="#4a5f7a" if music.is_enabled() else "#4a4f5a",
+        btn = tk.Button(row, bg=PRIMARY if music.is_enabled() else BTN,
                         fg=TEXT, font=FONT_S, bd=0, padx=12, pady=6,
                         cursor="hand2", width=10)
 
@@ -634,7 +764,7 @@ class App(tk.Tk):
             # 对局中关掉再开：续放对局曲；在菜单就续放菜单曲
             music.toggle(resume_track=self._music_scene())
             btn.configure(text=self._music_btn_text(),
-                          bg="#4a5f7a" if music.is_enabled() else "#4a4f5a")
+                          bg=PRIMARY if music.is_enabled() else BTN)
             self._refresh_music_btn()
 
         btn.configure(text=self._music_btn_text(), command=flip)
@@ -650,7 +780,7 @@ class App(tk.Tk):
                 pass
 
         scale = tk.Scale(row, from_=0, to=100, orient="horizontal", length=130,
-                         bg=BG, fg=TEXT, troughcolor="#2c313c", highlightthickness=0,
+                         bg=BG, fg=TEXT, troughcolor=BORDER, highlightthickness=0,
                          bd=0, sliderrelief="flat", showvalue=0,
                          command=on_scale)
         scale.set(music.get_volume())
@@ -819,7 +949,7 @@ class App(tk.Tk):
         box.pack(fill="both", expand=True, padx=18)
         lb = tk.Listbox(box, bg=PANEL, fg=TEXT, font=FONT_S, bd=0,
                         highlightthickness=0, activestyle="none",
-                        selectbackground="#4a5f7a", selectforeground=TEXT,
+                        selectbackground=PRIMARY, selectforeground=TEXT,
                         exportselection=False)
         sb = tk.Scrollbar(box, command=lb.yview)
         lb.configure(yscrollcommand=sb.set)
@@ -897,13 +1027,13 @@ class App(tk.Tk):
         tk.Button(btns, text=i18n.t("music_preview"), bg=PANEL, fg=TEXT,
                   font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
                   command=do_preview).pack(side="left", padx=4)
-        tk.Button(btns, text=i18n.t("music_apply"), bg="#3a5a80", fg=TEXT,
+        tk.Button(btns, text=i18n.t("music_apply"), bg=PRIMARY, fg=TEXT,
                   font=FONT_S, bd=0, padx=18, pady=6, cursor="hand2",
                   command=do_apply).pack(side="left", padx=4)
-        tk.Button(btns, text=i18n.t("music_apply_all"), bg="#3a5a80", fg=TEXT,
+        tk.Button(btns, text=i18n.t("music_apply_all"), bg=PRIMARY, fg=TEXT,
                   font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
                   command=do_apply_all).pack(side="left", padx=4)
-        tk.Button(btns, text=i18n.t("music_cancel"), bg="#4a4f5a", fg=TEXT,
+        tk.Button(btns, text=i18n.t("music_cancel"), bg=BTN, fg=TEXT,
                   font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
                   command=close).pack(side="left", padx=4)
         tk.Label(win, text=i18n.t("music_fmt_hint") + "  " + i18n.t("music_tracks", n=len(lib)),
@@ -967,7 +1097,7 @@ class App(tk.Tk):
 
             row = tk.Frame(win, bg=BG)
             row.pack(pady=14)
-            tk.Button(row, text=i18n.t("account_logout"), bg="#8a3a3a", fg=TEXT,
+            tk.Button(row, text=i18n.t("account_logout"), bg=DANGER, fg=TEXT,
                       font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
                       command=do_logout).pack()
             return
@@ -1019,56 +1149,258 @@ class App(tk.Tk):
 
         row = tk.Frame(win, bg=BG)
         row.pack(pady=16)
-        tk.Button(row, text=i18n.t("account_login"), bg="#3a5a80", fg=TEXT,
+        tk.Button(row, text=i18n.t("account_login"), bg=PRIMARY, fg=TEXT,
                   font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
                   command=try_login).pack(side="left", padx=8)
-        tk.Button(row, text=i18n.t("account_register"), bg="#4a7a4a", fg=TEXT,
+        tk.Button(row, text=i18n.t("account_register"), bg=SUCCESS, fg=TEXT,
                   font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
                   command=try_register).pack(side="left", padx=8)
 
-    def open_start_settings(self):
-        """主界面右上角设置：语言 / 操作说明 / 退出游戏"""
+    # ---------------- 设置（分页） ----------------
+
+    def _theme_controls(self, parent, on_change=None):
+        """外观控件：配色方案色卡 + 主色色板 + 恢复默认。
+
+        做成共用方法：主菜单设置窗、对局内设置窗都调它，避免两套 UI 漂移。
+        色卡用**预设自己的颜色**画（不是当前主题的颜色）—— 否则七张卡片
+        长得一模一样，玩家没法挑。
+        """
+        cur = theme.preset_name()
+        cur_acc = (theme.accent_color() or "").lower()
+
+        def pick(preset=None, accent=None):
+            self._pick_theme(preset, accent)
+            if on_change is not None:
+                on_change()
+
+        tk.Label(parent, text=i18n.t("theme_section"), bg=BG, fg=TEXT,
+                 font=FONT_B).pack(anchor="w")
+        tk.Label(parent, text=i18n.t("theme_hint"), bg=BG, fg=DIM,
+                 font=FONT_S, wraplength=860, justify="left").pack(
+            anchor="w", pady=(3, 12))
+
+        grid = tk.Frame(parent, bg=BG)
+        grid.pack(anchor="w")
+        for i, key in enumerate(theme.PRESETS):
+            pv = theme.preview(key)
+            chosen = (key == cur)
+            card = tk.Frame(grid, bg=pv["bg"], width=212, height=94,
+                            cursor="hand2", highlightthickness=2,
+                            highlightbackground=ACCENT if chosen else pv["border"])
+            # 4 列 × 2 行：3 列会把 7 张卡排成 3 行，连同主色区一起把
+            # 640px 的窗口顶爆（「恢复默认」被裁掉 —— 截图实测）。
+            card.grid(row=i // 4, column=i % 4, padx=(0, 10), pady=(0, 10))
+            card.pack_propagate(False)
+            name = tk.Label(card, text=i18n.t("theme_p_" + key), bg=pv["bg"],
+                            fg=pv["text"], font=(FONT_FAMILY, 11, "bold"))
+            name.pack(anchor="w", padx=10, pady=(9, 3))
+            strip = tk.Frame(card, bg=pv["bg"])
+            strip.pack(anchor="w", padx=10)
+            swatches = []
+            for col in (pv["accent"], pv["panel"], pv["card"], pv["dim"]):
+                sw = tk.Frame(strip, bg=col, width=26, height=16,
+                              highlightthickness=1,
+                              highlightbackground=pv["border"])
+                sw.pack(side="left", padx=(0, 4))
+                sw.pack_propagate(False)
+                swatches.append(sw)
+            if chosen:
+                tk.Label(card, text="\u2713", bg=pv["bg"], fg=pv["accent"],
+                         font=(FONT_FAMILY, 12, "bold")).place(
+                    relx=1.0, x=-7, y=5, anchor="ne")
+            for w in [card, name, strip] + swatches:
+                w.bind("<Button-1>", lambda e, k=key: pick(k, None))
+                bind_hover(w, amount=0.06)
+
+        tk.Label(parent, text=i18n.t("theme_accent"), bg=BG, fg=TEXT,
+                 font=FONT_B).pack(anchor="w", pady=(6, 6))
+        acc_row = tk.Frame(parent, bg=BG)
+        acc_row.pack(anchor="w")
+        for key, col in theme.ACCENTS.items():
+            chosen = (col.lower() == cur_acc)
+            sw = tk.Frame(acc_row, bg=col, width=38, height=38, cursor="hand2",
+                          highlightthickness=2,
+                          highlightbackground=TEXT if chosen else BORDER)
+            sw.pack(side="left", padx=(0, 8))
+            sw.pack_propagate(False)
+            if chosen:
+                tk.Label(sw, text="\u2713", bg=col, fg=theme.best_fg(col),
+                         font=(FONT_FAMILY, 12, "bold")).pack(expand=True)
+            for w in [sw] + list(sw.winfo_children()):
+                w.bind("<Button-1>",
+                       lambda e, c=col: pick(None, c))
+                bind_hover(w, amount=0.10)
+
+        tk.Button(parent, text=i18n.t("theme_reset"), bg=BTN, fg=TEXT,
+                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+                  activebackground=BTN_HOVER, activeforeground=TEXT,
+                  command=lambda: pick(theme.DEFAULT_PRESET, None)
+                  ).pack(anchor="w", pady=(14, 0))
+
+    def _pick_theme(self, preset=None, accent=None):
+        """应用主题（并落盘），然后把所有已经打开的界面换成新配色。"""
+        theme.apply(preset or theme.preset_name(), accent or None)
+        theme.save(theme.preset_name(), theme.accent_color())
+        theme.sync(globals())
+        try:
+            self.configure(bg=BG)
+        except tk.TclError:
+            return
+        self._refresh_views_after_theme()
+
+    def _refresh_views_after_theme(self):
+        """换主题后刷新视图。
+
+        - pygame 棋盘：颜色是**绘制时**读模块全局的，sync 之后下一帧就变；
+        - 主菜单 / 大厅：控件颜色在创建时就固定了，只能重建；
+        - 组卡 / 选国：同样重建（它们自己会判断 start_frame 是否存在）。
+        """
+        try:
+            import kards_board
+            theme.sync(vars(kards_board))
+            board = getattr(self, "_pyboard", None)
+            if board is not None and hasattr(board, "apply_theme"):
+                board.apply_theme()
+        except Exception:                                  # noqa: BLE001
+            pass
+
+        frame = getattr(self, "start_frame", None)
+        try:
+            if frame is None or not frame.winfo_exists():
+                return
+            if getattr(self, "_lobby_active", False):
+                self._build_lobby()      # 内部会 destroy start_frame 并重建
+            else:
+                frame.destroy()
+                self._build_start()
+        except tk.TclError:
+            pass
+
+    def open_start_settings(self, tab="appearance"):
+        """主界面设置窗：外观 / 声音 / 其它 三个分页。
+
+        为什么分页：外观面板本身就有 7 套配色 + 8 个主色，竖着堆会顶到
+        屏幕外（原窗口已经 700px 高，再加就没法看了）。
+        """
         win = tk.Toplevel(self)
         win.role = "start_settings"
         win.title(i18n.t("settings_title"))
         win.configure(bg=BG)
-        win.geometry("380x700")
+        win.geometry("980x700")
+        win.minsize(920, 620)
         win.transient(self)
-        tk.Label(win, text=i18n.t("settings_title"), bg=BG, fg=TEXT,
-                 font=FONT_XL).pack(pady=(18, 6))
+        try:
+            win.attributes("-topmost", True)
+            win.after(200, lambda: win.attributes("-topmost", False))
+        except tk.TclError:
+            pass
 
-        def apply_lang():
-            # 切换语言：保存偏好 → 重建主界面 → 重开设置窗（立即生效）
-            i18n.set_lang(i18n.get_lang())
-            self.start_frame.destroy()
-            self._build_start()
-            win.destroy()
-            self.open_start_settings()
+        head = tk.Frame(win, bg=BG)
+        head.pack(fill="x", padx=22, pady=(18, 8))
+        tk.Label(head, text=i18n.t("settings_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(side="left")
+        x_btn = tk.Button(head, text="\u2715", bg=BTN, fg=TEXT, font=FONT_S,
+                          bd=0, padx=10, pady=3, cursor="hand2",
+                          activebackground=BTN_HOVER, activeforeground=TEXT,
+                          command=win.destroy)
+        x_btn.pack(side="right")
+        bind_hover(x_btn)
 
-        self._lang_buttons(win, on_change=apply_lang)
-        self._music_row(win)
+        tabs = ("appearance", "sound", "more")
 
-        def show_help():
-            messagebox.showinfo(i18n.t("help_title"), i18n.t("help_text"))
+        def tab_label(key):
+            return {"appearance": i18n.t("settings_tab_look"),
+                    "sound": i18n.t("settings_tab_sound"),
+                    "more": i18n.t("settings_tab_more")}[key]
 
-        def show_keywords():
-            self.open_keyword_guide()
+        state = {"tab": tab if tab in tabs else "appearance"}
+        bar = tk.Frame(win, bg=BG)
+        bar.pack(fill="x", padx=22)
+        body = tk.Frame(win, bg=BG)
+        body.pack(fill="both", expand=True, padx=22, pady=(12, 16))
 
-        def quit_app():
-            if messagebox.askyesno(i18n.t("quit_title"), i18n.t("quit_confirm")):
+        tab_btns = {}
+
+        def render():
+            for w in body.winfo_children():
+                w.destroy()
+            for k, b in tab_btns.items():
+                active = (k == state["tab"])
+                b.configure(bg=ACCENT if active else PANEL,
+                            fg=ACCENT_FG if active else DIM,
+                            activebackground=ACCENT if active else PANEL)
+            {"appearance": build_appearance,
+             "sound": build_sound,
+             "more": build_more}[state["tab"]]()
+
+        def switch(key):
+            state["tab"] = key
+            render()
+
+        for key in tabs:
+            b = tk.Button(bar, text=tab_label(key), bg=PANEL, fg=DIM, font=FONT_S,
+                          bd=0, padx=18, pady=8, cursor="hand2",
+                          activeforeground=TEXT,
+                          command=lambda k=key: switch(k))
+            b.pack(side="left", padx=(0, 6))
+            bind_hover(b)
+            tab_btns[key] = b
+        tk.Frame(win, bg=BORDER, height=1).pack(fill="x", padx=22, pady=(8, 0))
+
+        def rebuild_self():
+            """换主题后重开本窗口（控件颜色创建时固定，只能重建）。"""
+            try:
+                keep = state["tab"]
                 win.destroy()
-                self.destroy()
+                self.open_start_settings(tab=keep)
+            except tk.TclError:
+                pass
 
-        def check_update():
-            win.destroy()
-            self.open_update_dialog()
+        def build_appearance():
+            self._theme_controls(body, on_change=rebuild_self)
 
-        for text, cmd, color in ((i18n.t("btn_check_update"), check_update, "#4a7a5a"),
-                                 (i18n.t("btn_help"), show_help, "#3a5a80"),
-                                 (i18n.t("btn_keywords"), show_keywords, "#4a6b8a"),
-                                 (i18n.t("btn_quit"), quit_app, "#4a4f5a")):
-            tk.Button(win, text=text, bg=color, fg=TEXT, font=FONT_B, bd=0,
-                      padx=18, pady=8, cursor="hand2", command=cmd).pack(pady=6)
+        def build_sound():
+            self._music_row(body)
+
+        def build_more():
+            def apply_lang():
+                i18n.set_lang(i18n.get_lang())
+                self.start_frame.destroy()
+                self._build_start()
+                win.destroy()
+                self.open_start_settings(tab="more")
+
+            self._lang_buttons(body, on_change=apply_lang)
+
+            def show_help():
+                messagebox.showinfo(i18n.t("help_title"), i18n.t("help_text"))
+
+            def show_keywords():
+                self.open_keyword_guide()
+
+            def quit_app():
+                if messagebox.askyesno(i18n.t("quit_title"), i18n.t("quit_confirm")):
+                    win.destroy()
+                    self.destroy()
+
+            def check_update():
+                win.destroy()
+                self.open_update_dialog()
+
+            row = tk.Frame(body, bg=BG)
+            row.pack(pady=(18, 0))
+            for text, cmd, color in ((i18n.t("btn_check_update"), check_update, SUCCESS),
+                                     (i18n.t("btn_help"), show_help, PRIMARY),
+                                     (i18n.t("btn_keywords"), show_keywords, INFO),
+                                     (i18n.t("btn_quit"), quit_app, BTN)):
+                b = tk.Button(row, text=text, bg=color, fg=TEXT, font=FONT_B, bd=0,
+                              padx=16, pady=8, cursor="hand2",
+                              activebackground=theme.hover_of(color),
+                              activeforeground=TEXT, command=cmd)
+                b.pack(side="left", padx=5)
+                bind_hover(b)
+
+        render()
 
     # ---------------- 自动更新 ----------------
 
@@ -1113,9 +1445,9 @@ class App(tk.Tk):
 
         bar_holder = tk.Frame(win, bg=BG)
         bar_holder.pack(fill="x", padx=16)
-        bar = tk.Frame(bar_holder, bg="#2a2f38", height=10)
+        bar = tk.Frame(bar_holder, bg=PANEL_ALT, height=10)
         bar.pack(fill="x")
-        bar_fill = tk.Frame(bar, bg="#2e6b46", height=10)
+        bar_fill = tk.Frame(bar, bg=SUCCESS, height=10)
         bar_fill.place(x=0, y=0, relwidth=0.0, relheight=1.0)
 
         notes_box = tk.Text(win, height=7, bg=PANEL, fg=DIM, font=FONT_S,
@@ -1221,13 +1553,13 @@ class App(tk.Tk):
                 except tk.TclError:
                     pass
                 rebuild_buttons()
-                tk.Button(btns, text=i18n.t("update_btn_do"), bg="#2e6b46", fg=TEXT,
+                tk.Button(btns, text=i18n.t("update_btn_do"), bg=SUCCESS, fg=TEXT,
                           font=FONT_B, bd=0, padx=16, pady=7, cursor="hand2",
                           command=do_download).pack(side="left", padx=5)
-                tk.Button(btns, text=i18n.t("update_btn_open_page"), bg="#3a5a80",
+                tk.Button(btns, text=i18n.t("update_btn_open_page"), bg=PRIMARY,
                           fg=TEXT, font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
                           command=open_page).pack(side="left", padx=5)
-                tk.Button(btns, text=i18n.t("update_later_btn"), bg="#4a4f5a", fg=TEXT,
+                tk.Button(btns, text=i18n.t("update_later_btn"), bg=BTN, fg=TEXT,
                           font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
                           command=close).pack(side="left", padx=5)
                 state["phase"] = "found"
@@ -1236,7 +1568,7 @@ class App(tk.Tk):
                 if state.get("phase") != "no_update":
                     state["phase"] = "no_update"
                     rebuild_buttons()
-                    tk.Button(btns, text=i18n.t("btn_close"), bg="#4a4f5a", fg=TEXT,
+                    tk.Button(btns, text=i18n.t("btn_close"), bg=BTN, fg=TEXT,
                               font=FONT_B, bd=0, padx=16, pady=7, cursor="hand2",
                               command=close).pack()
             elif st == "error":
@@ -1244,7 +1576,7 @@ class App(tk.Tk):
                 if state.get("phase") != "error":
                     state["phase"] = "error"
                     rebuild_buttons()
-                    tk.Button(btns, text=i18n.t("btn_close"), bg="#4a4f5a", fg=TEXT,
+                    tk.Button(btns, text=i18n.t("btn_close"), bg=BTN, fg=TEXT,
                               font=FONT_B, bd=0, padx=16, pady=7, cursor="hand2",
                               command=close).pack()
             elif st in ("downloading", "verifying", "extracting"):
@@ -1260,7 +1592,7 @@ class App(tk.Tk):
                 if state.get("phase") != "busy":
                     state["phase"] = "busy"
                     rebuild_buttons()
-                    tk.Button(btns, text=i18n.t("update_btn_cancel"), bg="#4a4f5a",
+                    tk.Button(btns, text=i18n.t("update_btn_cancel"), bg=BTN,
                               fg=TEXT, font=FONT_S, bd=0, padx=12, pady=7,
                               cursor="hand2", command=close).pack()
             elif st == "done":
@@ -1272,10 +1604,10 @@ class App(tk.Tk):
                 if not state.get("installed"):
                     state["installed"] = True
                     rebuild_buttons()
-                    tk.Button(btns, text=i18n.t("update_restart_btn"), bg="#2e6b46",
+                    tk.Button(btns, text=i18n.t("update_restart_btn"), bg=SUCCESS,
                               fg=TEXT, font=FONT_B, bd=0, padx=16, pady=7,
                               cursor="hand2", command=do_restart).pack(side="left", padx=5)
-                    tk.Button(btns, text=i18n.t("update_later_btn"), bg="#4a4f5a",
+                    tk.Button(btns, text=i18n.t("update_later_btn"), bg=BTN,
                               fg=TEXT, font=FONT_S, bd=0, padx=12, pady=7,
                               cursor="hand2", command=close).pack(side="left", padx=5)
 
@@ -1390,12 +1722,12 @@ class App(tk.Tk):
             # 「未实装」分组用暗金色 + 分隔线区分，避免玩家误以为卡池里有这些词
             planned = (gkey == "kw_group_planned")
             if planned:
-                tk.Frame(inner, bg="#3a3f4a", height=1).pack(fill="x", pady=(18, 0))
+                tk.Frame(inner, bg=BORDER, height=1).pack(fill="x", pady=(18, 0))
             tk.Label(inner, text=i18n.t(gkey), bg=BG,
-                     fg="#8a7a4a" if planned else GOLD,
+                     fg=MUTE if planned else GOLD,
                      font=FONT_B, anchor="w").pack(fill="x", pady=(12, 4))
             for name, desc in rows:
-                row = tk.Frame(inner, bg=PANEL if not planned else "#20242c")
+                row = tk.Frame(inner, bg=PANEL if not planned else BG_ALT)
                 row.pack(fill="x", pady=1)
                 tk.Label(row, text=name, bg=row["bg"], fg=DIM if planned else TEXT,
                          font=FONT_B, width=12, anchor="w",
@@ -1404,7 +1736,7 @@ class App(tk.Tk):
                          anchor="w", justify="left", wraplength=430,
                          padx=4, pady=4).pack(side="left", fill="x", expand=True)
 
-        tk.Button(win, text=i18n.t("kw_close"), bg="#3a5a80", fg=TEXT,
+        tk.Button(win, text=i18n.t("kw_close"), bg=PRIMARY, fg=TEXT,
                   font=FONT_B, bd=0, padx=20, pady=8, cursor="hand2",
                   command=win.destroy).pack(pady=12)
 
@@ -1424,7 +1756,7 @@ class App(tk.Tk):
         for code in i18n.LANG_NAMES:
             cur = i18n.get_lang() == code
             tk.Button(row, text=i18n.LANG_NAMES[code],
-                      bg="#3a5a80" if cur else "#4a4f5a",
+                      bg=PRIMARY if cur else BTN,
                       fg=TEXT, font=FONT_S, bd=0, padx=12, pady=6,
                       cursor="hand2", state="disabled" if cur else "normal",
                       command=lambda c=code: (i18n.set_lang(c), on_change())
@@ -1449,7 +1781,7 @@ class App(tk.Tk):
                  font=FONT_XL).pack(pady=(18, 2))
         tk.Label(self.start_frame, text=i18n.t("lobby_sub"),
                  bg=BG, fg=DIM, font=FONT_S).pack(pady=(0, 8))
-        tk.Button(self.start_frame, text=i18n.t("btn_back"), bg="#4a4f5a", fg=TEXT,
+        tk.Button(self.start_frame, text=i18n.t("btn_back"), bg=BTN, fg=TEXT,
                   font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
                   command=self._lobby_back).place(relx=1.0, rely=0.0,
                                                   anchor="ne", x=-16, y=10)
@@ -1487,17 +1819,17 @@ class App(tk.Tk):
                  font=FONT_S).pack(side="left")
         self.srv_addr_var = tk.StringVar(value=self.mp_server_addr)
         self.srv_addr_entry = tk.Entry(row, textvariable=self.srv_addr_var, width=18,
-                                       bg="#1a1d24", fg=TEXT, insertbackground=TEXT,
+                                       bg=BG_ALT, fg=TEXT, insertbackground=TEXT,
                                        relief="flat")
         self.srv_addr_entry.pack(side="left", padx=(4, 10), ipady=3)
-        self.srv_btn = tk.Button(row, text=i18n.t("btn_srv_connect"), bg="#2e6b46",
+        self.srv_btn = tk.Button(row, text=i18n.t("btn_srv_connect"), bg=SUCCESS,
                                  fg=TEXT, font=FONT_S, bd=0, padx=14, pady=5,
                                  cursor="hand2", command=self._lobby_connect)
         self.srv_btn.pack(side="left")
         # 「建立服务器」：本机一键起一个服务器（不用命令行）。
         # 只在具备条件时出现：有 kards_server.py 且没有被别的东西占用端口。
         self.srv_host_btn = tk.Button(row, text=i18n.t("btn_host_server"),
-                                      bg="#6b5a2a", fg=TEXT, font=FONT_S, bd=0,
+                                      bg=WARN, fg=TEXT, font=FONT_S, bd=0,
                                       padx=10, pady=5, cursor="hand2",
                                       command=self._lobby_host_server)
         if kards_host.can_host():
@@ -1519,12 +1851,12 @@ class App(tk.Tk):
         # 就能走完 开服 → 申请端口 → 把地址框换成公网地址 的全流程。
         self.srv_pub_btns = tk.Frame(box, bg=PANEL)
         self.srv_copy_btn = tk.Button(self.srv_pub_btns, text=i18n.t("btn_copy_addr"),
-                                      bg="#2b3a4a", fg=TEXT, font=FONT_S, bd=0,
+                                      bg=PANEL_ALT, fg=TEXT, font=FONT_S, bd=0,
                                       padx=10, pady=3, cursor="hand2",
                                       command=self._lobby_copy_addr)
         self.srv_pub_toggle = tk.Button(self.srv_pub_btns,
                                         text=i18n.t("btn_pub_onekey"),
-                                        bg="#3a5a80", fg=TEXT, font=FONT_S, bd=0,
+                                        bg=PRIMARY, fg=TEXT, font=FONT_S, bd=0,
                                         padx=10, pady=3, cursor="hand2",
                                         command=self._lobby_pub_toggle)
         self.srv_pub_toggle.pack(side="left")
@@ -1534,7 +1866,7 @@ class App(tk.Tk):
         # 游客（未登录）时给一个显眼的登录入口：联机按钮此时是灰的，
         # 光靠状态栏一行小字用户找不到出路（产品规则：游客不能联机）
         self.srv_login_btn = tk.Button(box, text=i18n.t("btn_login_or_reg"),
-                                       bg="#3a5a80", fg=TEXT, font=FONT_S, bd=0,
+                                       bg=PRIMARY, fg=TEXT, font=FONT_S, bd=0,
                                        padx=14, pady=5, cursor="hand2",
                                        command=lambda: self._account_dialog(for_server=True))
         self.srv_login_btn.pack(anchor="w", padx=14, pady=(0, 10))
@@ -1577,11 +1909,11 @@ class App(tk.Tk):
         box.pack(fill="x")
         tk.Label(box, text=i18n.t("match_title"), bg=PANEL, fg=TEXT,
                  font=FONT_B).pack(anchor="w", padx=14, pady=(10, 6))
-        self.match_btn = tk.Button(box, text=i18n.t("btn_quick_match"), bg="#2e6b46",
+        self.match_btn = tk.Button(box, text=i18n.t("btn_quick_match"), bg=SUCCESS,
                                    fg=TEXT, font=FONT_B, bd=0, padx=16, pady=8,
                                    cursor="hand2", command=self._mp_quick_match)
         self.match_btn.pack(anchor="w", padx=14)
-        self.room_btn = tk.Button(box, text=i18n.t("btn_create_room"), bg="#3a5a80",
+        self.room_btn = tk.Button(box, text=i18n.t("btn_create_room"), bg=PRIMARY,
                                   fg=TEXT, font=FONT_S, bd=0, padx=14, pady=6,
                                   cursor="hand2", command=self._mp_toggle_room)
         self.room_btn.pack(anchor="w", padx=14, pady=(8, 2))
@@ -1589,7 +1921,7 @@ class App(tk.Tk):
                                  font=FONT_S, anchor="w", justify="left",
                                  wraplength=290)
         self.room_lbl.pack(anchor="w", padx=14)
-        sep = tk.Frame(box, bg="#3a3f4a", height=1)
+        sep = tk.Frame(box, bg=BORDER, height=1)
         sep.pack(fill="x", padx=14, pady=8)
         row = tk.Frame(box, bg=PANEL)
         row.pack(anchor="w", padx=14, pady=(0, 12))
@@ -1597,10 +1929,10 @@ class App(tk.Tk):
                  font=FONT_S).pack(side="left")
         self.join_code_var = tk.StringVar(value="")
         e = tk.Entry(row, textvariable=self.join_code_var, width=10,
-                     bg="#1a1d24", fg=TEXT, insertbackground=TEXT, relief="flat")
+                     bg=BG_ALT, fg=TEXT, insertbackground=TEXT, relief="flat")
         e.pack(side="left", padx=(4, 8), ipady=3)
         e.bind("<Return>", lambda ev: self._mp_join_by_code())
-        self.join_code_btn = tk.Button(row, text=i18n.t("btn_join_code"), bg="#4a4f5a",
+        self.join_code_btn = tk.Button(row, text=i18n.t("btn_join_code"), bg=BTN,
                                        fg=TEXT, font=FONT_S, bd=0, padx=12, pady=5,
                                        cursor="hand2", command=self._mp_join_by_code)
         self.join_code_btn.pack(side="left")
@@ -1612,7 +1944,7 @@ class App(tk.Tk):
         box.pack(fill="both", expand=True, pady=(10, 0))
         tk.Label(box, text=i18n.t("lobby_log"), bg=PANEL, fg=TEXT,
                  font=FONT_B).pack(anchor="w", padx=14, pady=(10, 2))
-        self.lobby_logbox = tk.Text(box, height=6, bg="#1a1d24", fg=TEXT,
+        self.lobby_logbox = tk.Text(box, height=6, bg=BG_ALT, fg=TEXT,
                                     font=FONT_S, bd=0, highlightthickness=0,
                                     wrap="word", state="disabled")
         self.lobby_logbox.pack(fill="both", expand=True, padx=14, pady=(0, 10))
@@ -1657,12 +1989,12 @@ class App(tk.Tk):
             self.match_btn.configure(
                 text=i18n.t("btn_cancel_match") if self.mp_matching
                 else i18n.t("btn_quick_match"),
-                bg="#8a3a3a" if self.mp_matching else "#2e6b46")
+                bg=DANGER if self.mp_matching else SUCCESS)
         if self.room_btn is not None and self.room_btn.winfo_exists():
             self.room_btn.configure(
                 text=i18n.t("btn_leave_room") if self.mp_room_code
                 else i18n.t("btn_create_room"),
-                bg="#8a3a3a" if self.mp_room_code else "#3a5a80")
+                bg=DANGER if self.mp_room_code else PRIMARY)
         if self.room_lbl is not None and self.room_lbl.winfo_exists():
             if self.mp_room_code:
                 self.room_lbl.configure(text=i18n.t("room_code", code=self.mp_room_code),
@@ -1786,14 +2118,14 @@ class App(tk.Tk):
         except tk.TclError:
             return
         if kards_host.public_status().get("state") == "working":
-            text, state, color = i18n.t("btn_pub_working"), "disabled", "#3a3f4a"
+            text, state, color = i18n.t("btn_pub_working"), "disabled", BORDER
         elif getattr(self, "_pub_ok_addr", ""):
             if getattr(self, "_pub_switched", False):
-                text, state, color = i18n.t("btn_pub_back_lan"), "normal", "#6b5a2a"
+                text, state, color = i18n.t("btn_pub_back_lan"), "normal", WARN
             else:
-                text, state, color = i18n.t("btn_pub_onekey"), "normal", "#2e6b46"
+                text, state, color = i18n.t("btn_pub_onekey"), "normal", SUCCESS
         else:
-            text, state, color = i18n.t("btn_pub_onekey"), "normal", "#3a5a80"
+            text, state, color = i18n.t("btn_pub_onekey"), "normal", PRIMARY
         try:
             btn.configure(text=text, state=state, bg=color)
             # 「复制地址」只在真有地址可复制时露出来，别放一个点了没反应的按钮
@@ -2443,27 +2775,27 @@ class App(tk.Tk):
         self.deck_count_lbl.pack(side="left", padx=10)
         self.ally_count_lbl = tk.Label(right_t, text="", bg=BG, fg=DIM, font=FONT_S)
         self.ally_count_lbl.pack(side="left", padx=10)
-        tk.Button(right_t, text=i18n.t("btn_import"), bg="#6b4c7a", fg=TEXT, font=FONT_S,
+        tk.Button(right_t, text=i18n.t("btn_import"), bg=INFO, fg=TEXT, font=FONT_S,
                   bd=0, padx=12, pady=6, cursor="hand2",
                   command=self.on_import_deck).pack(side="left", padx=4)
-        tk.Button(right_t, text=i18n.t("btn_save"), bg="#6b5a2a", fg=TEXT, font=FONT_S,
+        tk.Button(right_t, text=i18n.t("btn_save"), bg=WARN, fg=TEXT, font=FONT_S,
                   bd=0, padx=12, pady=6, cursor="hand2",
                   command=self.on_save_deck).pack(side="left", padx=4)
-        tk.Button(right_t, text=i18n.t("btn_load"), bg="#4a5a6b", fg=TEXT, font=FONT_S,
+        tk.Button(right_t, text=i18n.t("btn_load"), bg=BTN, fg=TEXT, font=FONT_S,
                   bd=0, padx=12, pady=6, cursor="hand2",
                   command=self.on_load_deck).pack(side="left", padx=4)
-        tk.Button(right_t, text=i18n.t("btn_recommend"), bg="#3a5a80", fg=TEXT, font=FONT_S,
+        tk.Button(right_t, text=i18n.t("btn_recommend"), bg=PRIMARY, fg=TEXT, font=FONT_S,
                   bd=0, padx=12, pady=6, cursor="hand2",
                   command=self._auto_fill).pack(side="left", padx=4)
-        tk.Button(right_t, text=i18n.t("btn_clear"), bg="#4a4f5a", fg=TEXT, font=FONT_S,
+        tk.Button(right_t, text=i18n.t("btn_clear"), bg=BTN, fg=TEXT, font=FONT_S,
                   bd=0, padx=12, pady=6, cursor="hand2",
                   command=lambda: self._auto_fill(clear=True)).pack(side="left", padx=4)
         self.start_btn = tk.Button(
             right_t, text=i18n.t("btn_start_mp") if mp else i18n.t("btn_start_sp"),
             state="disabled",
-            bg="#2e6b46", fg=TEXT, font=FONT_B, bd=0,
+            bg=SUCCESS, fg=TEXT, font=FONT_B, bd=0,
             padx=20, pady=8, cursor="hand2",
-            activebackground="#3d8a5c",
+            activebackground=SUCCESS_HOVER,
             command=self._start_mp if mp else self._start_custom)
         self.start_btn.pack(side="left", padx=(10, 0))
 
@@ -2642,7 +2974,7 @@ class App(tk.Tk):
                               samples="；".join(unmatched[:3]))
             messagebox.showinfo(i18n.t("import_result_title"), msg)
 
-        tk.Button(win, text=i18n.t("btn_import_go"), bg="#2e6b46", fg=TEXT, font=FONT_B, bd=0,
+        tk.Button(win, text=i18n.t("btn_import_go"), bg=SUCCESS, fg=TEXT, font=FONT_B, bd=0,
                   padx=20, pady=8, cursor="hand2", command=do_import).pack(pady=(0, 12))
 
     def on_save_deck(self):
@@ -2669,7 +3001,7 @@ class App(tk.Tk):
         if not names:
             tk.Label(win, text=i18n.t("load_none"),
                      bg=BG, fg=DIM, font=FONT_S, justify="left").pack(anchor="w", padx=14)
-            tk.Button(win, text=i18n.t("btn_close"), bg="#4a4f5a", fg=TEXT, font=FONT_S, bd=0,
+            tk.Button(win, text=i18n.t("btn_close"), bg=BTN, fg=TEXT, font=FONT_S, bd=0,
                       padx=14, pady=6, cursor="hand2",
                       command=win.destroy).pack(pady=10)
             return
@@ -3204,7 +3536,10 @@ class App(tk.Tk):
         if b is not None:
             b.float_text(anchor, text, color, ms)
 
-    def flash_widget(self, ref, color=RED, times=3, interval=110):
+    def flash_widget(self, ref, color=None, times=3, interval=110):
+        # 默认值不能写成 color=RED —— 默认参数在 def 时就绑死了，换主题后
+        # 仍然闪旧色。这里在调用时取当前的 RED。
+        color = color or RED
         b = self._pyboard
         if b is not None:
             b.flash_widget(ref, color, times, interval)
@@ -3404,7 +3739,7 @@ class App(tk.Tk):
         elif t == "destroy":
             w = self.unit_widgets.get(id(ev["unit"]))
             if w is not None and w.winfo_exists():
-                self.float_text(w, "✖", "#c0c6d0")
+                self.float_text(w, "✖", TEXT)
         elif t == "hq_damage":
             self.shake()
         elif t == "counter":
@@ -3421,12 +3756,43 @@ class App(tk.Tk):
             pass    # 行军动画由 _ai_play_next / 联机 msg 回放负责
 
     # ---------------- 设置 / 投降 / 退出 ----------------
+    def open_theme_dialog(self):
+        """独立的外观窗（对局中也能开：棋盘会实时换色，不必退出对局）。"""
+        win = tk.Toplevel(self)
+        win.role = "theme"
+        win.title(i18n.t("theme_section"))
+        win.configure(bg=BG)
+        win.geometry("800x580")
+        win.transient(self)
+        head = tk.Frame(win, bg=BG)
+        head.pack(fill="x", padx=22, pady=(18, 6))
+        tk.Label(head, text=i18n.t("theme_section"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(side="left")
+        x_btn = tk.Button(head, text="\u2715", bg=BTN, fg=TEXT, font=FONT_S,
+                          bd=0, padx=10, pady=3, cursor="hand2",
+                          activebackground=BTN_HOVER, activeforeground=TEXT,
+                          command=win.destroy)
+        x_btn.pack(side="right")
+        bind_hover(x_btn)
+        tk.Frame(win, bg=BORDER, height=1).pack(fill="x", padx=22, pady=(6, 12))
+        body = tk.Frame(win, bg=BG)
+        body.pack(fill="both", expand=True, padx=22)
+
+        def reload():
+            try:
+                win.destroy()
+                self.open_theme_dialog()
+            except tk.TclError:
+                pass
+
+        self._theme_controls(body, on_change=reload)
+
     def open_settings(self):
         win = tk.Toplevel(self)
         win.role = "ingame_settings"
         win.title(i18n.t("settings_title"))
         win.configure(bg=BG)
-        win.geometry("340x700")
+        win.geometry("360x720")
         win.transient(self)
         tk.Label(win, text=i18n.t("settings_title"), bg=BG, fg=TEXT,
                  font=FONT_XL).pack(pady=(16, 6))
@@ -3455,17 +3821,27 @@ class App(tk.Tk):
         def keywords():
             self.open_keyword_guide()
 
+        def theme_dialog():
+            # 先关掉设置窗：换主题后它是旧配色，留着会和新棋盘"撞色"
+            win.destroy()
+            self.open_theme_dialog()
+
         def quit_app():
             if messagebox.askyesno(i18n.t("quit_title"), i18n.t("quit_safe_confirm")):
                 win.destroy()
                 self.destroy()
 
-        for text, cmd, color in ((i18n.t("btn_keywords"), keywords, "#4a6b8a"),
-                                 (i18n.t("btn_surrender"), surrender, "#8a3a3a"),
-                                 (i18n.t("btn_to_menu"), to_menu, "#3a5a80"),
-                                 (i18n.t("btn_quit"), quit_app, "#4a4f5a")):
-            tk.Button(win, text=text, bg=color, fg=TEXT, font=FONT_B, bd=0,
-                      padx=18, pady=8, cursor="hand2", command=cmd).pack(pady=5)
+        for text, cmd, color in ((i18n.t("btn_theme"), theme_dialog, INFO),
+                                 (i18n.t("btn_keywords"), keywords, INFO),
+                                 (i18n.t("btn_surrender"), surrender, DANGER),
+                                 (i18n.t("btn_to_menu"), to_menu, PRIMARY),
+                                 (i18n.t("btn_quit"), quit_app, BTN)):
+            b = tk.Button(win, text=text, bg=color, fg=TEXT, font=FONT_B, bd=0,
+                          padx=18, pady=8, cursor="hand2",
+                          activebackground=theme.hover_of(color),
+                          activeforeground=TEXT, command=cmd)
+            b.pack(pady=5)
+            bind_hover(b)
 
     def on_esc(self, event=None):
         """Esc：对局中安全退出到主菜单；主菜单则退出游戏
