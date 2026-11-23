@@ -514,9 +514,14 @@ def _main():
         # 弹窗由全局 ModalGuard 拦截（否则模态框会让测试永久卡死）
         H.modals.clear()
         guarded(e, e._lobby_connect)
-        ok = H.until(lambda: bool(e._srv_error), timeout=10, label="连接失败")
+        # 连接失败现在会先自动重试两次（服务器启动慢/抖动），
+        # 所以这里要等「重试用尽 → 弹出错误」这条完整链路。
+        ok = H.until(lambda: bool(e._srv_error) and bool(H.modals.calls),
+                     timeout=18, label="连接失败并提示")
         check("连接失败被记录", ok and e._srv_error, e._srv_error)
-        check("连接失败弹了错误提示", bool(H.modals.calls), H.modals.calls[:2])
+        check("连接失败弹了错误提示（重试用尽后）", bool(H.modals.calls),
+              H.modals.calls[:2])
+        H.pump(0.3)
         check("失败后 mp_link 仍为空", e.mp_link is None)
         check("失败后按钮可再次点击", str(e.srv_btn["state"]) == "normal",
               e.srv_btn["state"])

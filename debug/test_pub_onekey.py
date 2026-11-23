@@ -329,14 +329,15 @@ def main():
     app.mp_link = None
     del after_calls[:]
     kards_host.running = lambda: True
-    kards_host.port_in_use = lambda **kw: True
+    # 端口还没起来 → 应挂「等端口」的定时器，而不是立刻去连（立刻连会失败）
+    kards_host.port_in_use = lambda **kw: False
     kards_host.local_addr = fake_local
     kards_host.map_public_async = fake_map
     try:
         app.after = fake_after
         app._lobby_host_server()
         pump(app, 0.1)
-        check("排队了连接本机服", any(ms == 700 for ms, _ in after_calls), after_calls)
+        check("挂了等端口的定时器", app._t_host is not None, app._t_host)
         check("地址框指向本机", app.srv_addr_var.get() == lan_addr,
               app.srv_addr_var.get())
     finally:

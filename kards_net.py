@@ -157,20 +157,36 @@ def connect_async(ip, port, holder):
 
 
 def get_local_ips():
-    """返回本机在局域网中的 IP 列表（用于告诉对手连接地址）。"""
+    """返回本机所有网卡的 IP（用于判断「这个地址是不是本机」）。
+
+    ⚠ 只返回 UDP 探测到的那一个 IP 是不够的：多网卡机器（Wi-Fi + 有线 +
+    VMware/Hyper-V/WSL 虚拟网卡 + Tailscale）上，玩家从系统设置里看到、
+    或者大厅自动填的地址，可能不是默认路由那张网卡的地址。此时
+    `_is_self_host()` 会判 False → `same_server()` 判成「换了服务器」→
+    免密令牌作废 → 进服时被弹回登录框（用户报的「进服退登」）。
+
+    这里把主机名解析出的所有 IPv4 一并收进来，尽量覆盖全部网卡。
+    回环只在最后兜底，调用方（local_addr）取第一个用于展示。
+    """
     ips = []
+
+    def add(ip):
+        if ip and not ip.startswith("127.") and ip not in ips:
+            ips.append(ip)
+
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
-        ips.append(s.getsockname()[0])
+        add(s.getsockname()[0])
         s.close()
     except OSError:
         pass
-    if not ips:
-        try:
-            ips.append(socket.gethostbyname(socket.gethostname()))
-        except OSError:
-            pass
+    # 多网卡：主机名通常能解析出所有网卡地址（含虚拟网卡）
+    try:
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            add(ip)
+    except OSError:
+        pass
     return ips or ["127.0.0.1"]
 
 
@@ -340,6 +356,7 @@ _REPLY_MAP = {
     "login":        _m_is("auth_ok", "auth_err"),
     "register":     _m_is("auth_ok", "auth_err"),
     "resume":       _m_is("auth_ok", "auth_err"),
+    "adopt":        _m_is("auth_ok", "auth_err"),
     "match":        _m_is("matched", "matching", "err"),
     "create_room":  _m_is("room_created", "err"),
     "join_room":    _m_is("matched", "join_err", "err"),

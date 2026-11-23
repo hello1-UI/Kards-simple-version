@@ -321,6 +321,7 @@ class App(tk.Tk):
         self._pub_switched = False  # 地址框当前是否已切到公网地址
         self._pub_auto_switch = False  # 一键公网：映射完成后自动切换地址框
         self._resume_retry = 0      # 会话校验超时后的自动重试次数（防死循环）
+        self._connect_retry = 0     # 连接失败后的自动重试次数（服务器启动慢）
         self.mp_user = None        # 服务器账号名（未登录为 None）
         self.mp_matching = False   # 快速匹配等待中
         self.mp_room_code = None   # 自己开的邀请码房间
@@ -402,7 +403,7 @@ class App(tk.Tk):
     def _cancel_timers(self):
         """取消本窗口登记的全部 after 定时器（幂等，可在任意阶段调用）"""
         for key in ("_t_lobby", "_t_hello", "_t_net", "_t_prep",
-                    "_t_pub", "_t_reconnect"):
+                    "_t_pub", "_t_reconnect", "_t_retry", "_t_host"):
             tid = getattr(self, key, None)
             if tid:
                 try:
@@ -1743,8 +1744,25 @@ class App(tk.Tk):
             return
         # 没登录 / 没连上 → 切到本机服务器（这是开服的本意）
         self._lobby_set_addr_text(addr)
-        # 服务器进程刚起来时端口可能还没 listen 完，等一拍再连
-        self.after(700, self._lobby_connect)
+        # ⚠ 不能固定等 700ms 就connect：打包版第一次启动服务器要解压/import
+        # 模块，实测 2~5 秒。提前连必然失败，而失败会 `_close_server_link()`
+        # 把已登录的玩家清成游客 —— 用户看到的就是「一开服就退登」。
+        # 改成轮询等端口真正 listen 再连（最多 15 秒）。
+        self._lobby_connect_when_ready(port_i)
+
+    def _lobby_connect_when_ready(self, port, tries=0):
+        """等本机服务器真正 listen 之后再连（开服专用）。"""
+        if not self._lobby_active:
+            return
+        if kards_host.port_in_use(port=port):
+            self._lobby_connect()
+            return
+        if tries >= 30:                     # 15 秒还没起来：放弃但不退登
+            self._lobby_log(i18n.t("host_not_ready", port=port))
+            self._lobby_sync()
+            return
+        self._schedule("_t_host", 500,
+                       lambda: self._lobby_connect_when_ready(port, tries + 1))
 
     # ---- 跨局域网：公网地址 ----
 
@@ -1941,13 +1959,15 @@ class App(tk.Tk):
             return
         self._lobby_log(i18n.t("addr_copied", addr=addr))
 
-    def _lobby_connect(self):
+    def _lobby_connect(self, retry=False):
         # 已经离开大厅（回主菜单 / 进对局）→ 不许再把大厅轮询挂回来。
         # 掉线自动重连用的是 after(1200)，如果玩家在这 1.2 秒内点了返回，
         # 回调照样会执行并 `_schedule("_t_lobby")`，于是定时器永远停不掉
         # （实测：回主菜单后 _t_lobby 非 None，控制台刷 invalid command name）。
         if not getattr(self, "_lobby_active", False):
             return
+        if not retry:
+            self._connect_retry = 0     # 玩家手动发起 → 重试额度重置
         parsed = net.parse_addr(self.srv_addr_var.get()
                                 if getattr(self, "srv_addr_var", None) else self.mp_server_addr)
         if parsed is None:
@@ -2042,6 +2062,17 @@ class App(tk.Tk):
             self._srv_poll = None
             if res and res[0] == "err":
                 self._srv_error = res[1]
+                # 连不上先自动重试两次再报错：服务器刚起来（打包版要解压）、
+                # 或者玩家正在等 Wi-Fi/防火墙放行，都可能让第一次连接失败。
+                # 旧代码一次失败就弹模态框，玩家已经登录的界面同时也被清成
+                # 游客 —— 这就是「点连接就退登」的另一半原因。
+                if getattr(self, "_connect_retry", 0) < 2:
+                    self._connect_retry = getattr(self, "_connect_retry", 0) + 1
+                    self._lobby_log(i18n.t("srv_retry_connect",
+                                           n=self._connect_retry))
+                    self._schedule("_t_retry", 900,
+                                   lambda: self._lobby_connect(retry=True))
+                    return
                 self._lobby_sync()
                 messagebox.showerror(i18n.t("srv_fail_hint").split("\n")[0],
                                      i18n.t("srv_fail_hint", err=res[1]))
@@ -2050,6 +2081,7 @@ class App(tk.Tk):
                 self.mp_link.on_event = None
                 self._srv_ready = True
                 self._reconnecting = 0        # 连上了 → 下次掉线还能自动重连一次
+                self._connect_retry = 0
                 link = self.mp_link
                 # 账号代理到服务器：能免密 resume 就直接进大厅
                 account.set_remote(link, self._srv_addr)
@@ -2087,6 +2119,21 @@ class App(tk.Tk):
                             self._apply_account(who2)
                             self._lobby_log(i18n.t("srv_connected",
                                                    addr=self._srv_addr, name=who2))
+                            self._srv_send({"m": "lobby"})
+                            self._schedule("_t_lobby", 120, self._lobby_poll)
+                            return
+                    # ③ 连的是**本机服务器**（自己开的服）→ 免密接管。
+                    # 账号本来就存在这台机器上，没有任何理由因为「换了个
+                    # 服务器实例」就要求玩家重新输密码（用户报的「开服退登」）。
+                    # 服务器端只放行本机来源，局域网其他玩家仍要正常登录。
+                    parsed = net.parse_addr(self._srv_addr or "")
+                    if parsed and net.is_self_host(parsed[0]):
+                        cand = self.account or account.session_name()
+                        if cand and account.adopt_local(cand):
+                            self.mp_user = cand
+                            self._resume_retry = 0
+                            self._apply_account(cand)
+                            self._lobby_log(i18n.t("srv_adopt_ok", name=cand))
                             self._srv_send({"m": "lobby"})
                             self._schedule("_t_lobby", 120, self._lobby_poll)
                             return
@@ -2317,6 +2364,8 @@ class App(tk.Tk):
         self._cancel_timer("_t_lobby")       # 停掉大厅轮询，避免访问已销毁控件
         self._cancel_timer("_t_pub")         # 公网映射轮询也停（控件马上销毁）
         self._cancel_timer("_t_reconnect")   # 在途的自动重连不许再进大厅
+        self._cancel_timer("_t_retry")       # 在途的连接重试同上
+        self._cancel_timer("_t_host")        # 等端口的轮询同上
         self.start_frame.destroy()
         self._build_start()
 

@@ -66,6 +66,22 @@ def log(msg):
         sys.stdout.flush()
 
 
+# ---- 「本机来源」判定（免密接管用）------------------------------------------
+
+def is_local_peer(ip):
+    """连接来源是否就是服务器所在的这台机器。
+
+    ⚠ 只比 IP：同一局域网的玩家连过来时源地址是**他们自己的**地址，
+    不可能落在服务器的网卡列表里，所以不会被误判成本机。
+    """
+    if ip in ("127.0.0.1", "::1", "localhost"):
+        return True
+    try:
+        return ip in local_ips()
+    except Exception:                    # noqa: BLE001
+        return False
+
+
 # ----------------------------------------------------------------- 数据库
 
 DB_LOCK = threading.RLock()
@@ -139,7 +155,18 @@ class Store:
 
     def login(self, name, pw):
         rows = self.q("SELECT salt,pw FROM users WHERE name=?", (name,))
-        if not rows or rows[0]["pw"] != self.hash_pw(rows[0]["salt"], pw):
+        if not rows:
+            return None, "用户名或密码错误"
+        stored = rows[0]["pw"]
+        if stored.startswith("sha256:"):
+            # 本机免密建号时保存的是客户端本地账号的 sha256(salt+pw)，
+            # 这里按同一算法校验 —— 玩家以后用原密码照样能登录。
+            import hashlib as _h
+            ok = stored[7:] == _h.sha256(
+                (rows[0]["salt"] + pw).encode("utf-8")).hexdigest()
+        else:
+            ok = stored == self.hash_pw(rows[0]["salt"], pw)
+        if not ok:
             return None, "用户名或密码错误"
         self.x("UPDATE users SET last_seen=? WHERE name=?", (int(time.time()), name))
         return self.new_session(name), ""
@@ -189,6 +216,32 @@ class Store:
 
     def exists(self, name):
         return bool(self.q("SELECT 1 FROM users WHERE name=?", (name,)))
+
+    def adopt(self, name, salt="", pw_hash=""):
+        """本机免密接管 / 免密建号（只允许 peer_is_local 的调用方使用）。
+
+        为什么要有：账号是**按服务器**存的。玩家在自己机器上开服时，
+        本机服务器是独立数据库 —— 已登录的玩家一「切」过去就要重新
+        输密码，体验上就是「开服就退登」。
+
+        两种情况都处理：
+          · 服务器上已有该账号 → 直接发会话（玩家之前在本机服登录过）
+          · 服务器上没有、但客户端带了自己本地账号的 salt + sha256 哈希
+            → 用这个哈希建号（不传明文密码），玩家以后用原密码也能登录
+
+        ⚠ 只接受本机来源：局域网其他玩家传来哈希就能接管账号是不行的。
+        """
+        if not self.q("SELECT 1 FROM users WHERE name=?", (name,)):
+            if not (salt and pw_hash):
+                return None, "本机服务器上还没有这个账号，请先登录或注册一次"
+            now = int(time.time())
+            self.x("INSERT INTO users(name,salt,pw,created,last_seen)"
+                   " VALUES(?,?,?,?,?)",
+                   (name, salt, "sha256:" + pw_hash, now, now))
+            log(f"本机免密建号: {name}")
+        self.x("UPDATE users SET last_seen=? WHERE name=?",
+               (int(time.time()), name))
+        return self.new_session(name), ""
 
     # ---- 卡组云同步 ----
 
@@ -426,6 +479,23 @@ class ClientHandler(socketserver.BaseRequestHandler):
                 return "retry"
             with DB_LOCK:
                 tok, err = DB.login(name, msg.get("pw") or "")
+            if err:
+                self.send({"m": "auth_err", "err": err})
+                return "retry"
+        elif t == "adopt":
+            # 本机免密恢复：自己开的服，账号本来就在这台机器上，
+            # 不该因为"换了个服务器实例"就要求重新输密码。
+            if not is_local_peer(self.client_address[0]):
+                self.send({"m": "auth_err",
+                           "err": "免密恢复仅限本机：请在服务器那台机器上操作"})
+                return "retry"
+            name, err = norm_name(msg.get("user"))
+            if err:
+                self.send({"m": "auth_err", "err": err})
+                return "retry"
+            with DB_LOCK:
+                tok, err = DB.adopt(name, msg.get("salt") or "",
+                                    msg.get("pw") or "")
             if err:
                 self.send({"m": "auth_err", "err": err})
                 return "retry"
@@ -747,12 +817,27 @@ def main():
 
 
 def local_ips():
+    """本机全部网卡 IPv4（多网卡时每条都算「本机来源」）。
+
+    只取默认路由那一个是不够的：玩家可能从另一张网卡（有线/虚拟网卡）
+    连本机服务器，此时源地址不在单 IP 列表里，免密接管会被误拒。
+    """
     ips = []
+
+    def add(ip):
+        if ip and not ip.startswith("127.") and ip not in ips:
+            ips.append(ip)
+
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
-        ips.append(s.getsockname()[0])
+        add(s.getsockname()[0])
         s.close()
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            add(info[4][0])
     except OSError:
         pass
     return ips or ["127.0.0.1"]

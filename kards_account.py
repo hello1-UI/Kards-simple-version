@@ -244,6 +244,11 @@ def has_session_token(server=None):
     return True
 
 
+def session_name():
+    """会话缓存里记住的账号名（令牌可能已失效，名字仍有参考价值）。"""
+    return _load_session().get("name")
+
+
 def _rpc(msg, timeout=6.0, key=None):
     """向服务器发一条请求并等应答；未接服务器时返回 None。
 
@@ -284,6 +289,39 @@ def _remote_login(name, pw):
         _accept_token(rep, name)
         return True, ""
     return False, _err_text(rep, "用户名或密码错误")
+
+
+def adopt_local(name):
+    """在本机服务器上免密接管已存在的账号。
+
+    场景：玩家在自己机器上开服（本机服务器是独立数据库）。旧行为是
+    换过去就得重新输密码 —— 用户称之为「开服就退登」。既然服务器就在
+    这台机器上，本机来源直接继承账号即可（服务器端 `is_local_peer` 把关，
+    局域网里的其他玩家不会被放行）。
+
+    返回 True 表示已登录；False 表示账号不在该服务器上 / 连接不可用，
+    此时调用方应正常弹登录框（首次开服仍然要注册一次，这是正确的）。
+    """
+    if _REMOTE is None or not _REMOTE.alive:
+        return False
+    name = (name or "").strip()
+    if not name:
+        return False
+    msg = {"m": "adopt", "user": name}
+    # 本机服务器上还没有这个账号时，带上本地账号的 salt + 哈希，
+    # 让服务器"免密建号"（不传明文密码）。这样换了服务器实例也不用
+    # 重新注册；玩家以后用原密码照样能 login（服务器按 sha256 校验）。
+    u = _load()["users"].get(name) or {}
+    if u.get("salt") and u.get("pw"):
+        msg["salt"] = u["salt"]
+        msg["pw"] = u["pw"]
+    rep = _rpc(msg, key="adopt")
+    if isinstance(rep, dict) and rep.get("m") == "auth_ok":
+        _accept_token(rep, name)
+        _mkdir_decks(name)
+        _leave_guest()
+        return True
+    return False
 
 
 def local_verify(name, pw):

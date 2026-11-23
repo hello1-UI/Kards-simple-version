@@ -196,6 +196,10 @@ LANGS = {
         "host_keep_current": "本机服务器已启动，你仍留在当前大厅"
                              "（想切到本机服请点「连接」）。",
         "srv_resume_retry": "会话校验超时，正在重试免密登录…",
+        "srv_retry_connect": "连接失败，正在自动重试（第 {n} 次）…",
+        "host_not_ready": "本机服务器还没准备好（端口 {port} 未监听）。"
+                          "可能是防火墙拦了或启动失败，稍后再点「连接」试试。",
+        "srv_adopt_ok": "已用本机账号 {name} 免密进入（本机服务器，无需重新登录）。",
         # ---- 大厅：在线玩家 ----
         "lobby_players": "② 在线玩家",
         "lobby_no_players": "（还没有其他人在线）",
@@ -539,6 +543,11 @@ LANGS = {
         "host_keep_current": "Local server started; you stay in the current lobby "
                              "(click “Connect” to switch to it).",
         "srv_resume_retry": "Session check timed out — retrying passwordless sign-in…",
+        "srv_retry_connect": "Connection failed — retrying automatically ({n}/2)…",
+        "host_not_ready": "The local server is not ready yet (port {port} is not listening). "
+                          "The firewall may be blocking it, or it failed to start — "
+                          "try “Connect” again in a moment.",
+        "srv_adopt_ok": "Signed in as {name} without a password (local server).",
         # ---- Lobby: players ----
         "lobby_players": "② Players online",
         "lobby_no_players": "(nobody else online yet)",
@@ -875,6 +884,11 @@ LANGS = {
         "host_keep_current": "ローカルサーバーを起動しました。現在のロビーに残ります"
                              "（切り替えるには「接続」を押してください）。",
         "srv_resume_retry": "セッション確認がタイムアウトしました。自動ログインを再試行します…",
+        "srv_retry_connect": "接続に失敗しました。自動で再試行しています（{n}/2）…",
+        "host_not_ready": "ローカルサーバーの準備ができていません（ポート {port} が待ち受けていません）。"
+                          "ファイアウォールに止められているか、起動に失敗した可能性があります。"
+                          "しばらくしてから「接続」を押し直してください。",
+        "srv_adopt_ok": "ローカルアカウント {name} で自動サインインしました（ローカルサーバー）。",
         # ---- ロビー：プレイヤー ----
         "lobby_players": "② オンラインプレイヤー",
         "lobby_no_players": "（まだ他の人はいません）",
