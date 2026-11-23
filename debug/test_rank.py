@@ -259,6 +259,83 @@ def main():
                                               "stars": 0}, tr)))
     check("无变化也能描述", bool(R.describe(ch, tr)))
 
+    # ------------------------------------------------------------------
+    print("12. 人机对局：每 2 胜折算 1 星（2026-11-24 新规则）")
+    st = R.new_state("2026-11")
+    st, ch = R.apply_ai_result(st, "win", "2026-11")
+    check("人机第 1 胜不涨星", st["stars"] == 0 and ch["stars"] == 0, st["stars"])
+    check("第 1 胜标为还差 1 胜", ch["ai_pending"] and ch["ai_win"] == 1, ch)
+    check("第 1 胜文案提示再赢 1 场",
+          R.describe(ch, tr).startswith("rank_ai_pending")
+          and "left=1" in R.describe(ch, tr), R.describe(ch, tr))
+
+    st, ch = R.apply_ai_result(st, "win", "2026-11")
+    check("人机第 2 胜 +1 星", ch["stars"] == 1 and st["stars"] == 1, st["stars"])
+    check("第 2 胜后计数清零", st["ai_wins"] == 0, st["ai_wins"])
+    check("第 2 胜文案是加星", R.describe(ch, tr).startswith("rank_ai_gain"),
+          R.describe(ch, tr))
+
+    # 负场：星、连胜、连败、榜单全都不动
+    st0 = copy.deepcopy(st)
+    st, ch = R.apply_ai_result(st, "lose", "2026-11")
+    check("人机负场不改段位", (st["tier"], st["stars"]) == (st0["tier"], st0["stars"]))
+    check("人机负场不计连败/连胜",
+          st["zero_losses"] == 0 and st["streak"] == 0, st["zero_losses"])
+    check("人机负场不产文案", R.describe(ch, tr) == "")
+    st, ch = R.apply_ai_result(st, "draw", "2026-11")
+    check("人机平局完全空操作", st["ai_wins"] == st0["ai_wins"] and ch["stars"] == 0)
+
+    # 不必连续：胜-负-胜 也能凑够 2 胜
+    st = set_rank(R.new_state("2026-11"), 20, 0, best=20)
+    for r in ("win", "lose", "win"):
+        st, ch = R.apply_ai_result(st, r, "2026-11")
+    check("人机 2 胜可隔场累计", st["stars"] == 1, st["stars"])
+
+    # 不吃连胜加成：连赢 6 场 = 3 星（联机是 +1/+1/+2/+2/+2/+2 = 10 星）
+    st = set_rank(R.new_state("2026-11"), 20, 0, best=20)
+    base = R.total_stars(st)
+    for _ in range(6):
+        st, ch = R.apply_ai_result(st, "win", "2026-11")
+    check("人机连胜没有 +2 星加成", R.total_stars(st) - base == 3,
+          R.total_stars(st) - base)
+    check("人机不累加连胜计数", st["streak"] == 0, st["streak"])
+
+    # 满 5 星照样升段
+    st = set_rank(R.new_state("2026-11"), 20, 4, best=20)
+    st, ch = R.apply_ai_result(st, "win", "2026-11")     # 第 1 胜
+    st, ch = R.apply_ai_result(st, "win", "2026-11")     # 第 2 胜 → 升段
+    check("人机也能晋级", st["tier"] == 19 and st["stars"] == 0,
+          (st["tier"], st["stars"]))
+    check("人机晋级文案", R.describe(ch, tr).startswith("rank_ai_promoted"),
+          R.describe(ch, tr))
+
+    # 不进排行榜：5 段刷满也不会拿到榜分
+    st = set_rank(R.new_state("2026-11"), 5, 0, best=5)
+    for _ in range(20):
+        st, ch = R.apply_ai_result(st, "win", "2026-11")
+    check("人机不产生排行榜分", st["lb_pts"] == 0 and st["lb_win"] == 0,
+          (st["lb_pts"], st["lb_win"]))
+    check("人机不写榜单胜负场", st["lb_lose"] == 0)
+
+    # 1 段满星：赢了也没星可给，且不把计数攒成 2
+    st = set_rank(R.new_state("2026-11"), 1, 5, best=1)
+    st, ch = R.apply_ai_result(st, "win", "2026-11")
+    check("1 段满星人机不产出", R.total_stars(st) == R.total_stars(
+        set_rank(R.new_state("2026-11"), 1, 5, best=1)), R.total_stars(st))
+    check("1 段满星不记人机胜场", st["ai_wins"] == 0, st["ai_wins"])
+    check("1 段满星不产文案", R.describe(ch, tr) == "")
+
+    # 跨赛季：人机结算也要先补 -25 星
+    st = set_rank(R.new_state("2026-11"), 20, 0, best=20)
+    st, ch = R.apply_ai_result(st, "win", "2026-12")
+    check("人机结算先补赛季扣星", ch["season_rolled"] and st["season"] == "2026-12")
+    check("赛季扣星后人不机涨星（第 1 胜）", st["stars"] == 0, st["stars"])
+
+    # 坏数据兜底
+    st = R.normalize({"tier": 20, "stars": 2, "ai_wins": 7})
+    check("ai_wins 坏值被折成 0/1", st["ai_wins"] in (0, 1), st["ai_wins"])
+    check("归一化默认带 ai_wins", "ai_wins" in R.new_state("2026-11"))
+
     print()
     print("=" * 56)
     print(f"通过 {len(PASS)} 项 / 失败 {len(FAIL)} 项")

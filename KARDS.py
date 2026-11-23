@@ -423,7 +423,7 @@ class App(tk.Tk):
         # 每次刷新都走一次 RPC 会卡 UI，所以缓存一份，登录/结算后失效重取。
         self.rank_state = None
         self._rank_last = None       # 最近一场的段位变化（结算页展示）
-        self._game_online = False    # 当前对局是否联机 —— 只有联机才结算段位
+        self._game_online = False    # 当前对局是否联机（决定走排位还是人机结算）
         # ---- 账号 / 游客 ----
         # 产品规则：未登录即「游客」——能打人机，不能联机。
         # 游客是临时会话（不落盘），所以这里只设个内存标志，不建目录、不写文件。
@@ -876,6 +876,11 @@ class App(tk.Tk):
             tk.Label(parent, text=i18n.t("rank_lb_offline"), bg=PANEL, fg=WARN,
                      font=FONT_S, wraplength=380, justify="left"
                      ).pack(anchor="w", pady=(0, 4))
+        tk.Label(parent, text=i18n.t("rank_ai_progress",
+                                     n=st.get("ai_wins", 0),
+                                     need=rank.AI_WINS_PER_STAR),
+                 bg=PANEL, fg=TEXT if st.get("ai_wins") else DIM,
+                 font=FONT_S).pack(anchor="w", pady=(0, 2))
         tk.Label(parent, text=i18n.t("rank_ai_note"), bg=PANEL, fg=MUTE,
                  font=FONT_S, wraplength=380, justify="left").pack(anchor="w")
 
@@ -3627,7 +3632,7 @@ class App(tk.Tk):
         p1 = core.Player("你", nation, deck if deck is not None else core.build_deck(nation, self.db))
         p2 = core.Player("AI", ai_nation, core.build_deck(ai_nation, self.db))
         self.game = GUIGame(p1, p2, self.add_log, self.on_game_event)
-        self._game_online = False       # 人机练习 → 不计段位
+        self._game_online = False       # 人机练习 → 每 2 胜折算 1 星
         self._music_play("battle")
         if hasattr(self, "start_frame") and self.start_frame.winfo_exists():
             self.start_frame.destroy()
@@ -4313,11 +4318,13 @@ class App(tk.Tk):
         rank_line = ""
         if self.account:
             account.stats_add(self.account, result)
-            # 段位只在联机对局中结算：人机可以无限刷，算进段位就等于送分。
+            # 联机 → 完整排位结算；人机 → 每 2 胜折算 1 星（负场不动段位）。
             # 平局按规则不存在；真出了也不动段位（不让异常结算打花数据）。
-            if (getattr(self, "_game_online", False)
-                    and result in ("win", "lose")):
-                rank_line = self._rank_settle(result)
+            if result in ("win", "lose"):
+                if getattr(self, "_game_online", False):
+                    rank_line = self._rank_settle(result)
+                else:
+                    rank_line = self._rank_settle_ai(result)
             self._refresh_account_btn()
         rw = account.currency_reward(result, name=self.account)
         self.add_log(i18n.t("currency_reward", gold=rw["gold"],
@@ -4337,7 +4344,18 @@ class App(tk.Tk):
         ⚠ 失败时**不能**退回本地再算一遍：服务器可能已经记了，只是应答
         丢了（超时/断线），本地补算会变成一局两记。
         """
-        res = account.rank_add(self.account, result)
+        return self._rank_commit(account.rank_add(self.account, result))
+
+    def _rank_settle_ai(self, result):
+        """人机对局结算段位：每 2 胜折算 1 星，负场完全不动。
+
+        与联机共用同一套「服务器权威 + 失败不本地补算」的写法，
+        只是走 rank_add_ai（不碰连胜加成，也不计排行榜分）。
+        """
+        return self._rank_commit(account.rank_add_ai(self.account, result))
+
+    def _rank_commit(self, res):
+        """把结算结果落到内存状态 + 日志，返回展示文案（失败返回空）。"""
         if not res:
             self.add_log(i18n.t("rank_settle_failed"))
             return ""

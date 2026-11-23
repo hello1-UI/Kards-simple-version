@@ -261,6 +261,17 @@ class Store:
         self.rank_save(name, st)
         return st, change
 
+    def rank_add_ai(self, name, result):
+        """人机对局结算：每 2 胜 1 星，负场不动。
+
+        单独一条，别和排位的 rank_add 混用 —— 两者的加成、连败、
+        榜单计分完全不同，混在一起最容易「刷 AI 上榜」。
+        """
+        st = self.rank_get(name)
+        st, change = rank.apply_ai_result(st, result)
+        self.rank_save(name, st)
+        return st, change
+
     def rank_seed(self, name, st):
         """账号迁移时把本机段位搬上云。
 
@@ -670,6 +681,9 @@ class ClientHandler(socketserver.BaseRequestHandler):
             self.send({"m": "rank", "rank": DB.rank_get(self.name)})
         elif t == "rank_add":
             st, ch = DB.rank_add(self.name, msg.get("result"))
+            self.send({"m": "rank", "rank": st, "change": ch})
+        elif t == "rank_add_ai":
+            st, ch = DB.rank_add_ai(self.name, msg.get("result"))
             self.send({"m": "rank", "rank": st, "change": ch})
         elif t == "rank_seed":
             st = DB.rank_seed(self.name, msg.get("rank"))

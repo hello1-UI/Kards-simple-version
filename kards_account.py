@@ -608,9 +608,9 @@ def get_rank(name=None):
 
 
 def rank_add(name, result):
-    """结算一场排位对局，返回 {"rank": 新状态, "change": 变化} 或 None。
+    """结算一场**联机**排位对局，返回 {"rank": 新状态, "change": 变化} 或 None。
 
-    ⚠ 只有联机对局该调用它；人机练习不计段位（否则可以刷 AI 上分）。
+    ⚠ 人机对局走 rank_add_ai()：那边每 2 胜才折算 1 星，且不吃连胜加成。
     """
     if not name or result not in ("win", "lose", "draw"):
         return None
@@ -627,6 +627,31 @@ def rank_add(name, result):
     if not u:
         return None
     st, ch = rank.apply_result(u.get("rank") or rank.new_state(), result)
+    u["rank"] = st
+    _save(db)
+    return {"rank": st, "change": ch}
+
+
+def rank_add_ai(name, result):
+    """结算一场**人机**对局：每 2 胜折算 1 星，负场不动段位。
+
+    和 rank_add 一样以服务器为准（段位是服务器权威数据）；应答丢失时
+    不本地补算，避免一局两记。
+    """
+    if not name or result not in ("win", "lose", "draw"):
+        return None
+    if _BACKEND == "server" and name:
+        rep = _rpc({"m": "rank_add_ai", "result": result}, key="rank_add_ai",
+                   timeout=8.0)
+        if isinstance(rep, dict) and isinstance(rep.get("rank"), dict):
+            return {"rank": rank.normalize(rep["rank"]),
+                    "change": rep.get("change") or {}}
+        return None
+    db = _load()
+    u = db["users"].get(name)
+    if not u:
+        return None
+    st, ch = rank.apply_ai_result(u.get("rank") or rank.new_state(), result)
     u["rank"] = st
     _save(db)
     return {"rank": st, "change": ch}

@@ -365,9 +365,10 @@ _REPLY_MAP = {
     "stats":        _m_is("stats", "err"),
     "stats_add":    _m_is("stats", "err"),
     "stats_seed":   _m_is("stats", "err"),
-    # 段位 / 排行榜（rank_add / rank_seed 的应答也是 "rank"）
+    # 段位 / 排行榜（rank_add / rank_add_ai / rank_seed 的应答也是 "rank"）
     "rank":         _m_is("rank", "err"),
     "rank_add":     _m_is("rank", "err"),
+    "rank_add_ai":  _m_is("rank", "err"),
     "rank_seed":    _m_is("rank", "err"),
     "rank_board":   _m_is("rank_board", "err"),
 }

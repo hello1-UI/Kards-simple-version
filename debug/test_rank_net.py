@@ -300,6 +300,15 @@ def main():
             check("get_rank 走服务器", st and st["tier"] == 24 and st["stars"] == 1, st)
             got = account.rank_add(account.current(), "win")
             check("rank_add 走服务器", got and got["change"]["stars"] == 1, got)
+            got = account.rank_add_ai(account.current(), "win")
+            check("rank_add_ai 走服务器（第 1 胜只记进度）",
+                  got and got["change"].get("ai")
+                  and got["rank"]["ai_wins"] == 1
+                  and got["change"]["stars"] == 0, got)
+            got = account.rank_add_ai(account.current(), "lose")
+            check("人机负场不改段位",
+                  got and got["change"]["stars"] == 0
+                  and got["rank"]["ai_wins"] == 1, got)
             bd = account.leaderboard(10)
             check("leaderboard 标记在线", bd["online"] is True, bd.get("online"))
             check("leaderboard 有数据", bd["rows"] and bd["rows"][0]["name"] == "乙乙",
@@ -322,8 +331,55 @@ def main():
         q = d.wait("rank_board")
         check("limit 坏值不炸", q and isinstance(q.get("rows"), list), q)
         d.close()
+
+        print("\n=========== 10. 人机对局协议（每 2 胜 1 星）===========")
+        f = Cli()
+        f.auth("己己", "pass1234")
+        f.send({"m": "rank_seed", "rank": {
+            "tier": 20, "stars": 0, "best": 20, "season": rank.season_id()}})
+        f.wait("rank")
+        f.send({"m": "rank_add_ai", "result": "win"})
+        q = f.wait("rank")
+        check("人机第 1 胜不涨星", q and q["rank"]["stars"] == 0
+              and q["change"]["ai_pending"], q and q["change"])
+        check("人机胜场进度 = 1", q and q["rank"]["ai_wins"] == 1,
+              q and q["rank"])
+        f.send({"m": "rank_add_ai", "result": "win"})
+        q = f.wait("rank")
+        check("人机第 2 胜 +1 星", q and q["rank"]["stars"] == 1
+              and q["rank"]["ai_wins"] == 0, q and q["rank"])
+        f.send({"m": "rank_add_ai", "result": "lose"})
+        q = f.wait("rank")
+        check("人机负场不动段位", q and q["rank"]["stars"] == 1
+              and q["rank"]["ai_wins"] == 0, q and q["rank"])
+        f.send({"m": "rank_add", "result": "win"})
+        q = f.wait("rank")
+        check("联机与人机共用同一份段位", q and q["rank"]["stars"] == 2,
+              q and q["rank"])
+
+        # 1 段刷 AI：能涨星，但绝不产排行榜分（否则刷 AI 就能刷榜）
+        g = Cli()
+        g.auth("庚庚", "pass1234")
+        g.send({"m": "rank_seed", "rank": {
+            "tier": 1, "stars": 0, "best": 1, "lb_active": True,
+            "lb_pts": 0, "season": rank.season_id()}})
+        g.wait("rank")
+        for _ in range(2):
+            g.send({"m": "rank_add_ai", "result": "win"})
+            q = g.wait("rank")
+        check("1 段刷 AI 能涨星", q and q["rank"]["stars"] == 1, q and q["rank"])
+        check("刷 AI 不产排行榜分", q and q["rank"]["lb_pts"] == 0
+              and q["rank"]["lb_win"] == 0, q and q["rank"])
+        f.send({"m": "rank_board"})
+        q = f.wait("rank_board")
+        rows = (q or {}).get("rows") or []
+        me_row = next((r for r in rows if r["name"] == "庚庚"), None)
+        check("刷 AI 的人也在榜上但 0 分",
+              me_row is not None and me_row["pts"] == 0, me_row)
+        f.close()
+        g.close()
     finally:
-        for name in ("a", "a2", "b", "c", "d", "e"):
+        for name in ("a", "a2", "b", "c", "d", "e", "f", "g"):
             obj = locals().get(name)
             if obj is not None:
                 try:

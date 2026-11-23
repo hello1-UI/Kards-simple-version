@@ -10,6 +10,8 @@
   · 负：21~25 段扣 0 星；1~20 段 -1 星。
   · 0 星时连输 3 场掉 1 段（掉段后星数归 0）；21~25 段不掉段。
   · 保护段位 20 / 15 / 10 / 5 / 1：本赛季到达过，就不会再掉到更低的段位。
+  · 人机对局：**每 2 胜折算 1 星**（可累计，不必连续）；负场不影响段位，
+    也不参与联机的连胜加成与排行榜计分 —— 否则刷 AI 就能刷榜。
 
 赛季
   · 自然月为 1 个赛季，每月 1 日结算。
@@ -37,6 +39,7 @@ STARS_PER_TIER = 5        # 2~25 段升段所需星数
 DEMOTE_LOSSES = 3         # 0 星连输几场掉段
 SEASON_DECAY = 25         # 赛季结算每人扣多少星
 LB_WIN, LB_LOSE = 3, -2   # 排行榜计分
+AI_WINS_PER_STAR = 2      # 人机对局：每几胜折算 1 星
 
 # 保护段位：到达过就不再往下掉（数字是段位号）
 FLOOR_CHECKPOINTS = (20, 15, 10, 5, 1)
@@ -126,6 +129,7 @@ def new_state(season=None):
         "streak": 0,                 # 当前连胜
         "zero_losses": 0,            # 0 星下的连续败场
         "season": season or season_id(),
+        "ai_wins": 0,                # 人机累计胜场（0/1，满 2 折算 1 星后清零）
         "lb_pts": 0,                 # 排行榜积分
         "lb_win": 0,
         "lb_lose": 0,
@@ -150,6 +154,8 @@ def normalize(st):
     out["best"] = max(1, min(_i(st.get("best"), out["tier"]), TIERS))
     out["streak"] = max(0, _i(st.get("streak"), 0))
     out["zero_losses"] = max(0, _i(st.get("zero_losses"), 0))
+    # 人机胜场只需记住「差几胜」，满 2 就该清零，坏数据一律折成 0/1
+    out["ai_wins"] = max(0, _i(st.get("ai_wins"), 0)) % AI_WINS_PER_STAR
     out["lb_pts"] = _i(st.get("lb_pts"), 0)
     out["lb_win"] = max(0, _i(st.get("lb_win"), 0))
     out["lb_lose"] = max(0, _i(st.get("lb_lose"), 0))
@@ -296,6 +302,72 @@ def apply_result(st, result, year=None):
     return st, change
 
 
+def apply_ai_result(st, result, year=None):
+    """结算一场**人机**对局。返回 (new_state, change)。
+
+    人机规则（用户指定）：**每 2 胜折算 1 星**，可累计、不必连续。
+      · 负 / 平：完全空操作 —— 人机输棋不影响段位，也不计连败。
+      · 胜：ai_wins +1；满 2 场 → 清零并 +1 星（按同一套升段逻辑）。
+      · 不吃连胜加成、不改连胜计数、不碰排行榜积分 —— 否则刷 AI 就能刷榜。
+      · 1 段满星后不再产出星（否则会攒出「1 段 9 星」），胜场也不记。
+
+    change 比 apply_result 多两个字段：
+      "ai": True、"ai_win": 本场后累计胜场、"ai_pending": 还差 1 胜。
+    """
+    st, rolled = roll_season(st, year)
+    before = (st["tier"], st["stars"])
+    before_total = total_stars(st)
+    change = {"result": result, "stars": 0, "from": before, "to": before,
+              "promoted": False, "demoted": False, "protected": False,
+              "entered": False, "lb": 0, "season_rolled": rolled,
+              "ai": True, "ai_win": int(st.get("ai_wins") or 0),
+              "ai_pending": False}
+    if result != "win":
+        return st, change          # 人机负/平：不记账
+
+    capped = st["tier"] == 1 and st["stars"] >= STARS_PER_TIER
+    if capped:
+        return st, change          # 到顶了，赢了也没星可给，保持计数不变
+
+    st["ai_wins"] = int(st.get("ai_wins") or 0) + 1
+    change["ai_win"] = st["ai_wins"]
+    if st["ai_wins"] < AI_WINS_PER_STAR:
+        change["ai_pending"] = True
+        return st, change
+
+    st["ai_wins"] = 0
+    st["stars"] += 1
+    while st["stars"] >= STARS_PER_TIER and st["tier"] > 1:
+        st["stars"] -= STARS_PER_TIER
+        st["tier"] -= 1
+    if st["tier"] == 1:
+        st["stars"] = min(st["stars"], STARS_PER_TIER)
+        st["lb_active"] = True      # 人机爬到 1 段也上榜，但不带分进榜
+    st["best"] = min(st["best"], st["tier"])
+
+    change["stars"] = total_stars(st) - before_total
+    change["promoted"] = st["tier"] < before[0]
+    change["to"] = (st["tier"], st["stars"])
+    return st, change
+
+
+def _describe_ai(change, tr):
+    """人机对局的文案（与排位分开写：打人机不该显示「段位 +3 分」这类话）。"""
+    if change.get("result") != "win":
+        return ""                      # 人机负/平本来就没有段位变动
+    n = int(change.get("ai_win") or 0)
+    if change.get("ai_pending"):
+        return tr("rank_ai_pending", n=n, left=max(0, AI_WINS_PER_STAR - n))
+    if change.get("stars", 0) <= 0:
+        return ""                      # 1 段满星：赢了也没星可给
+    tier, stars = change["to"]
+    if change.get("promoted"):
+        return tr("rank_ai_promoted", wins=AI_WINS_PER_STAR,
+                  tier=tier, stars=stars)
+    return tr("rank_ai_gain", n=change["stars"], wins=AI_WINS_PER_STAR,
+              tier=tier, stars=stars)
+
+
 def describe(change, tr):
     """把 change 翻成一行人类可读文字。
 
@@ -303,6 +375,8 @@ def describe(change, tr):
     """
     if not change:
         return ""
+    if change.get("ai"):
+        return _describe_ai(change, tr)
     if change.get("season_rolled"):
         pass                     # 赛季结算提示由调用方单独显示
     tier, stars = change["to"]

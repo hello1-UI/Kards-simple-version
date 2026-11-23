@@ -163,8 +163,8 @@ def main():
             win.destroy()
             app.update()
 
-        print("4. 结算联动：联机才记段位")
-        calls = {"rank": [], "stats": []}
+        print("4. 结算联动：联机走排位、人机走 2 胜 1 星")
+        calls = {"rank": [], "ai": [], "stats": []}
         gui.account.rank_add = lambda n, r: (
             calls["rank"].append((n, r)) or
             {"rank": {"tier": 11, "stars": 0, "best": 5, "streak": 3,
@@ -174,6 +174,17 @@ def main():
                         "promoted": True, "demoted": False, "protected": False,
                         "entered": False, "lb": 0, "season_rolled": False}})
         gui.account.stats_add = lambda n, r: calls["stats"].append((n, r))
+        gui.account.rank_add_ai = lambda n, r: (
+            calls["ai"].append((n, r)) or
+            {"rank": {"tier": 12, "stars": 2, "best": 12, "streak": 0,
+                      "zero_losses": 0, "ai_wins": 1,
+                      "season": rank.season_id(),
+                      "lb_pts": 0, "lb_win": 0, "lb_lose": 0, "lb_active": False},
+             "change": {"result": r, "stars": 0, "from": (12, 2), "to": (12, 2),
+                        "promoted": False, "demoted": False,
+                        "protected": False, "entered": False, "lb": 0,
+                        "season_rolled": False, "ai": True, "ai_win": 1,
+                        "ai_pending": True}})
         gui.account.currency_reward = lambda r, name=None: {"gold": 1, "diamonds": 0}
         logs = []
         cap = {}
@@ -198,12 +209,17 @@ def main():
               app.rank_state)
 
         calls["rank"].clear()
+        calls["ai"].clear()
         cap.clear()
         app._finishing = False
         app._game_online = False
         app.finish(winner=p1)
-        check("人机对局不记段位", calls["rank"] == [], calls["rank"])
-        check("人机结算页无段位行", cap.get("line") == "", cap)
+        check("人机对局走 rank_add_ai", calls["ai"] == [("Tester", "win")],
+              calls["ai"])
+        check("人机对局不调联机结算", calls["rank"] == [], calls["rank"])
+        check("人机第 1 胜提示再赢 1 场", "再赢" in cap.get("line", ""), cap)
+        check("人机结算更新段位缓存",
+              app.rank_state and app.rank_state["ai_wins"] == 1, app.rank_state)
 
         calls["rank"].clear()
         cap.clear()

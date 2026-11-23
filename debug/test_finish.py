@@ -49,7 +49,7 @@ def make_app():
 
 def setup_game(app, my_hq=20, foe_hq=20):
     db = K.card_database()
-    p1 = K.Player("我", "德国", [db["步兵班"]] * K.DECK_SIZE)
+    p1 = K.Player("我", "德国", [db["近卫步兵"]] * K.DECK_SIZE)
     p2 = K.Player("敌", "苏联", [db["动员兵"]] * K.DECK_SIZE)
     g = K.Game(p1, p2, interactive=False)
     g.draw_cards(p1, 8)
