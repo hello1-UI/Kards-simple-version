@@ -368,9 +368,35 @@ def parse_addr(text, default_port=6000):
     return host, port
 
 
+# 本机对外的公网 IP（UPnP 端口映射成功后由 kards_host 登记）。
+#
+# 为什么需要：大厅「一键改为公网」会把地址框填成 `公网IP:端口`。玩家接着
+# 点「连接」时，如果它不被认作本机，就会同时踩两个坑：
+#   ① `same_server()` 判成「换了一台服务器」→ resume 被跳过 → 免密令牌
+#      作废 → 已登录的玩家被打回登录框（用户报的「进服就退登」）；
+#   ② 真去连自己的公网 IP → 很多家用路由器不支持 hairpin NAT，直接超时，
+#      玩家看到的是「连接失败」。
+# 登记之后这两个地址就是同一台服务器，连接也会走回环（见 connect_server_async）。
+_PUBLIC_IPS = set()
+
+
+def register_public_ip(ip):
+    """登记本机的公网 IP（幂等；空值/回环忽略）。"""
+    ip = (ip or "").strip()
+    if ip and ip not in ("0.0.0.0", "127.0.0.1", "::1"):
+        _PUBLIC_IPS.add(ip)
+
+
+def clear_public_ip():
+    """撤销登记（端口映射被撤掉时调用）。"""
+    _PUBLIC_IPS.clear()
+
+
 def _is_self_host(host):
-    """host 是否指本机（回环 / localhost / 本机的局域网 IP）"""
+    """host 是否指本机（回环 / localhost / 本机局域网 IP / 本机公网 IP）"""
     if host in ("127.0.0.1", "localhost", "::1", "0.0.0.0", ""):
+        return True
+    if host in _PUBLIC_IPS:
         return True
     try:
         return host in get_local_ips()
@@ -418,6 +444,10 @@ def connect_server_async(addr, holder, timeout=6.0):
         holder["result"] = ("err", "地址格式应为 主机:端口，例如 127.0.0.1:6000")
         return
     host, port = parsed
+    # 公网地址指向本机 → 走回环。家用路由器普遍不支持 hairpin NAT
+    # （内网访问自己的公网 IP 会超时），直连 127.0.0.1 才稳。
+    if host in _PUBLIC_IPS:
+        host = "127.0.0.1"
 
     def run():
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

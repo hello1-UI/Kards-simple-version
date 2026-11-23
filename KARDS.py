@@ -317,6 +317,10 @@ class App(tk.Tk):
         self.mp_server_addr = net.DEFAULT_SERVER   # 记住上次填的服务器地址
         self._pub_addr = ""                        # 公网可连地址（打通才有）
         self._pub_lan = ""                         # 局域网地址（复制用兜底）
+        self._pub_ok_addr = ""      # UPnP 打通后的公网地址（"" = 还没打通）
+        self._pub_switched = False  # 地址框当前是否已切到公网地址
+        self._pub_auto_switch = False  # 一键公网：映射完成后自动切换地址框
+        self._resume_retry = 0      # 会话校验超时后的自动重试次数（防死循环）
         self.mp_user = None        # 服务器账号名（未登录为 None）
         self.mp_matching = False   # 快速匹配等待中
         self.mp_room_code = None   # 自己开的邀请码房间
@@ -397,7 +401,8 @@ class App(tk.Tk):
 
     def _cancel_timers(self):
         """取消本窗口登记的全部 after 定时器（幂等，可在任意阶段调用）"""
-        for key in ("_t_lobby", "_t_hello", "_t_net", "_t_prep"):
+        for key in ("_t_lobby", "_t_hello", "_t_net", "_t_prep",
+                    "_t_pub", "_t_reconnect"):
             tid = getattr(self, key, None)
             if tid:
                 try:
@@ -1508,10 +1513,23 @@ class App(tk.Tk):
                                        fg=GREEN, font=FONT_S, anchor="w",
                                        justify="left", wraplength=290)
         self.srv_public_lbl.pack(anchor="w", padx=14)
-        self.srv_copy_btn = tk.Button(box, text=i18n.t("btn_copy_addr"), bg="#2b3a4a",
-                                      fg=TEXT, font=FONT_S, bd=0, padx=10, pady=3,
-                                      cursor="hand2", command=self._lobby_copy_addr)
+        # 公网操作区：复制地址 + 一键改公网。
+        # 「一键」按钮**常驻**：玩家不必先点「建立服务器」再等映射，直接点它
+        # 就能走完 开服 → 申请端口 → 把地址框换成公网地址 的全流程。
+        self.srv_pub_btns = tk.Frame(box, bg=PANEL)
+        self.srv_copy_btn = tk.Button(self.srv_pub_btns, text=i18n.t("btn_copy_addr"),
+                                      bg="#2b3a4a", fg=TEXT, font=FONT_S, bd=0,
+                                      padx=10, pady=3, cursor="hand2",
+                                      command=self._lobby_copy_addr)
+        self.srv_pub_toggle = tk.Button(self.srv_pub_btns,
+                                        text=i18n.t("btn_pub_onekey"),
+                                        bg="#3a5a80", fg=TEXT, font=FONT_S, bd=0,
+                                        padx=10, pady=3, cursor="hand2",
+                                        command=self._lobby_pub_toggle)
+        self.srv_pub_toggle.pack(side="left")
+        self.srv_pub_btns.pack(anchor="w", padx=14, pady=(2, 6))
         self._pub_addr = ""          # 当前可复制的地址（公网优先，其次局域网）
+        self._lobby_pub_btn_refresh()
         # 游客（未登录）时给一个显眼的登录入口：联机按钮此时是灰的，
         # 光靠状态栏一行小字用户找不到出路（产品规则：游客不能联机）
         self.srv_login_btn = tk.Button(box, text=i18n.t("btn_login_or_reg"),
@@ -1698,41 +1716,136 @@ class App(tk.Tk):
         else:
             self._lobby_log(i18n.t("host_running"))
 
-        addr = kards_host.local_addr(int(port) if port.isdigit() else 6000)
-        if getattr(self, "srv_addr_var", None) is not None:
-            self.srv_addr_var.set(addr)
+        port_i = int(port) if port.isdigit() else 6000
+        addr = kards_host.local_addr(port_i)
+        # 跨局域网：后台让路由器开公网端口（不阻塞 UI），结果用主线程轮询取。
+        # 先申请映射再决定"自己连哪儿" —— 本机服务器一旦起来，就该对外可用。
+        self._lobby_public_start(port_i, addr)
         # 局域网的其他人要连过来，得知道这个地址；顺带提醒防火墙
         self._lobby_log(i18n.t("host_firewall_hint"))
-        # 跨局域网：后台让路由器开公网端口（不阻塞 UI），结果用主线程轮询取
-        self._lobby_public_start(int(port) if port.isdigit() else 6000, addr)
-        # ⚠ 已经连在同一台服务器上（本机开服时通常就是这台）→ **保持现有连接**。
-        # 断链重连会让免密令牌失去意义（地址写法从 127.0.0.1:6000 变成
-        # 192.168.x.x:6000），玩家会被打回登录框 —— 也就是用户报的
-        # 「开服就退登」。同一台服务器、同一个账号，没有任何理由重连。
-        if (self.mp_link is not None
-                and getattr(self.mp_link, "alive", False)
-                and self._srv_ready
-                and net.same_server(self._srv_addr, addr)):
-            self._lobby_log(i18n.t("host_keep_session", name=self.mp_user or ""))
+
+        # ⚠ 「开服」不等于「把自己从当前大厅拽走」。
+        # 玩家可能已经在别人的服务器上登录了（正在等人开局），这时点建立服务器
+        # 只是想让**朋友们连这台机器**。旧代码无条件 `_lobby_connect()`，
+        # 会先 `_close_server_link()` 清掉 mp_user，再连到本机的空账号库 →
+        # resume 必然失败 → 弹登录框 = 用户报的「开服就退登」。
+        # 已登录的人保持原连接，想切到本机服再点「连接」（那是明确的意图）。
+        link = self.mp_link
+        if (link is not None and getattr(link, "alive", False)
+                and self._srv_ready and self.mp_user):
+            if net.same_server(self._srv_addr, addr):
+                self._lobby_log(i18n.t("host_keep_session",
+                                       name=self.mp_user or ""))
+                self._lobby_set_addr_text(addr)
+            else:
+                self._lobby_log(i18n.t("host_keep_current"))
             self._lobby_sync()
             return
+        # 没登录 / 没连上 → 切到本机服务器（这是开服的本意）
+        self._lobby_set_addr_text(addr)
         # 服务器进程刚起来时端口可能还没 listen 完，等一拍再连
         self.after(700, self._lobby_connect)
 
     # ---- 跨局域网：公网地址 ----
 
+    def _lobby_pub_btn_refresh(self):
+        """刷新「一键改为公网」按钮的文案与可用性。
+
+        状态只有四种，别再拆细（用户只看懂「能不能点、点了会怎样」）：
+          · 正在申请端口       → 「正在打通公网…」+ 禁用
+          · 已打通 + 地址是公网 → 「改回局域网」
+          · 已打通 + 地址是内网 → 「一键改为公网」
+          · 没打通             → 「一键改为公网」（点了会开服并重试）
+        """
+        box = getattr(self, "srv_pub_btns", None)
+        btn = getattr(self, "srv_pub_toggle", None)
+        copy_btn = getattr(self, "srv_copy_btn", None)
+        if box is None or btn is None:
+            return
+        try:
+            if not (box.winfo_exists() and btn.winfo_exists()):
+                return
+        except tk.TclError:
+            return
+        if kards_host.public_status().get("state") == "working":
+            text, state, color = i18n.t("btn_pub_working"), "disabled", "#3a3f4a"
+        elif getattr(self, "_pub_ok_addr", ""):
+            if getattr(self, "_pub_switched", False):
+                text, state, color = i18n.t("btn_pub_back_lan"), "normal", "#6b5a2a"
+            else:
+                text, state, color = i18n.t("btn_pub_onekey"), "normal", "#2e6b46"
+        else:
+            text, state, color = i18n.t("btn_pub_onekey"), "normal", "#3a5a80"
+        try:
+            btn.configure(text=text, state=state, bg=color)
+            # 「复制地址」只在真有地址可复制时露出来，别放一个点了没反应的按钮
+            if copy_btn is not None and copy_btn.winfo_exists():
+                if getattr(self, "_pub_addr", ""):
+                    if not copy_btn.winfo_ismapped():
+                        copy_btn.pack(side="left", padx=(0, 6))
+                        # 复制按钮排到 toggle 左边
+                        copy_btn.pack_configure(before=btn)
+                else:
+                    copy_btn.pack_forget()
+        except tk.TclError:
+            pass
+
+    def _lobby_pub_toggle(self):
+        """一键把大厅地址改成公网地址（再点一次改回局域网）。
+
+        这是用户要求的「一键改动」：不要求玩家先点「建立服务器」、也不需要
+        理解 UPnP —— 没打通就先把服务器拉起来并申请端口，打通后自动把地址
+        框换成公网地址并复制到剪贴板。
+        """
+        # 已经打通 → 纯地址切换，不重连、不动登录态
+        if getattr(self, "_pub_ok_addr", ""):
+            lan = getattr(self, "_pub_lan", "") or kards_host.local_addr()
+            if getattr(self, "_pub_switched", False):
+                self._lobby_set_addr_text(lan)
+                self._pub_switched = False
+                self._lobby_log(i18n.t("pub_switch_lan", addr=lan))
+            else:
+                self._lobby_set_addr_text(self._pub_ok_addr)
+                self._pub_switched = True
+                self._lobby_log(i18n.t("pub_switch_ok", addr=self._pub_ok_addr))
+                self._lobby_copy_text(self._pub_ok_addr)
+            self._lobby_pub_btn_refresh()
+            return
+
+        # 还没打通 → 一键开服 + 申请端口，映射结果回来后再切地址
+        self._pub_auto_switch = True
+        self._lobby_log(i18n.t("pub_onekey_start"))
+        self._lobby_pub_btn_refresh()
+        self._lobby_host_server()
+
+    def _lobby_set_addr_text(self, addr):
+        """只改地址输入框（不影响当前连接与登录态）。"""
+        var = getattr(self, "srv_addr_var", None)
+        if var is not None and addr:
+            var.set(addr)
+
+    def _lobby_copy_text(self, addr):
+        """把地址写进剪贴板（失败静默 —— 复制不了不该打断流程）。"""
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(addr)
+            return True
+        except tk.TclError:
+            return False
+
     def _lobby_public_start(self, port, lan_addr):
         """开服后开始申请公网端口（后台线程），并起一个主线程轮询。"""
         self._pub_addr = ""
         self._pub_lan = lan_addr
+        self._pub_ok_addr = ""
         try:
             if not self.srv_public_lbl.winfo_exists():
                 return
             self.srv_public_var.set(i18n.t("pub_working"))
             self.srv_public_lbl.configure(fg=DIM)
-            self.srv_copy_btn.pack_forget()
         except (AttributeError, tk.TclError):
             return
+        self._lobby_pub_btn_refresh()
         kards_host.map_public_async(port)
         self._schedule("_t_pub", 200, self._pub_poll)
 
@@ -1763,16 +1876,26 @@ class App(tk.Tk):
             key = "pub_direct" if st.get("direct") else "pub_ok"
             lines.insert(0, i18n.t(key, addr=pub))
             self._pub_addr = pub
+            self._pub_ok_addr = pub
+            # 一键模式下自动把地址框换成公网地址（用户不用再点第二次）
+            if getattr(self, "_pub_auto_switch", False):
+                self._pub_auto_switch = False
+                self._lobby_set_addr_text(pub)
+                self._pub_switched = True
+                self._lobby_copy_text(pub)
+                self._lobby_log(i18n.t("pub_switch_ok", addr=pub))
         elif st.get("cg_nat"):
             lines.append(i18n.t("pub_cgnat", ip=st.get("external_ip") or "?",
                                 port=port))
             fg = GOLD
             self._pub_addr = lan
+            self._pub_ok_addr = ""
         elif st.get("double_nat"):
             lines.append(i18n.t("pub_double_nat", ip=st.get("external_ip") or "?",
                                 port=port, local=local_ip))
             fg = GOLD
             self._pub_addr = lan
+            self._pub_ok_addr = ""
         else:
             err = st.get("error") or ""
             if err == "no_gateway":
@@ -1782,37 +1905,49 @@ class App(tk.Tk):
                                     ip=local_ip))
             fg = GOLD
             self._pub_addr = lan
+            self._pub_ok_addr = ""
+
+        if not self._pub_ok_addr and getattr(self, "_pub_auto_switch", False):
+            # 一键模式失败：明确收尾，别让玩家以为还在等
+            self._pub_auto_switch = False
+            self._lobby_log(i18n.t("pub_onekey_fail"))
 
         try:
             self.srv_public_var.set("\n".join(lines))
             self.srv_public_lbl.configure(fg=fg)
-            self.srv_copy_btn.pack(anchor="w", padx=14, pady=(2, 6))
         except tk.TclError:
             pass
+        self._lobby_pub_btn_refresh()
 
     def _lobby_public_clear(self):
         """连的是别人的服务器 → 自己这台没有公网入口，把那一行清掉。"""
         self._pub_addr = ""
+        self._pub_ok_addr = ""
+        self._pub_switched = False
+        self._pub_auto_switch = False
         try:
             if self.srv_public_lbl.winfo_exists():
                 self.srv_public_var.set("")
-                self.srv_copy_btn.pack_forget()
         except (AttributeError, tk.TclError):
             pass
+        self._lobby_pub_btn_refresh()
 
     def _lobby_copy_addr(self):
         addr = getattr(self, "_pub_addr", "") or (
             self.srv_addr_var.get() if getattr(self, "srv_addr_var", None) else "")
         if not addr:
             return
-        try:
-            self.clipboard_clear()
-            self.clipboard_append(addr)
-        except tk.TclError:
+        if not self._lobby_copy_text(addr):
             return
         self._lobby_log(i18n.t("addr_copied", addr=addr))
 
     def _lobby_connect(self):
+        # 已经离开大厅（回主菜单 / 进对局）→ 不许再把大厅轮询挂回来。
+        # 掉线自动重连用的是 after(1200)，如果玩家在这 1.2 秒内点了返回，
+        # 回调照样会执行并 `_schedule("_t_lobby")`，于是定时器永远停不掉
+        # （实测：回主菜单后 _t_lobby 非 None，控制台刷 invalid command name）。
+        if not getattr(self, "_lobby_active", False):
+            return
         parsed = net.parse_addr(self.srv_addr_var.get()
                                 if getattr(self, "srv_addr_var", None) else self.mp_server_addr)
         if parsed is None:
@@ -1820,6 +1955,23 @@ class App(tk.Tk):
             return
         host, port = parsed
         addr = f"{host}:{port}"
+        # ⚠ 同一台服务器已经连着 → **绝不重连**。
+        # 重连会 `_close_server_link()` 把 mp_user / 远程账号代理清掉，
+        # 再靠 resume 找回；而 resume 只要超时一次（尤其跨公网），玩家就
+        # 被弹回登录框 —— 这就是用户报的「开服 / 进服就退登」。
+        # 地址写法可能不同（127.0.0.1 ↔ 局域网 ↔ 公网），same_server 会认。
+        link = self.mp_link
+        if (link is not None and getattr(link, "alive", False)
+                and self._srv_ready and net.same_server(self._srv_addr, addr)):
+            self.mp_server_addr = addr
+            self._srv_error = ""
+            self._lobby_log(i18n.t("srv_already_same", name=self.mp_user or ""))
+            # 补订阅一次大厅快照：界面刚重建时服务器那边不会主动重推
+            self._srv_send({"m": "lobby"})
+            self._lobby_sync()
+            if self._t_lobby is None:
+                self._schedule("_t_lobby", 120, self._lobby_poll)
+            return
         # 连的若是别人的服务器，本机就没有「公网入口」这回事，别留上次开服的字样
         if not net.is_self_host(host):
             self._lobby_public_clear()
@@ -1850,7 +2002,9 @@ class App(tk.Tk):
             return False
         self._reconnecting = getattr(self, "_reconnecting", 0) + 1
         self._lobby_log(i18n.t("srv_reconnecting"))
-        self.after(1200, self._lobby_connect)
+        # 用具名定时器（而不是裸 after）：玩家可能在 1.2 秒内回主菜单，
+        # `_lobby_back()` 要能把它取消掉。
+        self._schedule("_t_reconnect", 1200, self._lobby_connect)
         return True
 
     def _close_server_link(self):
@@ -1874,6 +2028,7 @@ class App(tk.Tk):
         self.mp_room_code = None
         self.mp_lobby_players = []
         self._srv_ready = False
+        self._resume_retry = 0       # 新链路重新给一次免密重试机会
 
     # ---- 轮询：连接结果 + 服务器事件 ----
 
@@ -1901,6 +2056,7 @@ class App(tk.Tk):
                 ok, who = account.connect()
                 if ok:
                     self.mp_user = who
+                    self._resume_retry = 0
                     self._apply_account(who)
                     self._lobby_log(i18n.t("srv_connected", addr=self._srv_addr,
                                            name=who))
@@ -1917,6 +2073,23 @@ class App(tk.Tk):
                     account.set_remote(None)
                     self._srv_poll = net.ServerPoller(self._srv_addr)
                 else:
+                    # 链路还活着但免密登录没成功，有两种情况：
+                    #   ① 服务器明确拒绝（session 已被清）→ 必须重新登录；
+                    #   ② 这次只是超时/抖动（令牌还在）→ 直接弹登录框就是
+                    #      「退登」。原地重试一次，通常就好了。
+                    if self._resume_retry < 1 and account.has_session_token():
+                        self._resume_retry += 1
+                        self._lobby_log(i18n.t("srv_resume_retry"))
+                        ok2, who2 = account.connect()
+                        if ok2:
+                            self.mp_user = who2
+                            self._resume_retry = 0
+                            self._apply_account(who2)
+                            self._lobby_log(i18n.t("srv_connected",
+                                                   addr=self._srv_addr, name=who2))
+                            self._srv_send({"m": "lobby"})
+                            self._schedule("_t_lobby", 120, self._lobby_poll)
+                            return
                     self.mp_user = None
                     self._lobby_sync()
                     self.after(300, self._lobby_login_dialog)
@@ -2142,6 +2315,8 @@ class App(tk.Tk):
         self.mp_room_code = None
         self.mp_opp_name = None
         self._cancel_timer("_t_lobby")       # 停掉大厅轮询，避免访问已销毁控件
+        self._cancel_timer("_t_pub")         # 公网映射轮询也停（控件马上销毁）
+        self._cancel_timer("_t_reconnect")   # 在途的自动重连不许再进大厅
         self.start_frame.destroy()
         self._build_start()
 

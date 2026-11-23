@@ -222,6 +222,15 @@ def map_public_async(port=None, on_done=None):
         res["state"] = "done"
         res.setdefault("port", port)
         _PUB = res
+        # 映射成功 → 让 kards_net 把这个公网 IP 认作本机：
+        # 「公网地址:端口」与「局域网地址:端口」是同一台服务器，
+        # 免密令牌才不会被判成"换了服务器"（进服退登的根因之一）。
+        if res.get("ok") and res.get("external_ip"):
+            try:
+                import kards_net
+                kards_net.register_public_ip(res["external_ip"])
+            except Exception:                # noqa: BLE001
+                pass
         if on_done is not None:
             try:
                 on_done(res)
@@ -239,6 +248,11 @@ def clear_public(port=None):
         import kards_upnp as upnp
         upnp.unmap_port(public_port(port))
     except Exception:
+        pass
+    try:
+        import kards_net
+        kards_net.clear_public_ip()
+    except Exception:                        # noqa: BLE001
         pass
     _PUB = {"state": "idle", "ok": False, "external_ip": "", "port": 0,
             "local_ip": "", "gateway": "", "error": "", "cg_nat": False,

@@ -228,6 +228,22 @@ def _try_resume():
     return None
 
 
+def has_session_token(server=None):
+    """本地是否还留着免密令牌（只读缓存，不验证）。
+
+    用途：GUI 要区分「服务器明确拒绝登录」和「这次只是网络超时」。
+    前者 `_try_resume` 已经把 session 清掉；后者令牌还在 —— 这种情况
+    把玩家弹回登录框就是「退登」，应当重试而不是要求重新输密码。
+    """
+    d = _load_session()
+    if not d.get("token"):
+        return False
+    srv = server if server is not None else _SERVER
+    if d.get("server") and srv and not _same_server(d["server"], srv):
+        return False
+    return True
+
+
 def _rpc(msg, timeout=6.0, key=None):
     """向服务器发一条请求并等应答；未接服务器时返回 None。
 

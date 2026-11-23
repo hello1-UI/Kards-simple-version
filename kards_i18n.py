@@ -183,6 +183,19 @@ LANGS = {
                          "或在同一 Wi-Fi 下联机。",
         "btn_copy_addr": "复制地址",
         "addr_copied": "已复制 {addr}，发给朋友即可。",
+        # ---- 大厅：一键改为公网 ----
+        "btn_pub_onekey": "一键改为公网",
+        "btn_pub_back_lan": "改回局域网",
+        "btn_pub_working": "正在打通公网…",
+        "pub_onekey_start": "正在开服并申请公网端口，打通后自动把地址换成公网地址…",
+        "pub_switch_ok": "已切换为公网地址 {addr}（已复制，发给外网朋友即可）。",
+        "pub_switch_lan": "已切换回局域网地址 {addr}。",
+        "pub_onekey_fail": "公网端口没能自动打通，地址保持局域网。"
+                           "可按提示手动转发端口后再点一次「一键改为公网」。",
+        "srv_already_same": "已连接同一台服务器，保持当前登录（{name}）。",
+        "host_keep_current": "本机服务器已启动，你仍留在当前大厅"
+                             "（想切到本机服请点「连接」）。",
+        "srv_resume_retry": "会话校验超时，正在重试免密登录…",
         # ---- 大厅：在线玩家 ----
         "lobby_players": "② 在线玩家",
         "lobby_no_players": "（还没有其他人在线）",
@@ -511,6 +524,21 @@ LANGS = {
                          "or play on the same Wi-Fi.",
         "btn_copy_addr": "Copy address",
         "addr_copied": "Copied {addr} — send it to your friend.",
+        # ---- lobby: one-click public address ----
+        "btn_pub_onekey": "Go public",
+        "btn_pub_back_lan": "Back to LAN",
+        "btn_pub_working": "Opening public port…",
+        "pub_onekey_start": "Starting the server and requesting a public port; "
+                            "the address will switch automatically when it works…",
+        "pub_switch_ok": "Switched to public address {addr} (copied — send it to remote players).",
+        "pub_switch_lan": "Switched back to LAN address {addr}.",
+        "pub_onekey_fail": "The public port could not be opened automatically, "
+                           "so the LAN address is kept. Forward the port manually, "
+                           "then click “Go public” again.",
+        "srv_already_same": "Already connected to the same server — staying signed in ({name}).",
+        "host_keep_current": "Local server started; you stay in the current lobby "
+                             "(click “Connect” to switch to it).",
+        "srv_resume_retry": "Session check timed out — retrying passwordless sign-in…",
         # ---- Lobby: players ----
         "lobby_players": "② Players online",
         "lobby_no_players": "(nobody else online yet)",
@@ -833,6 +861,20 @@ LANGS = {
                          "同じ Wi-Fi で対戦してください。",
         "btn_copy_addr": "アドレスをコピー",
         "addr_copied": "{addr} をコピーしました。相手に送ってください。",
+        # ---- ロビー：ワンクリックで公衆アドレスへ ----
+        "btn_pub_onekey": "ワンクリックで公衆化",
+        "btn_pub_back_lan": "LAN に戻す",
+        "btn_pub_working": "公衆ポートを開放中…",
+        "pub_onekey_start": "サーバーを起動して公衆ポートを要求しています。"
+                            "成功するとアドレスが自動で公衆アドレスに切り替わります…",
+        "pub_switch_ok": "公衆アドレス {addr} に切り替えました（コピー済み。外部の相手に送ってください）。",
+        "pub_switch_lan": "LAN アドレス {addr} に戻しました。",
+        "pub_onekey_fail": "公衆ポートを自動開放できなかったため、LAN アドレスのままです。"
+                           "案内に従って手動でポート転送してから、もう一度「ワンクリックで公衆化」を押してください。",
+        "srv_already_same": "同じサーバーに接続済みです。現在のログイン（{name}）を維持します。",
+        "host_keep_current": "ローカルサーバーを起動しました。現在のロビーに残ります"
+                             "（切り替えるには「接続」を押してください）。",
+        "srv_resume_retry": "セッション確認がタイムアウトしました。自動ログインを再試行します…",
         # ---- ロビー：プレイヤー ----
         "lobby_players": "② オンラインプレイヤー",
         "lobby_no_players": "（まだ他の人はいません）",

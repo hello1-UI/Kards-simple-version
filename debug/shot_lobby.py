@@ -58,6 +58,8 @@ def main():
     only = sys.argv[1] if len(sys.argv) > 1 else None
     os.makedirs(OUT, exist_ok=True)
 
+    import kards_host
+    gui.i18n.set_lang("zh")
     app = gui.App()
     app.geometry("1000x760+40+40")
     try:
@@ -69,17 +71,36 @@ def main():
     app._pub_lan = LAN
     app.update()
 
-    for name in STATES:
-        if only and name != only:
-            continue
-        st = STATES[name]
-        if name == "working":
-            app.srv_public_var.set(gui.i18n.t("pub_working"))
-            app.srv_public_lbl.configure(fg=gui.DIM)
-            app.srv_copy_btn.pack_forget()
-        else:
-            app._lobby_public_render(st)
-        shot(app, name)
+    orig_status = kards_host.public_status
+    try:
+        for name in STATES:
+            if only and name != only:
+                continue
+            st = STATES[name]
+            if name == "working":
+                # 轮询中：按钮应显示「正在打通公网…」且禁用
+                kards_host.public_status = lambda: {"state": "working",
+                                                    "ok": False, "port": 6000}
+                app.srv_public_var.set(gui.i18n.t("pub_working"))
+                app.srv_public_lbl.configure(fg=gui.DIM)
+                app._pub_ok_addr = ""
+                app._lobby_pub_btn_refresh()
+            else:
+                kards_host.public_status = lambda st=st: st
+                app._lobby_public_render(st)
+            shot(app, name)
+
+        # 额外一张：一键切换**之后**的界面（地址框已是公网地址、按钮变「改回局域网」）
+        if not only or only == "switched":
+            ok = STATES["ok"]
+            kards_host.public_status = lambda: ok
+            app._lobby_public_render(ok)
+            app._lobby_set_addr_text("203.0.113.7:6000")
+            app._pub_switched = True
+            app._lobby_pub_btn_refresh()
+            shot(app, "switched")
+    finally:
+        kards_host.public_status = orig_status
 
     app.destroy()
 
