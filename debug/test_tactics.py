@@ -19,6 +19,9 @@ def check(name, ok, detail=""):
 
 
 db = core.card_database()
+# 泛用夹具卡（原「步兵班」等已被文档团级卡替代，不再入卡池）：
+# 测试直接本地构造，不依赖卡池内容。
+INF_2_2 = core.UnitCard("测试步兵", "德国", 2, 2, 2, [], "步兵")
 
 
 def new_game():
@@ -29,8 +32,9 @@ def new_game():
 
 
 def place(g, card_name, side, position, slot=1, kredits=10):
-    """部署并摆位：绕过部署回合限制便于测试"""
-    u = g.deploy_unit(side, db[card_name])
+    """部署并摆位：绕过部署回合限制便于测试（card_name 可传模板卡对象）"""
+    card = card_name if isinstance(card_name, core.UnitCard) else db[card_name]
+    u = g.deploy_unit(side, card)
     u.position = position
     u.slot = slot
     u.fresh_deploy = False
@@ -42,13 +46,13 @@ def place(g, card_name, side, position, slot=1, kredits=10):
 # ---- 1. 无闪击部署当回合不能移动/攻击 ----
 g = new_game()
 me, foe = g.players
-u = g.deploy_unit(me, db["步兵班"])               # 无闪击步兵
+u = g.deploy_unit(me, INF_2_2)               # 无闪击步兵
 check("无闪击: 部署当回合不能移动", g.move_unit(u, "前线") is False)
 check("无闪击: 部署当回合不能攻击", g.unit_ready(u) is False)
 b = g.deploy_unit(me, db["三号坦克 G 型"])        # [闪击]坦克
 check("闪击坦克: 部署当回合可移动", g.move_unit(b, "前线") is True)
 check("闪击坦克: 移动后仍可攻击", g.unit_ready(b) is True)
-t1 = place(g, "步兵班", foe, "前线", slot=1)
+t1 = place(g, INF_2_2, foe, "前线", slot=1)
 b.attack = 5
 before = t1.defense
 g.do_attack(b, t1)
@@ -73,7 +77,7 @@ inf = place(g, "殖民步兵", me, "后方", kredits=10)
 g.move_unit(inf, "前线")
 check("步兵移动后不能攻击", g.unit_ready(inf) is False)
 inf2 = place(g, "殖民步兵", me, "前线", kredits=10)
-t = place(g, "步兵班", foe, "前线", slot=1)
+t = place(g, INF_2_2, foe, "前线", slot=1)
 inf2.attack = 3
 g.do_attack(inf2, t)
 check("步兵攻击后不能移动", g.move_unit(inf2, "后方") is False)
@@ -89,9 +93,9 @@ check("坦克移动后仍可攻击", g.unit_ready(tank) is True)
 g = new_game()
 me, foe = g.players
 art = place(g, "Pak36反坦克炮", me, "后方")        # 炮兵
-f1 = place(g, "步兵班", foe, "前线", slot=1)
+f1 = place(g, INF_2_2, foe, "前线", slot=1)
 f2 = place(g, "T-70", foe, "前线", slot=3)   # ⚠ T-70 自带[警卫]，放 slot=3 与 f1 不相邻
-rear_foe = place(g, "步兵班", foe, "后方", slot=5)
+rear_foe = place(g, INF_2_2, foe, "后方", slot=5)
 tg = g.attack_targets(art)
 check("炮兵支援线可攻击敌方前线", f1 in tg and f2 in tg)
 check("炮兵可攻击敌方支援阵线（任意阵线）", rear_foe in tg)
@@ -113,7 +117,7 @@ check("支援线坦克可攻击敌方前线单位（敌方占线）", f1 in tg a
 # 前线空着时，支援线步兵/坦克无地面目标（够不着敌方支援阵线）
 g2 = new_game()
 me2, foe2 = g2.players
-place(g2, "步兵班", foe2, "后方", slot=5)          # 敌方全在支援阵线
+place(g2, INF_2_2, foe2, "后方", slot=5)          # 敌方全在支援阵线
 inf_r2 = place(g2, "殖民步兵", me2, "后方")
 check("前线空着时支援线步兵无目标", g2.attack_targets(inf_r2) == [])
 
@@ -121,8 +125,8 @@ check("前线空着时支援线步兵无目标", g2.attack_targets(inf_r2) == []
 g = new_game()
 me, foe = g.players
 ftr = place(g, "喷火战斗机", me, "后方")           # 战斗机
-ef = place(g, "步兵班", foe, "前线", slot=1)
-er = place(g, "步兵班", foe, "后方", slot=5)
+ef = place(g, INF_2_2, foe, "前线", slot=1)
+er = place(g, INF_2_2, foe, "后方", slot=5)
 tg = g.attack_targets(ftr)
 check("战斗机支援线可攻击敌方前线", ef in tg)
 check("战斗机可攻击敌方支援阵线（任意阵线）", er in tg)
@@ -132,8 +136,8 @@ check("战斗机支援线可以打总部", g.can_hit_hq(ftr)[0] is True)
 g = new_game()
 me, foe = g.players
 bmb = place(g, "斯图卡 B2", me, "后方")            # 轰炸机
-ef = place(g, "步兵班", foe, "前线", slot=1)
-er = place(g, "步兵班", foe, "后方", slot=5)
+ef = place(g, INF_2_2, foe, "前线", slot=1)
+er = place(g, INF_2_2, foe, "后方", slot=5)
 tg = g.attack_targets(bmb)
 check("轰炸机可攻击敌方前线", ef in tg)
 check("轰炸机可攻击敌方支援阵线", er in tg)
@@ -149,7 +153,7 @@ check("支援线战斗机掩护支援线目标", er not in tg and rear_fi in tg)
 g = new_game()
 me, foe = g.players
 inf_f = place(g, "殖民步兵", me, "前线", slot=1)
-er2 = place(g, "步兵班", foe, "后方", slot=5)
+er2 = place(g, INF_2_2, foe, "后方", slot=5)
 check("步兵在前线可攻击敌方支援阵线", er2 in g.attack_targets(inf_f))
 
 # ---- 5. 炮兵/轰炸机无视警卫 ----
@@ -157,7 +161,7 @@ g = new_game()
 me, foe = g.players
 guard = place(g, "T-70", foe, "前线", slot=1)
 guard.keywords.append("警卫")
-normal = place(g, "步兵班", foe, "前线", slot=2)
+normal = place(g, INF_2_2, foe, "前线", slot=2)
 art = place(g, "Pak36反坦克炮", me, "前线", slot=1)
 check("炮兵无视警卫(可打非警卫)", normal in g.attack_targets(art))
 inf = place(g, "殖民步兵", me, "前线", slot=1)
@@ -173,7 +177,7 @@ check("轰炸机无视#0警卫可打总部", g.can_hit_hq(bmb)[0] is True)
 # ---- 6. 轰炸机优先打战斗机 ----
 g = new_game()
 me, foe = g.players
-place(g, "步兵班", foe, "前线", slot=1)
+place(g, INF_2_2, foe, "前线", slot=1)
 fi = place(g, "雅克-3", foe, "前线", slot=2)       # 战斗机(前线)
 bmb = place(g, "斯图卡 B2", me, "后方")
 tg = g.attack_targets(bmb)
@@ -182,7 +186,7 @@ check("轰炸机必须优先打前线战斗机", tg == [fi], str(tg))
 # ---- 7. 战斗机拦截 ----
 g = new_game()
 me, foe = g.players
-victim = place(g, "步兵班", foe, "前线", slot=1)
+victim = place(g, INF_2_2, foe, "前线", slot=1)
 esc = place(g, "伊-15 海鸥", foe, "后方", slot=5)  # 支援线战斗机(拦截者)
 esc.attack = 1
 bmb = place(g, "斯图卡 B2", me, "前线", slot=1)
@@ -201,14 +205,14 @@ me, foe = g.players
 # 炮兵不吃反击
 art = place(g, "Pak36反坦克炮", me, "前线", slot=1)
 art.attack = 1
-t = place(g, "步兵班", foe, "前线", slot=1)        # 3防, 受1伤不死
+t = place(g, INF_2_2, foe, "前线", slot=1)        # 3防, 受1伤不死
 g.do_attack(art, t)
 check("炮兵攻击不吃反击", art.defense == art.max_defense,
       f"{art.defense}/{art.max_defense}")
 # 轰炸机打非战斗机不吃反击
 bmb = place(g, "斯图卡 B2", me, "前线", slot=1)
 bmb.attack = 1
-t2 = place(g, "步兵班", foe, "前线", slot=1)
+t2 = place(g, INF_2_2, foe, "前线", slot=1)
 g.do_attack(bmb, t2)
 check("轰炸机攻击不吃反击", bmb.defense == bmb.max_defense,
       f"{bmb.defense}/{bmb.max_defense}")

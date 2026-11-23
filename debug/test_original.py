@@ -21,10 +21,15 @@ def check(name, cond, detail=""):
     print(("  PASS " if cond else "  FAIL ") + name + (f"  [{detail}]" if detail and not cond else ""))
 
 
-def make_game(n1="苏联", n2="德国", filler1="动员兵", filler2="步兵班"):
+INF_2_2 = K.UnitCard("测试步兵", "德国", 2, 2, 2, [], "步兵")   # 泛用夹具（原步兵班已出池）
+FURY_KW = K.UnitCard("测试奋战兵", "德国", 2, 2, 2, ["奋战"], "步兵")
+
+
+def make_game(n1="苏联", n2="德国", filler1="动员兵", filler2=None):
     db = K.card_database()
+    f2 = filler2 if filler2 is not None else INF_2_2
     p1 = K.Player("你", n1, [db[filler1]] * K.DECK_SIZE)
-    p2 = K.Player("敌", n2, [db[filler2]] * K.DECK_SIZE)
+    p2 = K.Player("敌", n2, [f2] * K.DECK_SIZE)
     g = K.Game(p1, p2, interactive=False)
     g.draw_cards(p1, 8)
     g.draw_cards(p2, 8)
@@ -72,7 +77,7 @@ def main():
     print("== 3. 奋战：每回合攻击两次 ==")
     g, p1, p2 = make_game()
     db = K.card_database()
-    fury = deploy(g, p1, db["装甲掷弹兵"])      # 2/2 奋战
+    fury = deploy(g, p1, FURY_KW)               # 2/2 奋战（夹具）
     fury.can_attack = True
     fury.fresh_deploy = False
     t1 = deploy(g, p2, K.UnitCard("靶1", "德国", 1, 0, 3, [], "步兵"))
@@ -147,13 +152,13 @@ def main():
     print("== 9. 步兵班：反制触发成长 ==")
     g, p1, p2 = make_game()
     db = K.card_database()
-    gren = deploy(g, p2, db["步兵班"])          # 2/2 counter_grow
+    gren = deploy(g, p2, db["第87掷弹兵团"])    # 2/2 counter_grow（原步兵班效果迁移至此）
     p2.counters.append(db["反坦克炮"])
     atk = deploy(g, p1, db["T-34坦克"])
     atk.can_attack = True
     g.do_attack(atk, gren)
     check("反制触发", atk not in p1.board)
-    check("步兵班+2/+2", gren.attack == 4 and gren.defense == 4, f"{gren.attack}/{gren.defense}")
+    check("第87掷弹兵团+2/+2", gren.attack == 4 and gren.defense == 4, f"{gren.attack}/{gren.defense}")
 
     print("== 10. 部署效果 ==")
     db = K.card_database()
@@ -172,13 +177,13 @@ def main():
     check("四号坦克迫使撤退", foe_u.position == "后方")
     # 蚊式 nuke3
     g, p1, p2 = make_game("英国", "德国", filler1="德哈维兰蚊式")
-    victim = deploy(g, p2, db["步兵班"])
+    victim = deploy(g, p2, INF_2_2)
     p1.kredits = 12
     g.play_card(p1, hand_idx(p1, "德哈维兰蚊式"))
     check("蚊式3伤", victim not in p2.board)
     # 丛林渗透队 snipe2
     g, p1, p2 = make_game("日本", "德国", filler1="丛林渗透队")
-    low = deploy(g, p2, db["步兵班"])           # 2攻
+    low = deploy(g, p2, INF_2_2)           # 2攻
     tiger = deploy(g, p2, db["虎式坦克"])       # 8攻
     p1.kredits = 12
     g.play_card(p1, hand_idx(p1, "丛林渗透队"))
@@ -193,7 +198,7 @@ def main():
     check("M13/40 优势获得闪击奋战", "闪击" in m.keywords and "奋战" in m.keywords)
     # 殖民步兵 foe_hand
     g, p1, p2 = make_game("苏联", "德国", filler1="殖民步兵")
-    p2.hand = [db["步兵班"]] * 4
+    p2.hand = [INF_2_2] * 4
     p1.kredits = 12
     g.play_card(p1, hand_idx(p1, "殖民步兵"))
     col2 = p1.board[-1]
@@ -210,7 +215,7 @@ def main():
     check("M10消灭受其伤害的坦克", tank not in p2.board)
     long_tom = deploy(g, p1, db["远程榴弹炮"])
     long_tom.can_attack = True
-    deploy(g, p2, db["步兵班"])
+    deploy(g, p2, INF_2_2)
     g.do_attack(long_tom, p2.board[0])
     check("榴弹炮随机分配不崩溃", True)
     stuka = deploy(g, p1, db["斯图卡俯冲轰炸机"])
@@ -295,16 +300,16 @@ def main():
     print("== 17. 舰炮支援(轰炸突袭)相邻波及 ==")
     g, p1, p2 = make_game("苏联", "德国", filler1="舰炮支援")
     db = K.card_database()
-    deploy(g, p2, db["步兵班"], slot=0)
-    deploy(g, p2, db["步兵班"], slot=1)
-    deploy(g, p2, db["步兵班"], slot=3)
+    deploy(g, p2, INF_2_2, slot=0)
+    deploy(g, p2, INF_2_2, slot=1)
+    deploy(g, p2, INF_2_2, slot=3)
     p1.kredits = 12
     g.play_card(p1, hand_idx(p1, "舰炮支援"))
     check("相邻波及生效(不崩溃)", True)
 
     print("== 18. 卡池完整性/稀有度/卡组构建 ==")
     db = K.card_database()
-    check("卡池数量214", len(db) == 214, f"n={len(db)}")
+    check("卡池数量257", len(db) == 257, f"n={len(db)}")
     rar = {}
     for c in db.values():
         rar[c.rarity] = rar.get(c.rarity, 0) + 1

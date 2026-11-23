@@ -100,6 +100,13 @@ KEYWORD_DESC = {
     "亡计": "被消灭时，对敌方总部造成伤害（由卡牌效果授予）",
     "召集": "将一个单位移动到支援阵线（不耗行动费、不算本回合移动）",
     "进军": "将一个单位移动到前线（不耗行动费、不算本回合移动）",
+    "烟幕": "无法被敌方单位攻击；该单位行动后失去烟幕。位于前线的单位不能具有烟幕",
+    "山地": "部署时，每控制一个其他山地单位，新单位获得 +1/+1",
+    "协力": "打出时若场上没有同国家的其他友方单位，总部受到士气伤害（1 起，每次递增 1）",
+    "钳击": "与钳击相关的单位协同作战（具体加成见各卡说明）",
+    "守护": "其两侧相邻位置的友方单位获得[被守护]",
+    "被守护": "只能被炮兵、轰炸机攻击（由[守护]赋予）",
+    "老兵": "满足条件后升级为老兵：攻击力与防御力重置为老兵值，并可能获得新词条",
 }
 
 # 关键词速查表：给「关键词说明」界面用。
@@ -119,6 +126,13 @@ KEYWORD_GUIDE = [
     ("收缴", "消灭敌方单位时，将一张 1/1 副本（费用至多 3）加入手牌", "触发"),
     ("召集", "将一个单位移动到支援阵线（不耗行动费，也不算它本回合的移动）", "其他"),
     ("进军", "将一个单位移动到前线（不耗行动费，也不算它本回合的移动）", "其他"),
+    ("烟幕", "无法被敌方单位攻击；该单位行动后失去烟幕（前线单位不能具有烟幕）", "单位"),
+    ("山地", "部署时，每控制一个其他山地单位，新单位获得 +1/+1", "单位"),
+    ("协力", "打出时若场上没有同国家的其他友方单位，总部受到士气伤害（1 起，每次递增 1）", "其他"),
+    ("钳击", "与钳击相关的单位协同作战（具体加成见各卡说明）", "单位"),
+    ("守护", "其两侧相邻位置的友方单位获得[被守护]", "单位"),
+    ("被守护", "只能被炮兵、轰炸机攻击（由[守护]赋予）", "单位"),
+    ("老兵", "满足条件后升级：攻防重置为老兵值，并可能获得新词条", "触发"),
 ]
 
 # 兵种与规则术语速查（同样用于「关键词说明」界面）
@@ -142,26 +156,17 @@ TERM_GUIDE = [
 # 每项 = (关键词, 原版规则说明)；界面归入独立的「未实装」分组。
 # ---------------------------------------------------------------------------
 KEYWORD_PLANNED = [
-    ("部署", "部署效果会在该单位被部署时触发。"),
-    ("守护", "具有守护的单位两侧的目标获得[被守护]；守护单位自身无法获得[被守护]。"),
-    ("被守护", "被守护的单位只能被炮兵、轰炸机攻击。"),
+    ("部署", "部署效果会在该单位被部署时触发。（本作以「部署：」文字效果实现）"),
     ("重甲X", "受到的对战伤害 -X（X 为叠加层数，每张卡最多 3）；无法减免指令伤害。"
               "本作对应关键词名为[装甲]/[装甲2]/[装甲3]。"),
-    ("烟幕", "无法被敌方单位攻击；该单位行动后失去烟幕。位于前线的单位不能具有烟幕。"),
     ("隐蔽", "部署后以卡背朝上，敌人不知道它是什么单位，且无法被指令影响；"
              "移动不会失去隐蔽，攻击或被攻击时揭示。"),
-    ("钳击", "部署时选择另一个友方单位，两者同时获得钳击效果；"
-             "其中一个离开战场后，另一个也失去该效果。"),
     ("流亡", "流亡卡牌可用于其家乡国家与流亡所属国家（每张流亡卡的所属国都是指定好的，"
              "一般以波兰为主）。"),
     ("控制", "获得目标单位的控制权：若它是前线的唯一单位则保持原位，否则加入新控制者的支援阵线；"
              "新控制者可随意调度，但单位的所有者不变。"),
     ("情报X", "使对手手中 X 张牌变为明牌（X 为后缀数字，每张卡最多 3）。"),
-    ("山地", "部署或新增山地单位时，每控制一个其他山地单位，新单位获得 +1/+1。"),
     ("抑制", "被抑制的单位失去所有词条、关键字与加成效果，并重置攻击力、防御值与行动花费。"),
-    ("协力", "使用该卡牌时，若本回合开始时场上没有相同国家的友方单位，总部将受到士气伤害。"),
-    ("士气伤害", "伤害值从 1 开始，每次递增 1（1、2、3、4……）。"),
-    ("老兵", "达到一定条件后升级为老兵，并重置攻击力与防御力。"),
     ("特殊词条", "具有特殊词条的单位在场时即触发（特殊词条优先级高于手牌效果）。"),
 ]
 
@@ -181,6 +186,13 @@ KEYWORD_I18N = {
     "收缴": {"en": "Confiscate", "ja": "接収"},
     "召集": {"en": "Rally", "ja": "召集"},
     "进军": {"en": "Advance", "ja": "進軍"},
+    "烟幕": {"en": "Smokescreen", "ja": "煙幕"},
+    "山地": {"en": "Mountaineer", "ja": "山岳"},
+    "协力": {"en": "Alliance", "ja": "協力"},
+    "钳击": {"en": "Pincer", "ja": "挟撃"},
+    "守护": {"en": "Guardian", "ja": "守護"},
+    "被守护": {"en": "Guarded", "ja": "被守護"},
+    "老兵": {"en": "Veteran", "ja": "古参兵"},
     "行动费": {"en": "Operation cost", "ja": "行動コスト"},
     "前线": {"en": "Frontline", "ja": "前線"},
     "支援阵线": {"en": "Support line", "ja": "支援ライン"},
@@ -239,6 +251,23 @@ KEYWORD_DESC_I18N = {
              "ja": "ユニットを支援ラインへ移動（行動コスト不要、移動回数も消費しない）"},
     "进军": {"en": "Move a unit to the frontline (no operation cost, doesn't count as its move)",
              "ja": "ユニットを前線へ移動（行動コスト不要、移動回数も消費しない）"},
+    "烟幕": {"en": "Cannot be attacked by enemy units; loses smokescreen after acting. "
+                   "Frontline units cannot have smokescreen.",
+             "ja": "敵ユニットから攻撃されない。行動すると煙幕を失う。前線のユニットは煙幕を持てない。"},
+    "山地": {"en": "When deployed, gains +1/+1 for each other Mountaineer you control.",
+             "ja": "配置時、他の山岳ユニット1体につき+1/+1を得る。"},
+    "协力": {"en": "If you control no other friendly units of this nation when played, "
+                   "your HQ takes escalating morale damage (1, 2, 3…).",
+             "ja": "プレイ時、同じ国の他の味方ユニットが場にいないと、本部が士気ダメージ（1,2,3…）を受ける。"},
+    "钳击": {"en": "Pincer tactics — see each card for its bonus.",
+             "ja": "挟撃戦術 — 各カードの効果を参照。"},
+    "守护": {"en": "Adjacent friendly units gain [Guarded].",
+             "ja": "両隣の味方ユニットは[被守護]を得る。"},
+    "被守护": {"en": "Can only be attacked by artillery and bombers.",
+             "ja": "砲兵と爆撃機でしか攻撃できない。"},
+    "老兵": {"en": "Upgrades once its condition is met: attack/defense reset to veteran values, "
+                   "possibly gaining new keywords.",
+             "ja": "条件を満たすと昇格：攻撃/防御は古参兵の値にリセットされ、新キーワードを得る場合がある。"},
     "行动费": {"en": "Moving and attacking both cost this. The ⚡ number on the card.",
                "ja": "移動と攻撃で消費する。カード下の ⚡ の数値。"},
     "前线": {"en": "The middle row. Infantry must be here to attack enemy units.",
@@ -521,6 +550,10 @@ class Unit:
         self.operate = int(getattr(card, "operate", 0))  # 行动费：每次攻击消耗
         self.dying_hq = int((getattr(card, "traits", None) or {}).get("dying_hq", 0))
         self.overflow_turn = False  # 本回合溢出伤害转移敌方总部（呜啦！）
+        self.veteran = False        # [老兵]是否已升级
+        self.front_atk_active = False   # 第39装甲掷弹兵团：前线 +2 攻击的临时加成在位
+        self.katz_added = 0         # 卡茨曼团：本回合因出牌累计的临时行动费
+        self.smoke_used = False     # 烟幕已消耗标记（防重复结算）
         # 总部研发被动
         perk = owner.hq_card.perk
         if perk == "air_attack" and card.unit_type in ("战斗机", "轰炸机"):
@@ -857,28 +890,160 @@ def mk_destroy_cost_le(cost):
     return eff
 
 
+# ---------------- 中立衍生牌（不入卡组，由效果生成/加入手牌） ----------------
+# 《卡牌效果》文档：指挥点 = Kredits。
+
+def effect_production(game, caster):
+    caster.kredits += 1
+    game.log(f"  [生产] {caster.name} 获得 1 Kredits（共 {caster.kredits}）。")
+
+
+def effect_demolition(game, caster):
+    foe = game.opponent_of(caster)
+    live = [u for u in foe.board
+            if u.defense > 0 and not u.traits.get("order_immune")]
+    if live:
+        t = min(live, key=lambda u: (u.defense, u.attack))
+        game.log(f"  [爆破] 对 {t.name} 造成 1 点伤害。")
+        game.damage_unit(t, 1)
+    else:
+        game.log("  [爆破] 没有可指定的敌方单位，效果落空。")
+
+
+def effect_plan(game, caster):
+    game.draw_cards(caster, 1)
+    game.log("  [计划] 抽了一张牌。")
+
+
+NEUTRAL_ROUT = UnitCard("溃军", "中立", 1, 1, 1, [], "步兵", rarity="普通")
+NEUTRAL_PRODUCTION = OrderCard("生产", "中立", 0, effect_production, "获得 1 Kredits。")
+NEUTRAL_DEMOLITION = OrderCard("爆破", "中立", 0, effect_demolition,
+                               "对一个（防御最低的）敌方单位造成 1 点伤害。")
+NEUTRAL_PLAN = OrderCard("计划", "中立", 2, effect_plan, "抽一张牌。")
+
+
 
 # ---------------------------------------------------------------- 扩充卡池（数据取自原版 CSV，效果用通用机制近似）
 EXTRA_CARDS = [
     # ---- 单位 ----
             UnitCard("Pak36反坦克炮", "德国", 1, 1, 1, [], "炮兵", rarity="普通"),
             UnitCard("二号坦克 C 型", "德国", 1, 1, 3, [], "坦克", rarity="普通"),
-            UnitCard("第 4 先锋营", "德国", 1, 1, 3, [], "步兵", rarity="普通"),
+            UnitCard("第 4 先锋营", "德国", 1, 1, 3, [], "步兵",
+                     traits={"deploy": "front_army_def"}, rarity="普通"),
             UnitCard("35(t)指挥车", "德国", 2, 2, 2, [], "坦克", rarity="史诗"),
             UnitCard("亨舍尔 Hs 123", "德国", 2, 1, 3, ["奋战"], "轰炸机", rarity="史诗"),
-            UnitCard("第 104 装甲掷弹兵团", "德国", 2, 3, 3, [], "步兵", rarity="稀有"),
-            UnitCard("第 3 空降猎兵团", "德国", 2, 2, 2, [], "步兵", rarity="稀有"),
-            UnitCard("第 8 空降猎兵团", "德国", 2, 3, 2, ["闪击", "奋战"], "步兵", rarity="传说"),
+            UnitCard("第 104 装甲掷弹兵团", "德国", 2, 3, 3, [], "步兵", operate=1,
+                     traits={"deploy": "ger_tank_minus"}, rarity="稀有"),
+            UnitCard("第 3 空降猎兵团", "德国", 2, 2, 2, ["闪击"], "步兵", operate=1,
+                     traits={"tank_line_grow": True}, rarity="稀有"),
+            UnitCard("第 8 空降猎兵团", "德国", 2, 3, 2, ["闪击", "奋战"], "步兵",
+                     operate=1, rarity="传说"),
             UnitCard("150毫米榴弹炮", "德国", 3, 3, 2, [], "炮兵", rarity="传说"),
             UnitCard("Fw 200 秃鹰", "德国", 3, 3, 3, ["闪击"], "轰炸机", rarity="史诗"),
             UnitCard("三号坦克 G 型", "德国", 3, 3, 4, ["闪击"], "坦克", rarity="稀有"),
             UnitCard("三号突击炮 G 型", "德国", 3, 3, 3, [], "坦克", rarity="普通"),
             UnitCard("四号突击炮", "德国", 3, 3, 4, ["奋战"], "坦克", rarity="稀有"),
-            UnitCard("第 980 国民掷弹兵团", "德国", 3, 3, 6, [], "步兵", rarity="普通"),
+            UnitCard("第 980 国民掷弹兵团", "德国", 3, 3, 6, [], "步兵",
+                     operate=1, rarity="普通"),
             UnitCard("BF 109E-7 热带型", "德国", 4, 3, 3, [], "战斗机", rarity="普通"),
             UnitCard("三号坦克 H 型", "德国", 4, 2, 4, [], "坦克", rarity="史诗"),
             UnitCard("斯图卡 B2", "德国", 4, 3, 2, [], "轰炸机", rarity="稀有"),
             UnitCard("第 81 步兵团", "德国", 4, 3, 7, [], "步兵", rarity="普通"),
+            # ---- 德意志步兵（《卡牌效果》文档对齐；文档稀有度映射：
+            #      普通→普通 / 限定→稀有 / 特殊→史诗 / 精英→传说）----
+            UnitCard("第一步兵团", "德国", 1, 1, 2, [], "步兵", operate=0, rarity="普通"),
+            UnitCard("第102掷弹兵团", "德国", 1, 1, 3, ["冲击"], "步兵", operate=1,
+                     traits={"vet_when": "acted", "vet": {"atk": 2, "hp": 3, "kw": ["冲击"]}},
+                     rarity="普通"),
+            UnitCard("第158补给营", "德国", 4, 0, 4, ["烟幕"], "步兵", operate=4,
+                     traits={"kill_kredits": True}, rarity="传说"),
+            UnitCard("第18步兵团", "德国", 1, 2, 2, ["协力", "冲击"], "步兵", operate=1,
+                     traits={"deploy": "self_advance"}, rarity="普通"),
+            UnitCard("第28猎兵团", "德国", 1, 3, 1, ["烟幕"], "步兵", operate=1,
+                     traits={"front_gain_ambush": True}, rarity="稀有"),
+            UnitCard("第30步兵团", "德国", 1, 4, 4, ["闪击"], "步兵", operate=4,
+                     traits={"act_minus": True}, rarity="普通"),
+            UnitCard("第432步兵团", "德国", 1, 1, 4, [], "步兵", operate=1, rarity="普通"),
+            UnitCard("第56猎兵团", "德国", 1, 2, 1, ["钳击"], "步兵", operate=0,
+                     rarity="普通"),                      # 钳击：-1 行动费 → ⚡0
+            UnitCard("第738猎兵团", "德国", 1, 1, 2, ["闪击"], "步兵", operate=1,
+                     traits={"deploy": "deathmark"}, rarity="稀有"),
+            UnitCard("第95山地工兵营", "德国", 1, 1, 1, ["山地"], "步兵", operate=1,
+                     traits={"turn_kredits": True}, rarity="史诗"),
+            UnitCard("卡茨曼团", "德国", 2, 2, 3, ["闪击"], "步兵", operate=0,
+                     traits={"katzmann": True}, rarity="普通"),
+            UnitCard("山地人营", "德国", 2, 2, 3, ["闪击", "山地"], "步兵", operate=1,
+                     traits={"order_draw_once": True}, rarity="稀有"),
+            UnitCard("第1097国民掷弹兵团", "德国", 2, 2, 3, [], "步兵", operate=1,
+                     traits={"deploy": "guard_if_blitz"}, rarity="史诗"),
+            UnitCard("第141山地猎兵团", "德国", 2, 3, 2, ["山地"], "步兵", operate=1,
+                     traits={"order_immune": True}, rarity="史诗"),
+            UnitCard("第15侦察营", "德国", 2, 3, 2, [], "步兵", operate=1,
+                     traits={"deploy": "counter_develop"}, rarity="普通"),
+            UnitCard("第22步兵团", "德国", 2, 2, 1, [], "步兵", operate=1,
+                     traits={"end_draw": True}, rarity="史诗"),
+            UnitCard("第27燧发枪兵团", "德国", 2, 2, 4, ["协力", "冲击"], "步兵", operate=1,
+                     traits={"ger_hand_discount": True}, rarity="稀有"),
+            UnitCard("第36摩托化步兵营", "德国", 2, 1, 4, [], "步兵", operate=1,
+                     traits={"moto_buff": True}, rarity="史诗"),
+            UnitCard("第50步兵团", "德国", 2, 3, 2, [], "步兵", operate=1,
+                     traits={"vet_when": "front_move",
+                             "vet": {"atk": 4, "hp": 3, "kw": ["伏击"]}}, rarity="普通"),
+            UnitCard("第59装甲掷弹兵团", "德国", 2, 3, 3, [], "步兵", operate=1,
+                     traits={"move_and_attack": True}, rarity="普通"),
+            UnitCard("第62步兵团", "德国", 2, 3, 2, ["冲击"], "步兵", operate=1,
+                     traits={"deploy": "ally_minus_operate"}, rarity="稀有"),
+            UnitCard("第64装甲掷弹兵团", "德国", 2, 2, 3, ["闪击"], "步兵", operate=1,
+                     traits={"vet_when": "turn_start_front",
+                             "vet": {"atk": 3, "hp": 3, "effect": "kredits2"}},
+                     rarity="稀有"),
+            UnitCard("第74装甲掷弹兵团", "德国", 2, 2, 3, ["闪击", "协力"], "步兵", operate=1,
+                     traits={"deploy": "bounce_ally"}, rarity="普通"),
+            UnitCard("第87掷弹兵团", "德国", 2, 2, 2, [], "步兵", operate=1,
+                     traits={"counter_grow": True}, rarity="普通"),
+            UnitCard("第957国民掷弹兵团", "德国", 2, 3, 2, [], "步兵", operate=1,
+                     traits={"deploy": "production_to_hand"}, rarity="普通"),
+            UnitCard("第96步兵团", "德国", 2, 4, 4, ["闪击"], "步兵", operate=1,
+                     traits={"self_destruct_on_deploy": True}, rarity="传说"),
+            UnitCard("库尔马克侦察营", "德国", 3, 3, 3, ["山地"], "步兵", operate=1,
+                     traits={"deploy": "counter_from_hand"}, rarity="史诗"),
+            UnitCard("第101步兵团", "德国", 3, 2, 5, ["钳击"], "步兵", operate=1,
+                     traits={"pincer_grow": True}, rarity="普通"),
+            UnitCard("第13山地猎兵团", "德国", 3, 2, 3, ["山地"], "步兵", operate=1,
+                     traits={"mtn_grow": True}, rarity="普通"),
+            UnitCard("第136山地猎兵团", "德国", 3, 4, 3, ["山地"], "步兵", operate=1,
+                     rarity="普通"),
+            UnitCard("第14装甲掷弹兵团", "德国", 3, 3, 5, ["闪击"], "步兵", operate=1,
+                     traits={"vet_when": "ally_tank_deploy",
+                             "vet": {"atk": 3, "hp": 5, "kw": ["冲击"]}}, rarity="史诗"),
+            UnitCard("第3装甲掷弹兵团", "德国", 3, 3, 3, ["闪击"], "步兵", operate=1,
+                     traits={"ger_act_grow": True}, rarity="稀有"),
+            UnitCard("第304装甲掷弹兵团", "德国", 3, 3, 3, ["闪击"], "步兵", operate=1,
+                     traits={"deploy": "hq_hit_check"}, rarity="普通"),
+            UnitCard("第33装甲掷弹兵团", "德国", 3, 4, 3, [], "步兵", operate=1,
+                     traits={"deploy": "ally_tank_atk2"}, rarity="普通"),
+            UnitCard("第342燧发枪兵营", "德国", 3, 3, 4, [], "步兵", operate=1,
+                     traits={"front_buff2": True}, rarity="普通"),
+            UnitCard("第361非洲兵团", "德国", 3, 3, 4, [], "步兵", operate=1,
+                     traits={"front_hq3": True}, rarity="普通"),
+            UnitCard("第39装甲掷弹兵团", "德国", 3, 4, 3, [], "步兵", operate=1,
+                     traits={"front_atk2": True, "deploy": "swap_position"},
+                     rarity="稀有"),
+            UnitCard("第4空降猎兵团", "德国", 3, 4, 2, ["闪击", "奋战"], "步兵", operate=1,
+                     traits={"deploy": "free_unit2"}, rarity="传说"),
+            UnitCard("第5装甲掷弹兵团", "德国", 3, 2, 3, ["钳击"], "步兵", operate=1,
+                     traits={"pincer_spread": True}, rarity="普通"),
+            UnitCard("第989步兵团", "德国", 3, 3, 3, ["闪击"], "步兵", operate=1,
+                     traits={"deploy": "unique_buff"}, rarity="稀有"),
+            UnitCard("统帅堂装甲掷弹兵师", "德国", 3, 4, 4, [], "步兵", operate=1,
+                     traits={"deploy_kredits4": True}, rarity="史诗"),
+            UnitCard("蓝色军团", "德国", 3, 3, 3, [], "步兵", operate=1,
+                     traits={"blue_legion": True}, rarity="史诗"),
+            # ---- 中立衍生牌（不入卡组；指挥点 = Kredits）----
+            NEUTRAL_ROUT,
+            NEUTRAL_PRODUCTION,
+            NEUTRAL_DEMOLITION,
+            NEUTRAL_PLAN,
             UnitCard("105毫米轻型榴弹炮", "德国", 5, 2, 3, [], "炮兵", rarity="普通"),
             UnitCard("容克 Ju 88 A", "德国", 5, 4, 5, [], "轰炸机", rarity="稀有"),
             UnitCard("豹式坦克 G 型", "德国", 5, 6, 5, ["装甲"], "坦克", rarity="史诗"),
@@ -1022,10 +1187,9 @@ def card_database():
     EXTRA_CARDS 为扩充卡（数据同样取自原版 CSV；效果用通用机制近似实现）。"""
     db = [
         # ---- 德国（主国）----
-        UnitCard("步兵班", "德国", 2, 2, 2, [], "步兵",
-                 traits={"counter_grow": True}, rarity="普通"),
-        UnitCard("装甲掷弹兵", "德国", 2, 2, 2, ["奋战"], "步兵", rarity="普通"),
-        UnitCard("山地猎兵", "德国", 3, 4, 3, [], "步兵", rarity="普通"),
+        # 泛用步兵（步兵班/装甲掷弹兵/山地猎兵）已被《卡牌效果》文档的
+        # 团级单位整体替代（见 EXTRA_CARDS 德意志步兵块）；反制联动效果
+        # （原步兵班 counter_grow）迁移至第87掷弹兵团。
         UnitCard("Bf-109战斗机", "德国", 3, 3, 4, [], "战斗机", rarity="普通"),
         UnitCard("四号坦克", "德国", 6, 5, 5, ["召集"], "坦克",
                  traits={"deploy": "retreat"}, rarity="稀有"),
@@ -1515,6 +1679,8 @@ class Player:
         self.temp_buffs = []    # 本回合临时攻击增益 [(unit, amount)]，回合结束还原
         self.orders_played = 0  # 本回合已使用指令数（廓尔喀联动）
         self.ats_mark = 0       # 本土防卫军标记（1/2=标记方索引+1，0=无）
+        self.morale = 0         # [协力]士气伤害计数（1 起，每次递增 1）
+        self.once_turn = {}     # 一回合一次的触发标记：{tag: turn_num}
 
     def alive_units(self):
         return [u for u in self.board if u.defense > 0]
@@ -1563,10 +1729,17 @@ class Game:
     def get_cost(self, card, p):
         """按总部研发计算实际费用"""
         cost = card.cost
+        if getattr(card, "traits", None) and card.traits.get("cost_free"):
+            return 0              # 第4空降猎兵团：选中单位费用为 0
         perk = p.hq_card.perk
         if perk == "tank_discount" and card.kind == "unit" and card.unit_type == "坦克":
             cost = max(1, cost - 1)
         if perk == "support_discount" and card.kind in ("order", "counter"):
+            cost = max(1, cost - 1)
+        # 第27燧发枪兵团：德国单位费用 -1（至少 1）——简化为在场即生效
+        if (card.kind == "unit" and card.nation == "德国"
+                and any(u.traits.get("ger_hand_discount") and u.defense > 0
+                        for u in p.board)):
             cost = max(1, cost - 1)
         return cost
 
@@ -1632,6 +1805,9 @@ class Game:
 
     def damage_hq(self, player, amount, source=None):
         """统一的总部伤害入口：处理近卫步兵成长 / 本土防卫军抽牌联动"""
+        if not hasattr(self, "hq_hit_turn"):
+            self.hq_hit_turn = {}       # 记录各方总部最近受创的回合号（第304用）
+        self.hq_hit_turn[player] = self.turn_num
         if amount <= 0 or player.hq <= 0:
             # 总部已经倒下：不再继续扣血（否则血量会一路变负，污染 ai_power 等
             # 按血量算分的逻辑）。至少保证有下限 0。
@@ -1690,6 +1866,19 @@ class Game:
             unit.owner.discard.append(unit.card)
             self.emit({"type": "destroy", "unit": unit})
             self.log(f"  {unit.name} 被消灭了。")
+            # 第738猎兵团：标记的单位被消灭时，抽一张牌
+            watcher = unit.traits.get("deathwatch_owner")
+            if watcher is not None:
+                self.draw_cards(watcher, 1)
+                self.log(f"  [第738猎兵团] 标记的目标 {unit.name} 被消灭，抽一张牌！")
+            # 第158补给营：友方回合中消灭敌方单位时 +2 Kredits（一回合一次）
+            killer_side = self.opponent_of(unit.owner)
+            if self.current is killer_side:
+                for x in killer_side.board:
+                    if (x.traits.get("kill_kredits") and x.defense > 0
+                            and self._once(killer_side, f"supply_{id(x)}")):
+                        killer_side.kredits += 2
+                        self.log(f"  {x.name}：消灭敌军，获得 2 Kredits（共 {killer_side.kredits}）。")
             # [亡计]：被消灭时对敌方总部造成伤害
             if unit.dying_hq:
                 foe = self.opponent_of(unit.owner)
@@ -1728,6 +1917,31 @@ class Game:
             u.fresh_deploy = True   # 无[闪击]的单位部署当回合不能移动/攻击
         p.board.append(u)
         self.emit({"type": "deploy", "unit": u, "player": p})
+        # [山地]：部署时每控制一个其他山地单位，新单位 +1/+1
+        if "山地" in u.keywords:
+            n = sum(1 for x in p.board if x is not u and x.has("山地") and x.defense > 0)
+            if n:
+                self._bump(u, n, n, why=f"{n} 个山地单位")
+            for x in p.board:    # 第13山地猎兵团：友方山地加入或部署时 +1/+1
+                if x is not u and x.traits.get("mtn_grow") and x.defense > 0:
+                    self._bump(x, why="山地单位加入")
+        # 第96步兵团：其他友方单位部署时，消灭本单位
+        for x in list(p.board):
+            if x is not u and x.traits.get("self_destruct_on_deploy"):
+                self.log(f"  {x.name} 主动让位（友军部署时消灭本单位）。")
+                self.destroy_unit(x)
+        # 第14装甲掷弹兵团：友方部署坦克时升为老兵
+        if u.unit_type == "坦克":
+            for x in p.board:
+                if x is not u and x.traits.get("vet_when") == "ally_tank_deploy":
+                    self._vet_upgrade(x)
+        # 统帅堂装甲掷弹兵师：部署攻击力≥4 的其他单位时 +2 Kredits（一回合一次）
+        if u.attack >= 4:
+            for x in p.board:
+                if (x is not u and x.traits.get("deploy_kredits4")
+                        and self._once(p, f"shizhongtang_{id(x)}")):
+                    p.kredits += 2
+                    self.log(f"  {x.name}：部署强力单位，获得 2 Kredits（共 {p.kredits}）。")
         # 九七式坦克光环：友方步兵部署时 +1 攻击
         for other in p.board:
             if other is not u and other.traits.get("inf_aura") and u.unit_type == "步兵":
@@ -1738,6 +1952,9 @@ class Game:
     # ---------------- 部署效果（原版"部署："） ----------------
     @staticmethod
     def _strongest(units):
+        # [第141山地猎兵团]：无法被敌方指令指向——自动选目标时跳过它
+        live = [u for u in units if not u.traits.get("order_immune")]
+        units = live or units
         return max(units, key=lambda u: (u.attack, u.defense)) if units else None
 
     def on_deploy(self, unit):
@@ -1837,6 +2054,129 @@ class Game:
         elif d == "draw1":      # 华沙守军(近似原版情报联动): 抽一张牌
             self.draw_cards(p, 1)
             self.log(f"  [部署] {unit.name} 抽了 1 张牌。")
+        elif d == "front_army_def":     # 第4先锋营: 前线所有友方陆军防御 +1
+            n = 0
+            for x in p.board:
+                if x.position == "前线" and x.unit_type in ("步兵", "坦克") and x.defense > 0:
+                    x.defense += 1
+                    x.max_defense += 1
+                    n += 1
+            self.log(f"  [部署] {unit.name}：前线 {n} 个友方陆军防御 +1。"
+                     if n else "  [部署] 前线没有友方陆军，效果落空。")
+        elif d == "self_advance":       # 第18步兵团: 部署：进军
+            self.keyword_move(unit, "前线", source="进军")
+        elif d == "ger_tank_minus":     # 第104装甲掷弹兵团: 有友方坦克则行动费 -1
+            if any(x.unit_type == "坦克" and x.defense > 0 for x in p.board):
+                unit.operate = max(0, unit.operate - 1)
+                self.log(f"  [部署] {unit.name}：有友方坦克，行动费 -1（⚡{unit.operate}）。")
+        elif d == "guard_if_blitz":     # 第1097: 有敌方闪击单位 → 守护 +2 防御
+            if any(x.has("闪击") for x in foe.board):
+                unit.keywords.append("守护")
+                unit.defense += 2
+                unit.max_defense += 2
+                self.log(f"  [部署] {unit.name}：敌方有闪击单位，获得[守护]与 +2 防御"
+                         f"（{unit.defense}）。")
+        elif d == "counter_develop":    # 第15侦察营: 开发一张德国反制（卡组→反制区）
+            cs = [c for c in p.deck if c.kind == "counter" and c.nation == "德国"]
+            if cs and len(p.counters) < COUNTER_SLOTS:
+                c = cs[0]
+                p.deck.remove(c)
+                p.counters.append(c)
+                self.log(f"  [部署] {unit.name}：开发反制 [ {c.name} ]！")
+            else:
+                self.log("  [部署] 卡组里没有可开发的德国反制（或反制区已满）。")
+        elif d == "counter_from_hand":  # 库尔马克侦察营: 手中反制免费布置到反制区
+            cs = [c for c in p.hand if c.kind == "counter"]
+            if cs and len(p.counters) < COUNTER_SLOTS:
+                c = cs[0]
+                p.hand.remove(c)
+                p.counters.append(c)
+                self.log(f"  [部署] {unit.name}：将手中的 [ {c.name} ] 激活布置到反制区！")
+            else:
+                self.log("  [部署] 手中没有反制（或反制区已满）。")
+        elif d == "deathmark":          # 第738猎兵团: 标记一个敌方单位，其被消灭时抽牌
+            t = self._strongest([x for x in foe.board if x.defense > 0])
+            if t:
+                t.traits["deathwatch_owner"] = p
+                self.log(f"  [部署] {unit.name} 标记 {t.name}：其被消灭时抽一张牌。")
+        elif d == "bounce_ally":        # 第74: 一个友方单位返回手牌，自身 +1/+1
+            others = [x for x in p.board if x is not unit]
+            if others:
+                t = min(others, key=lambda x: (x.attack, x.defense))
+                p.board.remove(t)
+                p.hand.append(t.card)
+                unit.attack += 1
+                unit.defense += 1
+                unit.max_defense += 1
+                self.log(f"  [部署] {unit.name}：{t.name} 返回手牌，自身 +1/+1"
+                         f"（{unit.attack}/{unit.defense}）。")
+            else:
+                self.log("  [部署] 没有其他友方单位，效果落空。")
+        elif d == "ally_minus_operate": # 第62步兵团: 一个友方单位行动费 -1
+            others = [x for x in p.board if x is not unit and x.operate > 0]
+            if others:
+                t = self._strongest(others)
+                t.operate -= 1
+                self.log(f"  [部署] {unit.name}：{t.name} 行动费 -1（⚡{t.operate}）。")
+            else:
+                self.log("  [部署] 没有可减费的友方单位。")
+        elif d == "unique_buff":        # 第989: 若是唯一友方单位 +2/+2
+            if not any(x is not unit for x in p.board):
+                unit.attack += 2
+                unit.defense += 2
+                unit.max_defense += 2
+                self.log(f"  [部署] {unit.name}：唯一友军，获得 +2/+2"
+                         f"（{unit.attack}/{unit.defense}）。")
+        elif d == "hq_hit_check":       # 第304: 本回合敌方总部受过伤则 +2/+2
+            if getattr(self, "hq_hit_turn", {}).get(foe) == self.turn_num:
+                unit.attack += 2
+                unit.defense += 2
+                unit.max_defense += 2
+                self.log(f"  [部署] {unit.name}：敌方总部本回合受过伤，+2/+2"
+                         f"（{unit.attack}/{unit.defense}）。")
+            else:
+                self.log("  [部署] 本回合敌方总部还未受伤，效果落空。")
+        elif d == "ally_tank_atk2":     # 第33: 所有友方坦克攻击 +2
+            n = 0
+            for x in p.board:
+                if x is not unit and x.unit_type == "坦克" and x.defense > 0:
+                    x.attack += 2
+                    n += 1
+            self.log(f"  [部署] {unit.name}：{n} 个友方坦克攻击 +2。"
+                     if n else "  [部署] 没有友方坦克，效果落空。")
+        elif d == "swap_position":      # 第39: 与一个友方单位交换位置
+            front = [x for x in p.board
+                     if x is not unit and x.position == "前线" and x.defense > 0]
+            others = front or [x for x in p.board if x is not unit and x.defense > 0]
+            if others:
+                t = others[0]
+                unit.slot, t.slot = t.slot, unit.slot
+                unit.position, t.position = t.position, unit.position
+                for x in (unit, t):     # 前线加成/烟幕随位置修正
+                    if x.position == "前线":
+                        self._on_arrive_frontline(x)
+                    else:
+                        self._on_leave_frontline(x)
+                        if x.has("烟幕"):
+                            pass        # 支援线允许保留烟幕
+                self.log(f"  [部署] {unit.name} 与 {t.name} 交换了位置。")
+            else:
+                self.log("  [部署] 没有可交换的友方单位。")
+        elif d == "free_unit2":         # 第4空降: 手中1张费用≤2的单位费用变 0
+            cands = [c for c in p.hand if c.kind == "unit" and c.cost <= 2
+                     and not (getattr(c, "traits", None) or {}).get("cost_free")]
+            if cands:
+                c = min(cands, key=lambda c: c.cost)
+                c2 = copy.deepcopy(c)
+                c2.traits = dict(c2.traits)
+                c2.traits["cost_free"] = True
+                p.hand[p.hand.index(c)] = c2
+                self.log(f"  [部署] {unit.name}：{c.name} 的费用变为 0！")
+            else:
+                self.log("  [部署] 手中没有费用≤2的单位，效果落空。")
+        elif d == "production_to_hand": # 第957: 将1张"生产"加入手中
+            p.hand.append(NEUTRAL_PRODUCTION)
+            self.log(f"  [部署] {unit.name}：一张 [生产] 加入手牌。")
 
     # ---------------- 前线机制 ----------------
     def frontline_used(self):
@@ -1864,6 +2204,110 @@ class Game:
             return False
         return sum(1 for u in p.board if u.position == "前线") < FRONTLINE_SLOTS
 
+    # ---------------- 新词条钩子（烟幕/山地/协力/钳击/守护/老兵；指挥点=Kredits） ----------------
+
+    def _once(self, p, tag):
+        """一回合一次触发检查：本回合已用过返回 False，否则登记并返回 True。"""
+        if p.once_turn.get(tag) == self.turn_num:
+            return False
+        p.once_turn[tag] = self.turn_num
+        return True
+
+    def _bump(self, u, atk=1, hp=1, why=""):
+        u.attack += atk
+        u.defense += hp
+        u.max_defense += hp
+        extra = f"（{why}）" if why else ""
+        self.log(f"  {u.name} 获得 +{atk}/+{hp}{extra}（{u.attack}/{u.defense}）。")
+
+    def _vet_upgrade(self, u):
+        """[老兵]升级：攻防重置为老兵值，补词条，可能附带奖励。"""
+        if u.veteran or "老兵" in u.keywords:
+            return
+        u.veteran = True
+        u.keywords.append("老兵")
+        vet = u.traits.get("vet") or {}
+        atk = vet.get("atk", u.attack)
+        hp = vet.get("hp", u.defense)
+        u.attack, u.defense, u.max_defense = atk, hp, hp
+        for kw in vet.get("kw", ()):
+            if kw not in u.keywords:
+                u.keywords.append(kw)
+        self.log(f"  ⭐ {u.name} 升级为老兵！（{u.attack}/{u.defense}）")
+        self.emit({"type": "veteran", "unit": u})
+        if vet.get("effect") == "kredits2":
+            u.owner.kredits += 2
+            self.log(f"  升级奖励：获得 2 Kredits（共 {u.owner.kredits}）。")
+
+    def _on_arrive_frontline(self, u):
+        """任何方式抵达前线后的触发（普通移动 / [进军]）。"""
+        if u.position != "前线":
+            return
+        if u.has("烟幕"):           # 前线单位不能具有烟幕
+            u.keywords.remove("烟幕")
+            self.log(f"  {u.name} 进入前线，[烟幕]失效。")
+        if u.traits.get("vet_when") == "front_move":
+            self._vet_upgrade(u)    # 第50步兵团：移至前线时升为老兵
+        if u.traits.get("front_gain_ambush") and "伏击" not in u.keywords:
+            u.keywords.append("伏击")
+            self.log(f"  {u.name} 进军前线，获得[伏击]！")   # 第28猎兵团
+        if u.traits.get("front_hq3"):
+            foe = self.opponent_of(u.owner)
+            self.log(f"  {u.name} 进军前线，炮火延伸：敌方总部受 3 点伤害！")
+            self.damage_hq(foe, 3, source=u)                 # 第361非洲兵团
+        if u.traits.get("front_buff2"):
+            self.log(f"  {u.name} 进军前线，前线所有单位攻击 +2（本回合）！")
+            for side in self.players:                        # 第342燧发枪兵营
+                for x in side.board:
+                    if x.position == "前线" and x.defense > 0:
+                        x.attack += 2
+                        side.temp_buffs.append((x, 2))
+        if u.traits.get("front_atk2") and not u.front_atk_active:
+            u.front_atk_active = True                        # 第39装甲掷弹兵团
+            u.attack += 2
+            self.log(f"  {u.name} 在前线，攻击 +2（{u.attack}）。")
+        # 第36摩托化步兵营：友方德国单位移至前线 → +1 攻击、-1 行动费
+        if u.card.nation == "德国":
+            for x in u.owner.board:
+                if x is not u and x.traits.get("moto_buff") and x.defense > 0:
+                    u.attack += 1
+                    u.operate = max(0, u.operate - 1)
+                    self.log(f"  {x.name} 的联动：{u.name} +1 攻击、行动费 -1"
+                             f"（{u.attack}/⚡{u.operate}）。")
+
+    def _on_leave_frontline(self, u):
+        if u.traits.get("front_atk2") and u.front_atk_active:
+            u.front_atk_active = False
+            u.attack -= 2
+            self.log(f"  {u.name} 撤回后方，前线加成消失（{u.attack}）。")
+
+    def _post_action(self, u, spent=0, attack=False):
+        """一次行动（移动/攻击，spent=本次消耗的 Kredits）之后的联动结算。"""
+        owner = u.owner
+        if attack and u.has("烟幕"):     # 烟幕：行动（攻击）后失去
+            u.keywords.remove("烟幕")
+            self.log(f"  {u.name} 行动后失去[烟幕]。")
+        if u.traits.get("vet_when") == "acted":
+            self._vet_upgrade(u)         # 第102掷弹兵团：行动后升为老兵
+        if attack and u.traits.get("pincer_grow") and u in owner.board:
+            self._bump(u, why="钳击")    # 第101步兵团：攻击时 +1/+1
+        if attack and u.traits.get("pincer_spread") and u in owner.board:
+            for x in owner.board:        # 第5装甲掷弹兵团：其他钳击单位 +1/+1
+                if x is not u and x.has("钳击"):
+                    self._bump(x, why="钳击协同")
+        if u.card.nation == "德国":
+            for x in owner.board:
+                if x.traits.get("act_minus"):    # 第30步兵团：行动费 -1
+                    x.operate = max(0, x.operate - 1)
+                    self.log(f"  {x.name} 的行动费 -1（⚡{x.operate}）。")
+                if x is not u and x.traits.get("ger_act_grow"):
+                    self._bump(x, why=f"{u.name} 行动")  # 第3装甲掷弹兵团
+        if spent:
+            for x in owner.board:        # 蓝色军团：行动每花费 1 Kredits → 行动单位 +1/+1
+                if x.traits.get("blue_legion"):
+                    self._bump(u, spent, spent, why=f"蓝色军团（花费 {spent}）")
+                    break
+
     def move_unit(self, unit, dest):
         """移动单位到 前线/后方：消耗行动费，每单位每回合一次。
         规则：无[闪击]部署当回合不能移动；步兵移动与攻击二选一。"""
@@ -1873,7 +2317,8 @@ class Game:
         if unit.fresh_deploy:
             self.log(f"  {unit.name} 刚加入战场，需要[闪击]才能立即移动！")
             return False
-        if unit.unit_type == "步兵" and unit.attacks_made > 0:
+        if unit.unit_type == "步兵" and unit.attacks_made > 0 \
+                and not unit.traits.get("move_and_attack"):
             self.log(f"  {unit.name}（步兵）本回合已攻击过，不能再移动！")
             return False
         if dest == "前线":
@@ -1890,11 +2335,13 @@ class Game:
             if unit.position == "后方":
                 return False
         # 行动费：移动同样消耗（不足则失败）
+        spent = 0
         if unit.operate:
             if unit.owner.kredits < unit.operate:
                 self.log(f"  {unit.name} 移动需要 {unit.operate} 点行动费，Kredits 不足！")
                 return False
             unit.owner.kredits -= unit.operate
+            spent = unit.operate
             self.log(f"  {unit.name} 支付 {unit.operate} 点行动费进行移动（剩余 {unit.owner.kredits}）。")
         if dest == "前线":
             unit.position = "前线"
@@ -1903,6 +2350,11 @@ class Game:
             unit.position = "后方"
             self.log(f"  {unit.name} 撤回了后方。")
         unit.moved = True
+        if dest == "前线":
+            self._on_arrive_frontline(unit)
+        else:
+            self._on_leave_frontline(unit)
+        self._post_action(unit, spent)
         return True
 
     # ---------------- 词条移动（召集 / 进军）----------------
@@ -1923,6 +2375,10 @@ class Game:
             return False
         unit.position = dest
         self.log(f"  {tag}{unit.name} {'奔赴前线！' if dest == '前线' else '移回了支援阵线。'}")
+        if dest == "前线":
+            self._on_arrive_frontline(unit)
+        else:
+            self._on_leave_frontline(unit)
         self.emit({"type": "move", "unit": unit})
         return True
 
@@ -1960,6 +2416,19 @@ class Game:
         else:
             # 支援线的步兵/坦克：相邻线是前线，敌方占线时可打敌方前线单位
             pool = [u for u in enemy.board if u.position == "前线"]
+        # [烟幕]：无法被敌方单位攻击（对所有兵种生效）
+        smoked = [t for t in pool if t.has("烟幕")]
+        if smoked:
+            pool = [t for t in pool if t not in smoked]
+            if not pool:
+                return []
+        # [被守护]：只能被炮兵、轰炸机攻击（由友方[守护]单位相邻赋予）
+        if attacker.unit_type not in ("炮兵", "轰炸机"):
+            guarded = [t for t in pool if self._is_guarded(t)]
+            if guarded and len(guarded) < len(pool):
+                pool = [t for t in pool if t not in guarded]
+            elif guarded:
+                return []      # 全部被守护：没有可攻击的单位
         if attacker.unit_type == "轰炸机":
             fs = [u for u in pool if u.unit_type == "战斗机"]
             if fs:
@@ -1983,6 +2452,17 @@ class Game:
                 res.append(u)
         return res or pool
 
+    def _is_guarded(self, unit):
+        """[守护]：两侧相邻位置的友方单位获得[被守护]；守护单位自身免疫"""
+        if unit.has("守护"):
+            return False
+        for g in unit.owner.board:
+            if g.has("守护") and g.defense > 0 and g is not unit \
+                    and g.slot is not None and unit.slot is not None \
+                    and abs(g.slot - unit.slot) == 1:
+                return True
+        return False
+
     def can_hit_hq(self, attacker):
         """前线单位（或支援线的空军/炮兵）能直击敌方总部；
         敌方#0位警卫保护总部，但炮兵/轰炸机无视警卫"""
@@ -2005,8 +2485,8 @@ class Game:
             return False            # 无[闪击]部署当回合不能攻击
         if u.operate and u.owner.kredits < u.operate:
             return False            # 行动费不足
-        if u.unit_type == "步兵" and u.moved:
-            return False            # 步兵：移动与攻击每回合二选一
+        if u.unit_type == "步兵" and u.moved and not u.traits.get("move_and_attack"):
+            return False            # 步兵：移动与攻击每回合二选一（第59例外）
         if u.attack >= 5 and any(x.traits.get("lock5")
                                  for pl in self.players for x in pl.board):
             return False
@@ -2045,11 +2525,13 @@ class Game:
                 target = fi
         self.log(f"  {attacker.name} 攻击 {target.name}！")
         # 行动费：攻击前支付（不足则取消攻击）
+        spent = 0
         if attacker.operate:
             if attacker.owner.kredits < attacker.operate:
                 self.log(f"  {attacker.name} 需要 {attacker.operate} 点行动费，Kredits 不足，攻击取消！")
                 return
             attacker.owner.kredits -= attacker.operate
+            spent = attacker.operate
             self.log(f"  {attacker.name} 支付 {attacker.operate} 点行动费（剩余 {attacker.owner.kredits}）。")
         # 反制触发
         counter = self.check_counter(target.owner, "attack", attacker)
@@ -2120,6 +2602,7 @@ class Game:
                 self.log(f"  {target.name} 反击！{attacker.name} 受到 {target.attack} 点伤害。")
                 self.damage_unit(attacker, target.attack, source=target, combat=True)
         attacker.attacks_made += 1
+        self._post_action(attacker, spent, attack=True)
 
     def do_hq_attack(self, attacker):
         enemy = self.opponent_of(attacker.owner)
@@ -2138,11 +2621,13 @@ class Game:
             attacker.attacks_made += 1
             return
         # 行动费：攻击总部同样需要支付
+        spent = 0
         if attacker.operate:
             if attacker.owner.kredits < attacker.operate:
                 self.log(f"  {attacker.name} 需要 {attacker.operate} 点行动费，Kredits 不足，攻击取消！")
                 return
             attacker.owner.kredits -= attacker.operate
+            spent = attacker.operate
             self.log(f"  {attacker.name} 支付 {attacker.operate} 点行动费（剩余 {attacker.owner.kredits}）。")
         dmg = self.hq_damage(attacker)
         bonus = "（轰炸机 +2）" if attacker.unit_type == "轰炸机" else ""
@@ -2154,6 +2639,7 @@ class Game:
         self.damage_hq(enemy, dmg, source=attacker)
         attacker.attacks_made += 1
         self.log(f"  {attacker.name} 直击敌方总部，造成 {dmg} 点伤害{bonus}！")
+        self._post_action(attacker, spent, attack=True)
         # 斯图卡：对敌方总部造成伤害时，弃掉对手一张手牌
         if attacker.traits.get("stuka_hq") and enemy.hand:
             lost = enemy.hand.pop(random.randrange(len(enemy.hand)))
@@ -2207,6 +2693,20 @@ class Game:
             unit = self.deploy_unit(p, card)
             self.log(f"  {p.name} 部署了 {unit}")
             self.on_deploy(unit)
+            # [协力]：打出时场上没有同国家的其他友方单位 → 总部士气伤害（递增）
+            if "协力" in unit.keywords and unit in p.board:
+                if not any(x is not unit and x.card.nation == card.nation
+                           and x.defense > 0 for x in p.board):
+                    p.morale += 1
+                    self.log(f"  [协力] {p.name} 场上没有 {card.nation} 友军，"
+                             f"总部受到 {p.morale} 点士气伤害！")
+                    self.damage_hq(p, p.morale)
+            # 卡茨曼团：友方使用卡牌时，其行动费 +1（本回合）
+            for x in p.board:
+                if x.traits.get("katzmann") and x.defense > 0:
+                    x.operate += 1
+                    x.katz_added += 1
+                    self.log(f"  {x.name} 的行动费 +1（本回合，⚡{x.operate}）。")
         elif card.kind == "counter":
             if len(p.counters) >= COUNTER_SLOTS:
                 self.log(f"  反制区已满（最多 {COUNTER_SLOTS} 张）！")
@@ -2236,6 +2736,12 @@ class Game:
                         self.damage_hq(p, 1, source=u)
             card.effect(self, p)
             p.discard.append(card)
+            # 山地人营：友方使用指令时抽一张牌（近似原版「转换卡牌」，一回合一次）
+            for u in p.board:
+                if (u.traits.get("order_draw_once") and u.defense > 0
+                        and self._once(p, f"mtn_camp_{id(u)}")):
+                    self.draw_cards(p, 1)
+                    self.log(f"  {u.name}：友方使用指令，抽一张牌。")
         return True
 
     # ---------------- 回合流程 ----------------
@@ -2262,6 +2768,21 @@ class Game:
             u.attacks_made = 0
             u.moved = False
             u.fresh_deploy = False
+            # 第95山地工兵营：友方回合开始时获得 1 Kredits
+            if u.traits.get("turn_kredits") and u.defense > 0:
+                p.kredits += 1
+                self.log(f"  {u.name}：回合开始，获得 1 Kredits（共 {p.kredits}）。")
+            # 第3空降猎兵团：回合开始时，同阵线每有一个友方坦克，攻击 +1（累计）
+            if u.traits.get("tank_line_grow") and u.defense > 0:
+                n = sum(1 for x in p.board
+                        if x is not u and x.unit_type == "坦克"
+                        and x.position == u.position and x.defense > 0)
+                if n:
+                    u.attack += n
+                    self.log(f"  {u.name} 因同阵线 {n} 个坦克，攻击 +{n}（{u.attack}）。")
+            # [老兵]：友方回合开始时若在前线则升级（第64装甲掷弹兵团）
+            if u.traits.get("vet_when") == "turn_start_front" and u.position == "前线":
+                self._vet_upgrade(u)
             # [动员]：回合开始 +1/+1，直到受伤
             if "动员" in u.keywords:
                 u.attack += 1
@@ -2271,6 +2792,14 @@ class Game:
                 self.log(f"  [动员] {u.name} 获得 +1/+1（{u.attack}/{u.defense}）。")
 
     def end_turn(self):
+        # 第22步兵团：友方回合结束时，若有前线友方单位，抽一张牌
+        for u in self.current.board:
+            if u.traits.get("end_draw") and u.defense > 0:
+                if any(x.position == "前线" and x.defense > 0
+                       for x in self.current.board):
+                    self.draw_cards(self.current, 1)
+                    self.log(f"  {u.name}：回合结束，前线有友军，抽一张牌。")
+                    break
         # 临时增益必须在任何早退之前还原，否则「闪电战 / 呜啦！」的加攻
         # 会在对局结束的那一刻永久留在场上（temp_buffs 再没机会清空）。
         self._cleanup_own_turn()
@@ -2291,6 +2820,10 @@ class Game:
         self.current.temp_buffs = []
         for u in self.current.board:
             u.overflow_turn = False
+            # 卡茨曼团：本回合因出牌累计的临时行动费，回合结束还原
+            if u.katz_added:
+                u.operate = max(0, u.operate - u.katz_added)
+                u.katz_added = 0
         self.opponent_of(self.current).ats_mark = 0
 
     # ---------------- 界面（命令行）----------------

@@ -342,7 +342,7 @@ def main():
 
         print("\n=========== 9. 卡组云同步 ===========")
         d.send({"m": "deck_save", "nation": "德国", "title": "闪电战",
-                "content": "#国家:德国\n3 装甲掷弹兵"})
+                "content": "#国家:德国\n3 第432步兵团"})
         r = d.wait("deck_saved", 3)
         check("卡组保存成功", r is not None, str(r))
         d.send({"m": "deck_save", "nation": "德国", "title": "第二套",
@@ -358,7 +358,7 @@ def main():
         d.send({"m": "deck_get", "nation": "德国", "title": "闪电战"})
         r = d.wait("deck_data", 3)
         check("按名读取卡组内容",
-              r and "装甲掷弹兵" in (r.get("content") or ""), str(r))
+              r and "第432步兵团" in (r.get("content") or ""), str(r))
 
         # 用全新账号验证隔离。注意不能用"测试员丁"——那会顶掉 e 的连接
         # （服务端会踢同名旧连接），后面第 10 节的异常容错就全废了；

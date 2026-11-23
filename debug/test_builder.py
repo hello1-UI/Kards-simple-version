@@ -85,7 +85,7 @@ def main():
         check(f"有「{label}」按钮", button_by_text(app.builder_frame, label) is not None)
 
     print("\n=== 2. 「清空」必须真的清空（用户报的 bug） ===")
-    app.deck_counts = {"步兵班": 4}
+    app.deck_counts = {"第一步兵团": 4}
     pump(app)
     check("初始非空", app._deck_total() == 4, str(app._deck_total()))
     btn_clear = button_by_text(app.builder_frame, "清空")
