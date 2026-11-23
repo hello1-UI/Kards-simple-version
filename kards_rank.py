@@ -12,7 +12,7 @@
   · 保护段位 20 / 15 / 10 / 5 / 1：本赛季到达过，就不会再掉到更低的段位。
 
 赛季
-  · 自然年为 1 个赛季，1 月 1 日结算。
+  · 自然月为 1 个赛季，每月 1 日结算。
   · 结算：每人 -25 星（按总星数折算，掉到 0 为止）。
   · ⚠ 「赛季结束前不会降至更低」的保护**不**作用于结算本身：
     否则 1 段玩家永远停在 1 段，赛季软重置就永远不发生。保护只在
@@ -47,14 +47,35 @@ _MAX_TOTAL = (TIERS - 1) * STARS_PER_TIER + STARS_PER_TIER   # 1 段 5 星 = 125
 # ---------------------------------------------------------------- 基础换算
 
 def season_id(ts=None):
-    """当前赛季标识（自然年）。1 月 1 日进入新赛季。"""
-    return str(time.localtime(ts).tm_year)
+    """当前赛季标识（自然月），如 "2026-11"。每月 1 日进入新赛季。"""
+    t = time.localtime(ts)
+    return f"{t.tm_year:04d}-{t.tm_mon:02d}"
+
+
+def season_index(sid):
+    """赛季号 → 连续月序号（用于算跨了几个月）。
+
+    兼容老数据：只有年份的（"2026"）当作该年 1 月；
+    完全无法解析返回 None，调用方按「跨 1 个赛季」处理。
+    """
+    s = str(sid or "").strip()
+    try:
+        if "-" in s:
+            y, m = s.split("-", 1)
+            return int(y) * 12 + int(m) - 1
+        return int(s) * 12
+    except (TypeError, ValueError):
+        return None
 
 
 def season_end_ts(ts=None):
-    """本赛季结算时刻（下一年 1 月 1 日 00:00 本地时间）。"""
-    y = time.localtime(ts).tm_year + 1
-    return time.mktime((y, 1, 1, 0, 0, 0, 0, 0, -1))
+    """本赛季结算时刻（下个月 1 日 00:00 本地时间）。"""
+    t = time.localtime(ts)
+    if t.tm_mon == 12:
+        y, m = t.tm_year + 1, 1
+    else:
+        y, m = t.tm_year, t.tm_mon + 1
+    return time.mktime((y, m, 1, 0, 0, 0, 0, 0, -1))
 
 
 def season_days_left(ts=None):
@@ -170,10 +191,12 @@ def roll_season(st, year=None):
     st = normalize(st)
     if st["season"] == year:
         return st, False
+    cur_i, old_i = season_index(year), season_index(st["season"])
     try:
-        n = max(1, int(year) - int(st["season"]))
-    except (TypeError, ValueError):
+        n = max(1, cur_i - old_i) if (cur_i is not None and old_i is not None) else 1
+    except TypeError:                # 老数据/坏数据
         n = 1
+    # 缺席很多个月时最多补 50 次（掉到 25 段 0 星也早就到底了）
     for _ in range(min(n, 50)):
         st = _decay_once(st)
     st["season"] = year

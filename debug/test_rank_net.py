@@ -124,6 +124,11 @@ class Cli:
             pass
 
 
+def prev_month():
+    y, m = (int(x) for x in rank.season_id().split("-"))
+    return f"{y - 1:04d}-12" if m == 1 else f"{y:04d}-{m - 1:02d}"
+
+
 def wait_connect(addr, timeout=6):
     box = {}
     net.connect_server_async(addr, box, timeout=timeout)
@@ -207,7 +212,7 @@ def main():
         e = Cli()
         e.auth("戊戊", "pass1234")
         e.send({"m": "rank_seed", "rank": {"tier": 20, "stars": 2, "best": 20,
-                                          "season": "2026"}})
+                                          "season": rank.season_id()}})
         e.wait("rank")
         e.send({"m": "rank_add", "result": "lose"})
         q = e.wait("rank")
@@ -219,7 +224,7 @@ def main():
         b = Cli()
         b.auth("乙乙", "pass1234")
         b.send({"m": "rank_seed", "rank": {
-            "tier": 2, "stars": 4, "best": 2, "streak": 5, "season": "2026",
+            "tier": 2, "stars": 4, "best": 2, "streak": 5, "season": rank.season_id(),
             "lb_pts": 0, "lb_win": 0, "lb_lose": 0, "lb_active": False}})
         q = b.wait("rank")
         check("seed 本机段位", q and q["rank"]["tier"] == 2 and q["rank"]["stars"] == 4,
@@ -235,7 +240,7 @@ def main():
         b.send({"m": "rank_add", "result": "lose"})
         q = b.wait("rank")
         check("上榜后负 -2", q and q["rank"]["lb_pts"] == 1, q and q["rank"])
-        b.send({"m": "rank_seed", "rank": {"tier": 1, "stars": 5, "season": "2026",
+        b.send({"m": "rank_seed", "rank": {"tier": 1, "stars": 5, "season": rank.season_id(),
                                           "lb_pts": 999}})
         q = b.wait("rank")
         check("已有段位时 seed 被忽略", q and q["rank"]["lb_pts"] == 1,
@@ -257,11 +262,11 @@ def main():
         c = Cli()
         c.auth("丙丙", "pass1234")
         c.send({"m": "rank_seed", "rank": {
-            "tier": 1, "stars": 0, "best": 1, "season": "2025",
+            "tier": 1, "stars": 0, "best": 1, "season": prev_month(),
             "lb_pts": 40, "lb_win": 10, "lb_lose": 5, "lb_active": True}})
         q = c.wait("rank")
         # 1 段 0 星 = 120 总星，扣 25 = 95 → 6 段 0 星
-        check("旧赛季 seed 在服务端结算", q and q["rank"]["tier"] == 6,
+        check("上月赛季 seed 在服务端结算", q and q["rank"]["tier"] == 6,
               q and q["rank"])
         check("结算后排行榜积分清零", q and q["rank"]["lb_pts"] == 0)
         check("结算后赛季号更新", q and q["rank"]["season"] == rank.season_id(),
