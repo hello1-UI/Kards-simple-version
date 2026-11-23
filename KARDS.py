@@ -36,6 +36,7 @@ import kards_engine as core
 import kards_i18n as i18n
 import kards_net as net
 import kards_account as account
+import kards_rank as rank
 import kards_host
 import kards_update as net_update
 import kards_music as music
@@ -417,6 +418,12 @@ class App(tk.Tk):
         self._t_net = None
         self._t_prep = None
         self.db = core.card_database()
+        # ---- 段位 / 排行榜 ----
+        # 段位是服务器权威数据，但界面上要频繁显示（账号按钮/大厅）。
+        # 每次刷新都走一次 RPC 会卡 UI，所以缓存一份，登录/结算后失效重取。
+        self.rank_state = None
+        self._rank_last = None       # 最近一场的段位变化（结算页展示）
+        self._game_online = False    # 当前对局是否联机 —— 只有联机才结算段位
         # ---- 账号 / 游客 ----
         # 产品规则：未登录即「游客」——能打人机，不能联机。
         # 游客是临时会话（不落盘），所以这里只设个内存标志，不建目录、不写文件。
@@ -590,6 +597,10 @@ class App(tk.Tk):
                                    cursor="hand2", activebackground=BTN_HOVER,
                                    activeforeground=TEXT, command=self._toggle_music)
         self.music_btn.pack(side="right")
+        tk.Button(right, text=i18n.t("btn_rank"), bg=BTN, fg=TEXT,
+                  font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
+                  activebackground=BTN_HOVER, activeforeground=TEXT,
+                  command=self.open_rank_dialog).pack(side="right", padx=(0, 8))
         tk.Button(right, text=i18n.t("btn_theme"), bg=BTN, fg=TEXT,
                   font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
                   activebackground=BTN_HOVER, activeforeground=TEXT,
@@ -654,8 +665,33 @@ class App(tk.Tk):
         self.open_start_settings(tab="appearance")
 
     # ---------------- 账号管理 ----------------
+    def _rank_state(self, force=False):
+        """当前账号的段位（带缓存）。
+
+        段位在服务器上，每刷新一次按钮就发一次 RPC 会明显卡顿；
+        缓存到 `self.rank_state`，登录换号或对局结算后置空重取。
+        """
+        if not self.account:
+            return None
+        if force or self.rank_state is None:
+            try:
+                self.rank_state = account.get_rank(self.account)
+            except Exception:                          # noqa: BLE001
+                self.rank_state = None
+        return self.rank_state
+
+    @staticmethod
+    def _stars_text(n, total=5):
+        n = max(0, min(int(n), int(total)))
+        return "★" * n + "☆" * (total - n)
+
     def _account_btn_text(self):
         if self.account:
+            st = self._rank_state()
+            if st:
+                return i18n.t("account_btn_rank", name=self.account,
+                              tier=st["tier"],
+                              stars=self._stars_text(st["stars"]))
             s = account.get_stats(self.account)
             return i18n.t("account_btn", name=self.account,
                           w=s["win"], l=s["lose"], d=s["draw"])
@@ -703,10 +739,193 @@ class App(tk.Tk):
         except tk.TclError:
             pass
 
+    # ---------------- 段位 / 排行榜 ----------------
+
+    def open_rank_dialog(self):
+        """段位详情 + 排行榜。
+
+        数据来源：`account.get_rank()`（服务器权威，离线退回本地副本）
+        与 `account.leaderboard()`。两者都可能走网络，所以先取数据再建
+        控件 —— 别在回调里取，否则窗口先画出来再卡住更难看。
+        """
+        # 同角色窗口只留一个（连点按钮不会开一堆）
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "rank":
+                w.lift()
+                return
+
+        st = self._rank_state(force=True)
+        board = None
+        if self.account:
+            try:
+                board = account.leaderboard(20)
+            except Exception:                          # noqa: BLE001
+                board = None
+
+        win = tk.Toplevel(self)
+        win.role = "rank"
+        win.title(i18n.t("rank_title"))
+        win.configure(bg=BG)
+        win.geometry("880x740")
+        win.minsize(820, 680)
+        win.transient(self)
+
+        tk.Label(win, text=i18n.t("rank_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(pady=(16, 2))
+        season = (board or {}).get("season") or rank.season_id()
+        tk.Label(win, text=i18n.t("rank_season_line", year=season,
+                                  days=rank.season_days_left()),
+                 bg=BG, fg=DIM, font=FONT_S).pack(pady=(0, 12))
+
+        body = tk.Frame(win, bg=BG)
+        body.pack(fill="both", expand=True, padx=18)
+
+        left = tk.Frame(body, bg=PANEL, padx=18, pady=16)
+        left.pack(side="left", fill="both", expand=True)
+        right = tk.Frame(body, bg=PANEL, padx=16, pady=14, width=380)
+        right.pack(side="right", fill="both", padx=(14, 0))
+        right.pack_propagate(False)
+
+        if not self.account:
+            # 游客：没有段位可言，给登录引导
+            tk.Label(left, text=i18n.t("rank_guest_title"), bg=PANEL, fg=GOLD,
+                     font=FONT_B).pack(anchor="w", pady=(40, 6))
+            tk.Label(left, text=i18n.t("rank_guest"), bg=PANEL, fg=DIM,
+                     font=FONT, wraplength=360, justify="left").pack(anchor="w")
+        elif st is None:
+            tk.Label(left, text=i18n.t("rank_unavailable"), bg=PANEL, fg=WARN,
+                     font=FONT, wraplength=360, justify="left"
+                     ).pack(anchor="w", pady=40)
+        else:
+            self._rank_left_panel(left, st, board)
+
+        self._rank_board_panel(right, board)
+        self._rank_rules(win)
+        tk.Button(win, text=i18n.t("btn_close"), bg=BTN, fg=TEXT, font=FONT_B,
+                  bd=0, padx=24, pady=8, cursor="hand2",
+                  activebackground=BTN_HOVER, activeforeground=TEXT,
+                  command=win.destroy).pack(pady=(10, 16))
+
+    def _rank_left_panel(self, parent, st, board):
+        """左栏：当前段位、星数、连胜、保护位、榜单状态。"""
+        tk.Label(parent, text=i18n.t("rank_current"), bg=PANEL, fg=DIM,
+                 font=FONT_S).pack(anchor="w")
+
+        head = tk.Frame(parent, bg=PANEL)
+        head.pack(anchor="w", pady=(2, 6))
+        num = tk.Label(head, text=str(st["tier"]), bg=PANEL, fg=GOLD,
+                       font=(FONT_FAMILY, 52, "bold"))
+        unit = tk.Label(head, text=i18n.t("rank_tier_unit"), bg=PANEL, fg=TEXT,
+                        font=FONT_B)
+        # 中文/日文是「12 段」，英文是「Tier 12」—— 单位放前放后各一处
+        if i18n.get_lang() == "en":
+            unit.pack(side="left", anchor="s", pady=(0, 14))
+            num.pack(side="left", padx=(4, 14))
+        else:
+            num.pack(side="left")
+            unit.pack(side="left", anchor="s", pady=(0, 14), padx=(2, 14))
+        # 5 颗星逐颗画：实心金色 / 空心暗色，比一串文字更直观
+        pips = tk.Frame(head, bg=PANEL)
+        pips.pack(side="left", anchor="s", pady=(0, 16))
+        for i in range(rank.STARS_PER_TIER):
+            tk.Label(pips, text="★", bg=PANEL,
+                     fg=GOLD if i < st["stars"] else BORDER,
+                     font=(FONT_FAMILY, 22)).pack(side="left")
+
+        # 进度条：本段 5 星的完成度
+        bar = tk.Canvas(parent, height=8, bg=BORDER, highlightthickness=0, bd=0)
+        bar.pack(fill="x", pady=(2, 6))
+        prog = max(0.0, min(1.0, st["stars"] / float(rank.STARS_PER_TIER)))
+        bar.bind("<Configure>", lambda e, c=bar, p=prog: (
+            c.delete("all"),
+            c.create_rectangle(0, 0, max(1, int(c.winfo_width() * p)), 8,
+                               fill=ACCENT, outline="")))
+        nxt = st["tier"] - 1
+        tk.Label(parent,
+                 text=(i18n.t("rank_to_next", tier=nxt,
+                              n=rank.STARS_PER_TIER - st["stars"])
+                       if st["tier"] > 1 else i18n.t("rank_top")),
+                 bg=PANEL, fg=TEXT, font=FONT_S).pack(anchor="w", pady=(0, 12))
+
+        tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", pady=(0, 10))
+
+        streak = i18n.t("rank_streak", n=st["streak"])
+        zero = i18n.t("rank_zero_losses", n=st["zero_losses"],
+                      need=rank.DEMOTE_LOSSES)
+        tk.Label(parent, text=streak, bg=PANEL, fg=TEXT, font=FONT_S
+                 ).pack(anchor="w", pady=1)
+        tk.Label(parent, text=zero, bg=PANEL,
+                 fg=WARN if st["zero_losses"] else DIM,
+                 font=FONT_S).pack(anchor="w", pady=1)
+        fl = rank.floor_tier(st)
+        tk.Label(parent, text=i18n.t("rank_floor", tier=fl), bg=PANEL,
+                 fg=DIM, font=FONT_S).pack(anchor="w", pady=(1, 10))
+
+        # 榜单状态
+        me = (board or {}).get("me") if board else None
+        if st["tier"] == 1:
+            txt = (i18n.t("rank_lb_me", pos=me["pos"], pts=me["pts"])
+                   if me else i18n.t("rank_lb_top_ok"))
+            fg = GOLD
+        else:
+            txt = i18n.t("rank_lb_locked")
+            fg = DIM
+        tk.Label(parent, text=txt, bg=PANEL, fg=fg, font=FONT_S,
+                 wraplength=380, justify="left").pack(anchor="w", pady=(0, 6))
+        if not (board or {}).get("online", True):
+            tk.Label(parent, text=i18n.t("rank_lb_offline"), bg=PANEL, fg=WARN,
+                     font=FONT_S, wraplength=380, justify="left"
+                     ).pack(anchor="w", pady=(0, 4))
+        tk.Label(parent, text=i18n.t("rank_ai_note"), bg=PANEL, fg=MUTE,
+                 font=FONT_S, wraplength=380, justify="left").pack(anchor="w")
+
+    def _rank_board_panel(self, parent, board):
+        """右栏：排行榜（前 20 名，自己不在其中时单独补一行）。"""
+        tk.Label(parent, text=i18n.t("rank_lb_title"), bg=PANEL, fg=TEXT,
+                 font=FONT_B).pack(anchor="w")
+        if board is None:
+            tk.Label(parent, text=i18n.t("rank_lb_need_login"), bg=PANEL,
+                     fg=DIM, font=FONT_S).pack(anchor="w", pady=10)
+            return
+        rows = board.get("rows") or []
+        tk.Label(parent, text=i18n.t("rank_lb_total", n=board.get("total", 0)),
+                 bg=PANEL, fg=DIM, font=FONT_S).pack(anchor="w", pady=(1, 8))
+        if not rows:
+            tk.Label(parent, text=i18n.t("rank_lb_empty"), bg=PANEL, fg=DIM,
+                     font=FONT_S).pack(anchor="w", pady=10)
+        for r in rows[:20]:
+            mine = bool(self.account) and r.get("name") == self.account
+            row = tk.Frame(parent, bg=PANEL_ALT if mine else PANEL)
+            row.pack(fill="x", pady=1)
+            tk.Label(row, text=f"{r['pos']:>2}", bg=row["bg"],
+                     fg=GOLD if mine else DIM, font=FONT_S, width=3,
+                     anchor="e").pack(side="left", padx=(4, 6))
+            tk.Label(row, text=r["name"], bg=row["bg"],
+                     fg=GOLD if mine else TEXT, font=FONT_S, anchor="w"
+                     ).pack(side="left")
+            tk.Label(row, text=f"{r['lose']}负", bg=row["bg"], fg=DIM,
+                     font=FONT_S).pack(side="right", padx=(0, 6))
+            tk.Label(row, text=f"{r['win']}胜", bg=row["bg"], fg=DIM,
+                     font=FONT_S).pack(side="right", padx=(0, 6))
+            tk.Label(row, text=i18n.t("rank_pts", n=r["pts"]), bg=row["bg"],
+                     fg=GOLD if mine else TEXT, font=FONT_B
+                     ).pack(side="right", padx=(0, 8))
+        me = board.get("me")
+        if me and me.get("pos", 0) > len(rows[:20]):
+            tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", pady=6)
+            tk.Label(parent, text=i18n.t("rank_lb_me", pos=me["pos"],
+                                         pts=me["pts"]),
+                     bg=PANEL, fg=GOLD, font=FONT_S).pack(anchor="w")
+
+    def _rank_rules(self, win):
+        tk.Label(win, text=i18n.t("rank_rules"), bg=BG, fg=MUTE, font=FONT_S,
+                 wraplength=820, justify="left").pack(padx=20, pady=(12, 0))
+
     def _apply_account(self, name):
         """登录/注册成功后应用账号（卡组目录 + 按钮）"""
         self.account = name
         core.set_decks_dir(account.deck_dir(name))
+        self.rank_state = None          # 换号 → 段位缓存作废
         self._refresh_account_btn()
 
     # ---------------- 背景音乐 ----------------
@@ -1080,7 +1299,14 @@ class App(tk.Tk):
         if self.account:
             s = account.get_stats(self.account)
             tk.Label(win, text=i18n.t("account_stats", w=s["win"], l=s["lose"], d=s["draw"]),
-                     bg=BG, fg=GOLD, font=FONT).pack(pady=10)
+                     bg=BG, fg=GOLD, font=FONT).pack(pady=(10, 2))
+            st = self._rank_state()
+            if st:
+                tk.Label(win, text=i18n.t("account_rank", tier=st["tier"],
+                                          stars=self._stars_text(st["stars"])),
+                         bg=BG, fg=ACCENT, font=FONT_S).pack(pady=(0, 8))
+            else:
+                tk.Frame(win, bg=BG, height=10).pack()
 
             def do_logout():
                 # account.logout() 会把身份切回游客（游客不落盘，所以不丢数据）
@@ -2617,6 +2843,11 @@ class App(tk.Tk):
             tk.Label(row, text=("⭐ " if me else "· ") + name, bg=PANEL,
                      fg=GOLD if me else TEXT, font=FONT_S, anchor="w"
                      ).pack(side="left")
+            rk = p.get("rank") or {}
+            if rk.get("tier"):
+                tk.Label(row, text=i18n.t("player_rank", tier=rk["tier"]),
+                         bg=PANEL, fg=ACCENT, font=FONT_S
+                         ).pack(side="left", padx=(8, 0))
             tk.Label(row, text=(i18n.t("player_ingame") if p.get("in_game")
                                 else i18n.t("player_idle")), bg=PANEL, fg=DIM,
                      font=FONT_S).pack(side="right")
@@ -3146,6 +3377,7 @@ class App(tk.Tk):
         me = core.Player("你", self.deck_nation, my_deck)
         foe = core.Player(foe_name, opp.get("nation", "德国"), opp_deck)
         self.game = GUIGame(me, foe, self.add_log, self.on_game_event)
+        self._game_online = True        # 联机对局 → 结算段位
         self._music_play("battle")
         for attr in ("start_frame", "builder_frame"):
             fr = getattr(self, attr, None)
@@ -3395,6 +3627,7 @@ class App(tk.Tk):
         p1 = core.Player("你", nation, deck if deck is not None else core.build_deck(nation, self.db))
         p2 = core.Player("AI", ai_nation, core.build_deck(ai_nation, self.db))
         self.game = GUIGame(p1, p2, self.add_log, self.on_game_event)
+        self._game_online = False       # 人机练习 → 不计段位
         self._music_play("battle")
         if hasattr(self, "start_frame") and self.start_frame.winfo_exists():
             self.start_frame.destroy()
@@ -3577,10 +3810,11 @@ class App(tk.Tk):
         elif on_done is not None:
             on_done()
 
-    def show_end_animation(self, won, on_done=None, nation=None):
+    def show_end_animation(self, won, on_done=None, nation=None, rank_line=""):
         b = self._pyboard
         if b is not None:
-            b.show_end_animation(won, on_done=on_done, nation=nation)
+            b.show_end_animation(won, on_done=on_done, nation=nation,
+                                 rank_line=rank_line)
         elif on_done is not None:
             on_done()          # 没有结算动画可放，直接收尾回菜单
 
@@ -4076,8 +4310,14 @@ class App(tk.Tk):
         # 账号战绩 + 货币奖励。游客也发币（存 guest 键）：输了也有 30 金币
         # 保底，胜利才给钻石，让"再来一局"始终有个看得见的进账。
         result = "draw" if won is None else ("win" if won else "lose")
+        rank_line = ""
         if self.account:
             account.stats_add(self.account, result)
+            # 段位只在联机对局中结算：人机可以无限刷，算进段位就等于送分。
+            # 平局按规则不存在；真出了也不动段位（不让异常结算打花数据）。
+            if (getattr(self, "_game_online", False)
+                    and result in ("win", "lose")):
+                rank_line = self._rank_settle(result)
             self._refresh_account_btn()
         rw = account.currency_reward(result, name=self.account)
         self.add_log(i18n.t("currency_reward", gold=rw["gold"],
@@ -4088,7 +4328,28 @@ class App(tk.Tk):
             self._finishing = False
             self.back_to_menu()
 
-        self.show_end_animation(won, after_click, nation=me.nation)
+        self.show_end_animation(won, after_click, nation=me.nation,
+                                rank_line=rank_line)
+
+    def _rank_settle(self, result):
+        """联机对局结算段位；返回一行展示文案（网络失败返回空）。
+
+        ⚠ 失败时**不能**退回本地再算一遍：服务器可能已经记了，只是应答
+        丢了（超时/断线），本地补算会变成一局两记。
+        """
+        res = account.rank_add(self.account, result)
+        if not res:
+            self.add_log(i18n.t("rank_settle_failed"))
+            return ""
+        self.rank_state = res["rank"]
+        self._rank_last = res.get("change") or {}
+        ch = self._rank_last
+        if ch.get("season_rolled"):
+            self.add_log(i18n.t("rank_new_season", year=res["rank"]["season"]))
+        line = rank.describe(ch, i18n.t)
+        if line:
+            self.add_log(i18n.t("rank_log", text=line))
+        return line
 
     # ---------------- 胜利 / 失败结算动画 ----------------
     HQ_EXPLODE_MS = 1400        # 总部爆炸阶段时长

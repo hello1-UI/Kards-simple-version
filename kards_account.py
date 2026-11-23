@@ -29,6 +29,7 @@ import secrets
 import time
 
 from kards_engine import DATA_DIR
+import kards_rank as rank
 
 _NAME_RE = re.compile(r"^[\w\-]{2,16}$")   # \w 含中文/字母/数字/下划线
 
@@ -352,6 +353,13 @@ def _seed_stats(name):
               "draw": st["draw"]}, key="stats_seed")
 
 
+def _seed_rank(name):
+    """本地有段位且当前在服务器模式 → 把段位搬上服务器（服务器只收新账号）"""
+    st = _local_rank(name)
+    if st["tier"] != rank.START_TIER or st["stars"] or st["lb_pts"]:
+        _rpc({"m": "rank_seed", "rank": st}, key="rank_seed")
+
+
 def _migrate_to_server(name, pw):
     """把本地账号迁移到服务器（登录被拒 + 本地密码核对通过时调用）。
 
@@ -375,6 +383,7 @@ def _migrate_to_server(name, pw):
                    "请输入该账号在服务器上注册时用的密码。")
         return False, err
     _seed_stats(name)
+    _seed_rank(name)
     return True, ""
 
 
@@ -449,6 +458,7 @@ def register(name, pw):
                 # 本地若有同名账号（老玩家换机器/重装后重新注册），
                 # 把本地战绩一并搬上去
                 _seed_stats(name)
+                _seed_rank(name)
             return rep
         # 服务器掉线 → 回退本地
     db = _load()
@@ -565,6 +575,89 @@ def stats_add(name, result):
     st = u.setdefault("stats", {"win": 0, "lose": 0, "draw": 0})
     st[result] = st.get(result, 0) + 1
     _save(db)
+
+
+# ---------------------------------------------------------------- 段位
+
+def _local_rank(name):
+    """本地段位状态（顺带做赛季结算）。"""
+    db = _load()
+    u = db["users"].get(name) or {}
+    st = rank.normalize(u.get("rank") or rank.new_state())
+    st2, rolled = rank.roll_season(st)
+    if rolled and name in db["users"]:
+        db["users"][name]["rank"] = st2
+        _save(db)
+    return st2
+
+
+def get_rank(name=None):
+    """当前段位状态；游客/未登录返回 None。
+
+    在线优先问服务器（段位是服务器权威数据，换机器也一致）；
+    连不上就退回本地副本，保证单机也能看到自己的段位。
+    """
+    name = name or current()
+    if not name or name == GUEST:
+        return None
+    if _BACKEND == "server" and name:
+        rep = _rpc({"m": "rank"}, key="rank")
+        if isinstance(rep, dict) and isinstance(rep.get("rank"), dict):
+            return rank.normalize(rep["rank"])
+    return _local_rank(name)
+
+
+def rank_add(name, result):
+    """结算一场排位对局，返回 {"rank": 新状态, "change": 变化} 或 None。
+
+    ⚠ 只有联机对局该调用它；人机练习不计段位（否则可以刷 AI 上分）。
+    """
+    if not name or result not in ("win", "lose", "draw"):
+        return None
+    if _BACKEND == "server" and name:
+        rep = _rpc({"m": "rank_add", "result": result}, key="rank_add",
+                   timeout=8.0)
+        if isinstance(rep, dict) and isinstance(rep.get("rank"), dict):
+            return {"rank": rank.normalize(rep["rank"]),
+                    "change": rep.get("change") or {}}
+        # 服务器应答丢失（超时/断线）→ 不能本地再算一遍，否则会双记
+        return None
+    db = _load()
+    u = db["users"].get(name)
+    if not u:
+        return None
+    st, ch = rank.apply_result(u.get("rank") or rank.new_state(), result)
+    u["rank"] = st
+    _save(db)
+    return {"rank": st, "change": ch}
+
+
+def leaderboard(limit=50):
+    """排行榜。
+
+    返回 {"rows": 前 N 名, "total": 上榜人数, "me": 我的行|None,
+          "online": 是否来自服务器, "season": "2026"}
+    离线时只能用本地账号库拼一个"单机榜"，界面上要说明。
+    """
+    limit = max(1, int(limit or 50))
+    if _BACKEND == "server" and _REMOTE is not None and getattr(_REMOTE, "alive", False):
+        rep = _rpc({"m": "rank_board", "limit": limit}, key="rank_board",
+                   timeout=8.0)
+        if isinstance(rep, dict) and isinstance(rep.get("rows"), list):
+            return {"rows": rep.get("rows") or [],
+                    "total": int(rep.get("total") or 0),
+                    "me": rep.get("me"), "online": True,
+                    "season": str(rep.get("season") or rank.season_id())}
+    db = _load()
+    entries = []
+    for n, u in db["users"].items():
+        st, _ = rank.roll_season(rank.normalize(u.get("rank") or rank.new_state()))
+        entries.append((n, st))
+    full = rank.board_rows(entries, 0)
+    cur = current()
+    me = next((r for r in full if r["name"] == cur), None)
+    return {"rows": full[:limit], "total": len(full), "me": me,
+            "online": False, "season": rank.season_id()}
 
 
 # ---------------------------------------------------------------- 货币 ----

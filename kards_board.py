@@ -643,7 +643,7 @@ class PygameBoard:
             fade.fill((13, 16, 23, int(255 * min(1.0, p_out))))
             surf.blit(fade, (0, 0))
 
-    def show_end_animation(self, won, on_done=None, nation=None):
+    def show_end_animation(self, won, on_done=None, nation=None, rank_line=""):
         """全屏结算：**先炸总部，再出胜负大字**。点击任意处 → on_done
 
         ⚠ 时序（用户要求）：不能一点「结算」就把胜利/战败大字盖上来 ——
@@ -655,6 +655,7 @@ class PygameBoard:
           phase 1  full : 胜负大字 + 粒子庆祝 / 暗场震动
         """
         self.end_state = {"won": won, "on_done": on_done, "nation": nation,
+                          "rank_line": rank_line,
                           "ready_at": self.t_now + 700}
         self._end_clicked = False
         self._start_hq_explode(won)
@@ -1898,6 +1899,14 @@ class PygameBoard:
         f2 = font(18)
         surf.blit(f2.render(sub, True, C(DIM)),
                   (self.W // 2 - f2.size(sub)[0] // 2, int(self.H * 0.52)))
+        # 段位变化（只有联机对局才有）：胜负大字下面单独一行，
+        # 金色带星号，玩家一眼能看到「这局上了几分/掉了几星」。
+        rl = st.get("rank_line") or ""
+        if rl:
+            rl = plain(rl)
+            f4 = font(17, True)
+            surf.blit(f4.render(rl, True, C(GOLD)),
+                      (self.W // 2 - f4.size(rl)[0] // 2, int(self.H * 0.585)))
         # 国家徽章（简化版：圆盘 + 首字）
         nation = self.end_state.get("nation") or ""
         main = C(GOLD) if won else C(DIM)

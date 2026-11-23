@@ -56,6 +56,12 @@ jobs:
           python debug/test_mp_ready.py
           python debug/test_mp_ready_order.py
 
+      - name: 段位 / 排行榜（规则 + 服务器协议 + GUI）
+        run: |
+          python debug/test_rank.py
+          python debug/test_rank_net.py
+          python debug/test_rank_gui.py
+
       - name: 自动更新与打包相关
         run: |
           python debug/test_update.py

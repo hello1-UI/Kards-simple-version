@@ -18,7 +18,7 @@ KARDS 简化版 —— 联机服务器（纯标准库，单文件，零依赖）
 协议：TCP + 换行分隔 JSON（UTF-8）。
      信封字段用 "m" 表示消息类型（message），**不要用 "t"** ——
      游戏内的行动指令里有 "t" 表示目标槽位，用 "t" 做信封会被覆盖。
-     首条消息必须是 {"m":"login"/"register"/"resume", ...}，
+     首条消息必须是 {"m":"login"/"register"/"resume"/"adopt", ...}，
      之后服务器回 {"m":"auth_ok"}/{"m":"auth_err"}。
      认证失败回 auth_err 后**连接保留**，可在同一连接上重试
      （客户端的本地账号迁移依赖这一点）；协议级垃圾才直接断开。
@@ -36,6 +36,8 @@ import sqlite3
 import sys
 import threading
 import time
+
+import kards_rank as rank
 
 DEFAULT_PORT = 6000
 SESSION_TTL = 30 * 24 * 3600      # 会话 token 有效期 30 天
@@ -109,7 +111,8 @@ class Store:
                     last_seen INTEGER,
                     win     INTEGER NOT NULL DEFAULT 0,
                     lose    INTEGER NOT NULL DEFAULT 0,
-                    draw    INTEGER NOT NULL DEFAULT 0
+                    draw    INTEGER NOT NULL DEFAULT 0,
+                    rank    TEXT
                 );
                 CREATE TABLE IF NOT EXISTS sessions (
                     token   TEXT PRIMARY KEY,
@@ -126,6 +129,11 @@ class Store:
                 );
                 """
             )
+            # ---- 老库迁移：rank 列是后加的段位/排行榜状态（JSON） ----
+            # CREATE TABLE IF NOT EXISTS 不会给已存在的表补列，必须显式 ALTER。
+            cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(users)")}
+            if "rank" not in cols:
+                self.conn.execute("ALTER TABLE users ADD COLUMN rank TEXT")
             self.conn.commit()
 
     def q(self, sql, args=()):
@@ -217,6 +225,76 @@ class Store:
     def exists(self, name):
         return bool(self.q("SELECT 1 FROM users WHERE name=?", (name,)))
 
+    # ---- 段位 / 排行榜 ----
+
+    @staticmethod
+    def _rank_parse(raw):
+        if not raw:
+            return rank.new_state()
+        try:
+            d = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            d = None
+        return rank.normalize(d)
+
+    def rank_save(self, name, st):
+        self.x("UPDATE users SET rank=? WHERE name=?",
+               (json.dumps(st, ensure_ascii=False), name))
+
+    def rank_get(self, name, roll=True):
+        """读段位状态；跨赛季则就地结算（懒结算，玩家不登录也会在
+        第一次读取时补上，避免"缺席一年回来还是 1 段"）。"""
+        rows = self.q("SELECT rank FROM users WHERE name=?", (name,))
+        if not rows:
+            return rank.new_state()
+        st = self._rank_parse(rows[0]["rank"])
+        if roll:
+            st2, rolled = rank.roll_season(st)
+            if rolled:
+                self.rank_save(name, st2)
+            st = st2
+        return st
+
+    def rank_add(self, name, result):
+        st = self.rank_get(name)
+        st, change = rank.apply_result(st, result)
+        self.rank_save(name, st)
+        return st, change
+
+    def rank_seed(self, name, st):
+        """账号迁移时把本机段位搬上云。
+
+        只在服务器账号还是「全新」（25 段 0 星、从未上榜）时生效，
+        否则任何人都能反复 seed 刷段位。赛季按服务端时间推进，
+        客户端传来的旧赛季不会触发多次扣星。
+        """
+        cur = self.rank_get(name, roll=False)
+        pristine = (cur["tier"] == rank.START_TIER and cur["stars"] == 0
+                    and not cur["lb_active"] and cur["lb_pts"] == 0)
+        if not pristine:
+            return cur
+        st = rank.normalize(st)
+        st, _ = rank.roll_season(st)
+        self.rank_save(name, st)
+        return st
+
+    def rank_board(self, limit=50):
+        """全服排行榜（按当前赛季）。返回 (前 limit 名, 完整榜)。
+
+        顺带把每个人的赛季结算补上 —— 结算需要写库，所以这里会按需
+        rank_save；用户量级很小（单服几十到几百人），可接受。
+        """
+        rows = self.q("SELECT name, rank FROM users")
+        entries = []
+        for r in rows:
+            st = self._rank_parse(r["rank"])
+            st, rolled = rank.roll_season(st)
+            if rolled:
+                self.rank_save(r["name"], st)
+            entries.append((r["name"], st))
+        full = rank.board_rows(entries, 0)
+        return (full[:int(limit)] if limit else full), full
+
     def adopt(self, name, salt="", pw_hash=""):
         """本机免密接管 / 免密建号（只允许 peer_is_local 的调用方使用）。
 
@@ -306,6 +384,16 @@ ROOMS = []         # 进行中的房间
 ROOMS_BY_CODE = {} # 邀请码 -> Room
 
 
+def _rank_brief(name):
+    """大厅列表用的精简段位信息（失败不该拖垮大厅）。"""
+    try:
+        st = DB.rank_get(name)
+        return {"tier": st["tier"], "stars": st["stars"],
+                "lb": st["lb_pts"] if st["lb_active"] else None}
+    except Exception:                # noqa: BLE001
+        return None
+
+
 def lobby_snapshot():
     """在线玩家快照。
 
@@ -323,6 +411,7 @@ def lobby_snapshot():
             continue
         try:
             snap.append({"name": c.name, "stats": DB.stats(c.name),
+                         "rank": _rank_brief(c.name),
                          "in_game": c.room is not None})
         except Exception:            # noqa: BLE001  单个玩家查询失败不该拖垮大厅
             continue
@@ -536,7 +625,7 @@ class ClientHandler(socketserver.BaseRequestHandler):
             old.alive = False
 
         self.send({"m": "auth_ok", "user": name, "token": tok,
-                   "stats": DB.stats(name)})
+                   "stats": DB.stats(name), "rank": DB.rank_get(name)})
 
         if old is not None and old is not self:
             try:
@@ -577,6 +666,28 @@ class ClientHandler(socketserver.BaseRequestHandler):
             DB.stats_seed(self.name, msg.get("win", 0),
                           msg.get("lose", 0), msg.get("draw", 0))
             self.send({"m": "stats", "stats": DB.stats(self.name)})
+        elif t == "rank":
+            self.send({"m": "rank", "rank": DB.rank_get(self.name)})
+        elif t == "rank_add":
+            st, ch = DB.rank_add(self.name, msg.get("result"))
+            self.send({"m": "rank", "rank": st, "change": ch})
+        elif t == "rank_seed":
+            st = DB.rank_seed(self.name, msg.get("rank"))
+            self.send({"m": "rank", "rank": st})
+        elif t == "rank_board":
+            # limit 是客户端传的，坏值不能把整条连接打挂（int("x") 会抛异常）
+            try:
+                lim = int(msg.get("limit") or 50)
+            except (TypeError, ValueError):
+                lim = 50
+            top, full = DB.rank_board(max(1, min(lim, 200)))
+            me = None
+            for r in full:
+                if r["name"] == self.name:
+                    me = r
+                    break
+            self.send({"m": "rank_board", "rows": top, "total": len(full),
+                       "me": me, "season": rank.season_id()})
         elif t == "deck_save":
             DB.deck_save(self.name, msg.get("nation", ""), msg.get("title", ""),
                          msg.get("content", ""))
