@@ -37,6 +37,9 @@ a = Analysis(
         # 但那是在一个分支里延迟导入的，分析器可能看不到。
         'kards_engine', 'kards_i18n', 'kards_net', 'kards_account',
         'kards_host', 'kards_update', 'kards_server',
+        # 跨局域网联机：kards_upnp 由 kards_host 在**函数内**延迟导入，
+        # 显式声明一下更保险（否则离线环境可能漏打，表现为「找不到 UPnP 路由器」）。
+        'kards_upnp',
         # 增强对战界面：kards_board 在 _activate_pyboard() 里延迟导入，
         # pygame 又在 kards_board 里导入 —— 全部显式声明，防止漏打。
         # （pygame 的 DLL 由 PyInstaller 自带的 hook-pygame 收集）

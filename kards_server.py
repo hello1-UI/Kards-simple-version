@@ -299,6 +299,11 @@ class ClientHandler(socketserver.BaseRequestHandler):
         self.sock = self.request
         self.sock.settimeout(HEARTBEAT_TIMEOUT)
         self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        # 跨公网的长连接：开 keepalive 抵消运营商 NAT 的空闲回收
+        try:
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        except OSError:
+            pass
         self.wlock = threading.Lock()
         self.alive = True
         self.name = None       # 登录后的用户名
