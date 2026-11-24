@@ -61,7 +61,7 @@ def main():
         t0 = time.time()
         try:
             r = subprocess.run(
-                [os.path.join(unpack, "KARDS安装器.exe"), target],
+                [os.path.join(unpack, "KARDS安装器.exe"), "--cli", target],
                 input="\n", capture_output=True, text=True, timeout=420,
                 cwd=unpack)
             out = (r.stdout or "") + (r.stderr or "")
@@ -106,8 +106,9 @@ def main():
         # ---- 5. 运行卸载器 ----
         print("\n--- 5. 运行卸载器 ---")
         try:
-            u = subprocess.run([uni], input="\n", capture_output=True, text=True,
-                               timeout=120, cwd=os.path.dirname(target))
+            u = subprocess.run([uni, "--cli"], input="\n", capture_output=True,
+                               text=True, timeout=120,
+                               cwd=os.path.dirname(target))
             uout = (u.stdout or "") + (u.stderr or "")
         except subprocess.TimeoutExpired:
             check("卸载器未超时", False, "超时")

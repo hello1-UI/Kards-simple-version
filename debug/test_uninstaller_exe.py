@@ -47,7 +47,7 @@ def run_case(title, dirname):
 
     # 直接用 exe 运行，喂一个回车（不删用户数据）
     try:
-        r = subprocess.run([os.path.join(target, "KARDS卸载器.exe")],
+        r = subprocess.run([os.path.join(target, "KARDS卸载器.exe"), "--cli"],
                            input="\n", capture_output=True, text=True,
                            timeout=60, cwd=target)
         out = (r.stdout or "") + (r.stderr or "")

@@ -1,19 +1,23 @@
 # -*- coding: utf-8 -*-
-"""KARDS 简化版 —— 安装器
+"""KARDS 简化版 —— 安装器（图形界面 / 控制台双形态）
 
 功能:
   1. 从 GitHub Release 下载 KARDS.zip（多镜像竞速测速，自动选最快）
   2. 解压安装到指定目录（默认 C:\\Program Files\\Kards-Simple-Version，可改）
-  3. 内置 UI 模板（models/）可选保留或删除 —— 安装时问一次；
-     `--no-models` 静默删除、`--models` 静默保留（脚本化安装用）
+  3. 内置 UI 模板（models/）可选保留或删除 —— 安装时勾选；
+     `--no-models` 默认不勾、`--models` 默认勾（脚本化安装用）
   4. 创建用户数据目录 %USERPROFILE%\\AppData\\Kards-Simple-Version（设置/日志/卡组）
   5. 创建桌面 + 开始菜单快捷方式
   6. 注册到系统"应用和功能"，支持一键卸载（附带 uninstall.py）
 
 用法:
-  python install.py                              # 交互式（回车用默认路径）
-  python install.py "D:\\Games\\KARDS"             # 指定安装路径
-  python install.py "D:\\Games\\KARDS" --no-models # 不装内置 UI 模板
+  KARDS安装器.exe                        # 图形界面（双击即用）
+  KARDS安装器.exe "D:\\Games\\KARDS"       # 预填安装路径
+  KARDS安装器.exe --cli "D:\\Games\\KARDS" # 控制台模式（脚本化 / 回归测试）
+  python install.py --cli
+
+⚠ 图形界面代码只在 main_gui() 里延迟 import tkinter：
+  受管 Python 没有 tkinter，控制台模式与全部回归测试必须仍能跑。
 
 依赖: 仅 Python 3.8+ 标准库，无需 pip 安装任何东西
 
@@ -89,6 +93,51 @@ DL_READ_TIMEOUT = DL_STALL_TIMEOUT + 30
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Kards-Simple-Version"
 
 
+# ---------------------------------------------------------------- 进度/取消钩子
+# 控制台模式保持为 None —— 对原有流程零影响；图形界面在 main_gui() 里注入。
+_PROGRESS_HOOK = None          # callable(frac_or_None, text)
+_CANCEL_EVENT = None           # threading.Event
+_STAGE = [0.0, 1.0]            # 当前阶段在总进度里的 (起点, 跨度)
+
+
+class Cancelled(Exception):
+    """用户点了「停止」。"""
+
+
+class InstallError(Exception):
+    """可预期的安装失败（网络全挂、压缩包损坏等）—— 文案直接给用户看。"""
+
+
+def set_ui_hooks(progress=None, cancel=None):
+    global _PROGRESS_HOOK, _CANCEL_EVENT
+    _PROGRESS_HOOK = progress
+    _CANCEL_EVENT = cancel
+
+
+def _stage(base, span):
+    _STAGE[0], _STAGE[1] = float(base), float(span)
+
+
+def _emit(frac, text=""):
+    """报告进度。frac=None 表示不确定（测速阶段让进度条来回滑）。"""
+    if _PROGRESS_HOOK is None:
+        return
+    try:
+        if frac is None:
+            _PROGRESS_HOOK(None, text)
+        else:
+            base, span = _STAGE
+            _PROGRESS_HOOK(base + max(0.0, min(1.0, frac)) * span, text)
+    except Exception:
+        pass            # 界面出问题绝不能拖垮安装
+
+
+def _check_cancel():
+    if _CANCEL_EVENT is not None and _CANCEL_EVENT.is_set():
+        raise Cancelled()
+
+
+
 # ---------------------------------------------------------------- 基础工具
 
 def is_admin():
@@ -98,11 +147,29 @@ def is_admin():
         return False
 
 
-def relaunch_as_admin():
+def _launch_spec(extra_args=None):
+    """返回 (exe, 参数字符串)，用于以管理员身份重启本程序。
+
+    ⚠ 打包成 exe 后 sys.argv[0] **就是 exe 自身路径**。原先直接拼
+    `sys.argv` 会让子进程收到 `安装器.exe "<exe路径>"`，而 ask_install_dir()
+    认 argv[1] 为安装路径 —— 提权后安装目录会变成安装器自己所在的目录，
+    紧接着 cleanup_old() 会把那里清空（真实踩过）。所以必须只传 argv[1:]。
+    """
+    if extra_args is None:
+        extra_args = sys.argv[1:]
+    args = list(extra_args)
+    if getattr(sys, "frozen", False):
+        return sys.executable, " ".join(f'"{a}"' for a in args)
+    # 源码模式：解释器 + 脚本路径 + 用户参数
+    params = [os.path.abspath(sys.argv[0])] + args
+    return sys.executable, " ".join(f'"{a}"' for a in params)
+
+
+def relaunch_as_admin(extra_args=None):
     """以管理员身份重启自身（UAC 弹窗），成功则不返回"""
-    params = " ".join(f'"{a}"' for a in sys.argv)
+    exe, params = _launch_spec(extra_args)
     ret = ctypes.windll.shell32.ShellExecuteW(
-        None, "runas", sys.executable, params, None, 1)
+        None, "runas", exe, params, None, 1)
     if ret > 32:
         sys.exit(0)
     print("  未获得管理员权限。改用当前用户权限继续（装到 Program Files 可能失败）。")
@@ -156,6 +223,7 @@ _probe.errors = []
 def pick_fastest():
     """并发测速所有源，返回 (name, url)；全不可用返回 None"""
     print("  正在测速各下载源（并发，最多 %ds）..." % SPEED_TEST_TIMEOUT)
+    _emit(None, "正在测速下载源…")
     results, threads = [], []
     for name, url in URLS:
         t = threading.Thread(target=_probe, args=(name, url, results), daemon=True)
@@ -192,6 +260,7 @@ def download(dest):
             order.append((name, url))
 
     for name, url in order:
+        _check_cancel()
         print(f"  从 [{name}] 下载 ...")
         if _download_one(url, dest, name):
             return True
@@ -232,6 +301,7 @@ def _download_one(url, dest, name):
             while True:
                 if state["aborted"]:
                     raise IOError(state["reason"])
+                _check_cancel()
                 chunk = resp.read(256 * 1024)
                 if not chunk:
                     break
@@ -250,8 +320,13 @@ def _download_one(url, dest, name):
                         print(f"\r    [{bar}] {done * 100 // total:3d}% "
                               f"{human(done)}/{human(total)} "
                               f"{spd:.2f}MB/s 剩余~{left:.0f}s", end="")
+                        _emit(done / total,
+                              f"正在从 {name} 下载  {human(done)} / {human(total)}"
+                              f"  ·  {spd:.1f} MB/s  ·  剩余约 {left:.0f} 秒")
                     else:
                         print(f"\r    已下载 {human(done)}  {spd:.2f}MB/s", end="")
+                        _emit(None, f"正在从 {name} 下载  {human(done)}"
+                                    f"  ·  {spd:.1f} MB/s")
             print()
         stop.set()
 
@@ -262,7 +337,16 @@ def _download_one(url, dest, name):
             print("    未收到任何数据")
             return False
         print(f"  下载完成（{human(done)}，来源 {name}）")
+        _emit(1.0, f"下载完成（{human(done)}，来源 {name}）")
         return True
+    except Cancelled:
+        stop.set()
+        try:
+            if os.path.exists(dest):
+                os.remove(dest)
+        except OSError:
+            pass
+        raise
     except Exception as e:
         stop.set()
         if state["aborted"]:
@@ -310,6 +394,7 @@ def extract(zip_path, install_dir):
         print(f"    共 {total} 个文件，"
               f"{human(sum(i.file_size for i, _ in members))}")
         for n, (info, fn) in enumerate(members, 1):
+            _check_cancel()
             rel = fn[len(strip):] if strip else fn
             dest = os.path.join(install_dir, *rel.split("/"))
             os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -329,12 +414,14 @@ def extract(zip_path, install_dir):
                 filled = 20 * n // total
                 print(f"\r    [{'#' * filled}{'-' * (20 - filled)}] "
                       f"{n}/{total} 文件", end="")
+                _emit(n / total, f"正在解压  {n} / {total} 个文件")
         print()
     if renamed:
         print("  ⚠ 以下文件正在使用中，已另存为 .new（关闭相关程序后可手动改名）：")
         for rel, alt in renamed:
             print(f"      {rel}  ->  {alt}")
     print("  解压完成")
+    _emit(1.0, "解压完成")
 
 
 # ---------------------------------------------------------------- 可选组件（内置 UI 模板）
@@ -385,6 +472,29 @@ def remove_models(install_dir):
         if os.path.isdir(d):
             shutil.rmtree(d, ignore_errors=True)
     return count
+
+
+def bundled_models_count():
+    """安装器**自带**的模板套数（用来在界面上写「N 套配色」）。
+
+    打包时 models/ 会作为 datas 塞进 exe，落点是 sys._MEIPASS/models；
+    源码运行则在项目根。都找不到就返回 0，界面文案自动退化成通用说法。
+    """
+    roots = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        roots.append(meipass)
+    base = bundled_dir()
+    roots.extend([base, os.path.dirname(base)])
+    for r in roots:
+        d = os.path.join(r, MODELS_DIRNAME)
+        try:
+            n = len([x for x in os.listdir(d) if x.lower().endswith(".json")])
+        except OSError:
+            continue
+        if n:
+            return n
+    return 0
 
 
 def ask_keep_models(install_dir, keep=None):
@@ -750,26 +860,18 @@ def ask_install_dir():
     return DEFAULT_DIR, "默认（输入无效）"
 
 
-def main():
-    print("=" * 56)
-    print("  KARDS 简化版 安装器")
-    print("=" * 56)
+def install_core(install_dir, keep_models=None, open_dir=True):
+    """完整安装流程（不含路径询问与结束等待）。图形界面与控制台共用。
 
-    keep_models, argv = parse_flags(sys.argv)
-    sys.argv = argv            # ask_install_dir 只认 argv[1]，不能是 --no-models
-
-    install_dir, how = ask_install_dir()
-    print(f"  安装到: {install_dir}   [{how}]")
-    # 管理权限：目标不可写且当前非管理员 → 请求提权
-    if not can_write(install_dir) and not is_admin():
-        print("  目标目录需要管理员权限，弹出 UAC 授权窗口...")
-        relaunch_as_admin()      # 拒绝则降级继续
-
+    失败抛 InstallError（文案可直接展示给用户）；用户取消抛 Cancelled。
+    返回 dict：exe 路径、保留的模板套数、快捷方式列表等。
+    """
     # 提前统一超时，避免任何请求无限等待
     socket.setdefaulttimeout(CONNECT_TIMEOUT)
 
     # 1. 下载
     print("\n[1/5] 下载 KARDS.zip ...")
+    _stage(0.0, 0.55)
     tmp_zip = os.path.join(tempfile.gettempdir(), "KARDS-install.zip")
     for p in (tmp_zip, tmp_zip + ".part"):
         if os.path.exists(p):
@@ -778,24 +880,29 @@ def main():
             except OSError:
                 pass
     t_dl = time.time()
-    if not download(tmp_zip):
-        print("\n错误: 所有下载源均失败。")
-        print("可能原因：网络受限 / 代理未开启 / 镜像站临时故障。")
-        print("建议：检查网络后重试，或手动下载 KARDS.zip 后放到同一目录再运行安装器。")
-        input("\n按回车键退出 ...")
-        sys.exit(1)
+    ok = False
+    try:
+        ok = download(tmp_zip)
+    except Cancelled:
+        raise
+    if not ok:
+        raise InstallError(
+            "所有下载源均失败。可能原因：网络受限 / 代理未开启 / 镜像站临时故障。\n"
+            "建议：检查网络后重试，或手动下载 KARDS.zip 后放到安装器同一目录再运行。")
     print(f"  下载耗时 {time.time() - t_dl:.0f}s")
 
     # 2. 解压
     print("\n[2/5] 解压安装 ...")
+    _stage(0.55, 0.33)
+    _emit(0.0, "准备解压")
     if os.path.isdir(install_dir):
         cleanup_old(install_dir)
     try:
         extract(tmp_zip, install_dir)
+    except Cancelled:
+        raise
     except Exception as e:
-        print(f"  解压失败: {e}")
-        input("\n按回车键退出 ...")
-        sys.exit(1)
+        raise InstallError(f"解压失败: {e}")
     try:
         os.remove(tmp_zip)
     except OSError:
@@ -803,8 +910,12 @@ def main():
 
     # 3. 可选组件：内置 UI 模板（models/）
     print("\n[3/5] 内置 UI 模板（可选） ...")
+    _stage(0.88, 0.04)
+    _emit(0.5, "处理内置 UI 模板")
+    n_models_kept = 0
     if ask_keep_models(install_dir, keep_models):
         n_models, size_models = models_info(install_dir)
+        n_models_kept = n_models
         if n_models:
             print(f"  保留 {n_models} 套配色（{human(size_models)}）✓")
         else:
@@ -815,6 +926,8 @@ def main():
 
     # 4. 用户数据目录 + 卸载器
     print("\n[4/5] 初始化用户数据目录 ...")
+    _stage(0.92, 0.03)
+    _emit(0.5, "初始化用户数据目录")
     for sub in ("", "logs", "decks"):
         os.makedirs(os.path.join(DATA_DIR, sub), exist_ok=True)
     print(f"  用户数据: {DATA_DIR}（设置/日志/自组卡组）")
@@ -832,8 +945,10 @@ def main():
     else:
         print("  卸载器未随安装器分发（跳过，不影响游戏）")
 
-    # 4. 快捷方式 + 系统注册
+    # 5. 快捷方式 + 系统注册
     print("\n[5/5] 创建快捷方式并注册到系统 ...")
+    _stage(0.95, 0.05)
+    _emit(0.2, "创建快捷方式")
     exe = os.path.join(install_dir, "KARDS.exe")
     if not os.path.isfile(exe):
         print(f"  ⚠ 未找到 KARDS.exe（{exe}），请确认安装包完整")
@@ -865,6 +980,7 @@ def main():
             print(f"  ⚠ 快捷方式全部失败: {e}")
             print("    不影响游戏本体，可直接运行: " + exe)
 
+    _emit(0.8, "注册到系统「应用和功能」")
     try:
         if uni_dst:
             register_uninstall(install_dir, fetch_latest_version(),
@@ -877,19 +993,124 @@ def main():
     except Exception as e:
         print(f"  ⚠ 应用注册失败（不影响游戏本体）: {e}")
 
+    _emit(1.0, "安装完成")
     print()
     print("=" * 56)
     print("  安装完成！双击桌面快捷方式即可开始游戏")
     print(f"  程序目录: {install_dir}")
     print(f"  用户数据: {DATA_DIR}")
     print("=" * 56)
-    if os.path.isfile(exe):
+
+    if open_dir and os.path.isfile(exe):
         # 闪一下安装目录，让用户能确认文件确实落在哪里
         try:
             os.startfile(install_dir)          # noqa: S606
         except OSError:
             pass
+
+    return {
+        "install_dir": install_dir,
+        "exe": exe,
+        "exe_ok": os.path.isfile(exe),
+        "models": n_models_kept,
+        "shortcuts": lnk_made,
+        "uninstaller": uni_dst,
+    }
+
+
+# ---------------------------------------------------------------- 控制台入口
+
+def _cli_main():
+    print("=" * 56)
+    print("  KARDS 简化版 安装器")
+    print("=" * 56)
+
+    keep_models, argv = parse_flags(sys.argv)
+    sys.argv = argv            # ask_install_dir 只认 argv[1]，不能是 --no-models
+
+    install_dir, how = ask_install_dir()
+    print(f"  安装到: {install_dir}   [{how}]")
+    # 管理权限：目标不可写且当前非管理员 → 请求提权
+    if not can_write(install_dir) and not is_admin():
+        print("  目标目录需要管理员权限，弹出 UAC 授权窗口...")
+        relaunch_as_admin()      # 拒绝则降级继续
+
+    try:
+        install_core(install_dir, keep_models)
+    except Cancelled:
+        print("\n  已取消安装（未做任何改动）。")
+        sys.exit(1)
+    except InstallError as e:
+        print("\n错误: " + str(e))
+        input("\n按回车键退出 ...")
+        sys.exit(1)
+    except Exception as e:
+        import traceback
+        print(f"\n安装失败: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        input("\n按回车键退出 ...")
+        sys.exit(1)
+
     input("按回车键退出安装器 ...")
+
+
+def _gui_args():
+    """解析图形模式参数：返回 (预填路径, 是否装模板, 是否自动开始)。"""
+    path = None
+    keep = None
+    auto = False
+    for a in sys.argv[1:]:
+        if a == "--no-models":
+            keep = False
+        elif a == "--models":
+            keep = True
+        elif a == "--auto":
+            auto = True
+        elif a.startswith("--"):
+            continue
+        elif path is None:
+            path = a
+    return path, keep, auto
+
+
+def main():
+    """入口：默认图形界面；`--cli` 或没有 tkinter 时回退控制台。"""
+    if "--cli" in sys.argv:
+        return _cli_main()
+    try:
+        import installer_ui                  # noqa: F401  延迟导入（见模块头注释）
+    except Exception:
+        return _cli_main()                   # 受管 Python 没 tkinter → 控制台
+    try:
+        path, keep, auto = _gui_args()
+        installer_ui.run(path, keep, auto)
+    except Exception:
+        import traceback
+        _crash_log(traceback.format_exc())
+        _msgbox_error()
+        return _cli_main()
+
+
+def _crash_log(text):
+    """界面起不来时把 traceback 落到 TEMP，方便用户回帖排查。"""
+    try:
+        p = os.path.join(tempfile.gettempdir(), "kards_installer_crash.log")
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(time.strftime("\n===== %Y-%m-%d %H:%M:%S =====\n"))
+            f.write(text)
+    except OSError:
+        pass
+
+
+def _msgbox_error():
+    try:
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "安装程序界面启动失败，已切换到控制台模式。\n\n"
+            "详细信息见：%TEMP%\\kards_installer_crash.log",
+            "KARDS 安装程序", 0x30)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
