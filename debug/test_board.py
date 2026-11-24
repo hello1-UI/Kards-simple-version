@@ -912,10 +912,91 @@ def test_draw():
               traceback.format_exc().splitlines()[-1])
 
 
-# ---------------------------------------------------------------- G 主循环
+# ---------------------------------------------------------------- G 指向箭头
+
+def test_aim_arrow():
+    section("G 指向箭头")
+    g, _ = make_game()
+    app, b = new_board(g)
+    me, foe = g.players[0], g.players[1]
+    u = spawn_unit(g, me, pos="前线")
+    eu = spawn_unit(g, foe, pos="前线")
+    b.sync()
+    pygame.init()
+
+    # ---- 曲线几何
+    pts, (vx, vy) = b._aim_points((100, 500), (700, 500), steps=20)
+    check("曲线首点 = 起点", pts[0] == (100, 500), str(pts[0]))
+    check("曲线末点 = 指针", pts[-1] == (700, 500), str(pts[-1]))
+    check("曲线采样点数量正确", len(pts) == 21, str(len(pts)))
+    mid = pts[len(pts) // 2]
+    check("长距离箭头向上鼓成弧（非直线）", mid[1] < 500 - 10, str(mid))
+    check("末端方向大致朝右", vx > 0.85, f"{vx:.2f},{vy:.2f}")
+    short, _d = b._aim_points((10, 10), (11, 10))
+    check("零距离退化为两点（不除零）", short == [(10, 10), (11, 10)], str(short))
+
+    # ---- 配色：攻击=金 / 机动=绿 / 非法=红 / 无目标=灰
+    def col_of(pos):
+        b.drag = {"kind": "unit", "unit": u, "pos": pos, "moved": True,
+                  "sx": 0, "sy": 0}
+        kind, extra = b.zone_at(pos)
+        ok = bool(kind) and b.valid_drop(kind, extra)
+        return b._aim_color(kind, ok), kind, ok
+
+    c, kind, ok = col_of(b.unit_refs[id(eu)].rect.center)
+    check("指向敌方单位 → 金色（攻击）", c == board.C(board.GOLD) and ok,
+          f"{kind} {ok}")
+    c, kind, ok = col_of(b.hq_ref.rect.center)
+    check("指向敌方总部 → 金色（攻击）", c == board.C(board.GOLD) and ok,
+          f"{kind} {ok}")
+    L = b.layout()
+    c, kind, ok = col_of(L["row_my_front"].center)
+    check("指向我方前线 → 绿色（机动）", c == board.C(board.GREEN) and ok,
+          f"{kind} {ok}")
+    c, kind, ok = col_of((4, 4))
+    check("指向空白 → 灰色（无目标）", c == board.C(board.MUTE) and not kind,
+          f"{kind} {ok}")
+    check("非法落点 → 红色", b._aim_color("enemy_card", False) == board.C(board.RED))
+
+    # ---- 真画一遍：箭头必须真的落在画面上
+    surf = pygame.Surface((b.W, b.H))
+    bg = board.C(board.BG)
+    surf.fill(bg)
+    b.drag = {"kind": "unit", "unit": u,
+              "pos": b.unit_refs[id(eu)].rect.center, "moved": True,
+              "sx": 0, "sy": 0, "src_rect": pygame.Rect(b.unit_refs[id(u)].rect)}
+    b._draw_aim_arrow(surf, b.drag)
+    changed = 0
+    for x in range(0, b.W, 6):
+        for y in range(0, b.H, 6):
+            if surf.get_at((x, y))[:3] != bg:
+                changed += 1
+    check("箭头确实画到了画布上", changed > 20, f"{changed} 个采样点")
+    check("箭头绘制不抛异常（含空白目标 / 无 ref 兜底）", True)
+    b.drag["pos"] = (4, 4)
+    try:
+        b._draw_aim_arrow(surf, b.drag)
+        b.drag = {"kind": "unit", "unit": object(), "pos": (10, 10),
+                  "moved": True, "sx": 0, "sy": 0}
+        b._draw_aim_arrow(surf, b.drag)   # 单位不在 unit_refs 里 → 直接跳过
+        check("箭头对空目标 / 失效单位不崩", True)
+    except Exception:
+        check("箭头对空目标 / 失效单位不崩", False,
+              traceback.format_exc().splitlines()[-1])
+
+    # ---- 单位拖拽不再画"幽灵卡"（箭头模式下原地不动）
+    b.drag = {"kind": "unit", "unit": u,
+              "pos": b.unit_refs[id(eu)].rect.center, "moved": True,
+              "sx": 0, "sy": 0}
+    b.draw(surf)
+    check("单位拖拽时整屏可绘制", True)
+    b.drag = None
+
+
+# ---------------------------------------------------------------- H 主循环
 
 def test_main_loop():
-    section("G 主循环")
+    section("H 主循环")
     g, _ = make_game()
     app, b = new_board(g)
     b.sync()
@@ -937,7 +1018,7 @@ def test_main_loop():
 # ---------------------------------------------------------------- H 接线
 
 def test_app_wiring():
-    section("H 与 KARDS.App 的接线")
+    section("I 与 KARDS.App 的接线")
     try:
         import tkinter  # noqa: F401
     except Exception:
@@ -994,7 +1075,7 @@ def test_app_wiring():
 
 
 def test_app_hybrid_game():
-    section("I 真实 App 全链路（Tk 菜单 + pygame 战场）")
+    section("J 真实 App 全链路（Tk 菜单 + pygame 战场）")
     try:
         import tkinter as tk
     except Exception:
@@ -1094,7 +1175,7 @@ def main():
     for fn in (test_pure, test_layout_and_sync, test_drop_zones, test_input,
                test_pause_menu, test_end_screen, test_surrender_explode,
                test_intro, test_deploy_fly, test_fonts,
-               test_animations, test_draw,
+               test_animations, test_draw, test_aim_arrow,
                test_main_loop, test_app_hybrid_game, test_app_wiring):
         try:
             fn()

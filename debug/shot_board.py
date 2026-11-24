@@ -160,6 +160,34 @@ def main():
     b5.draw(surf)
     pygame.image.save(surf, os.path.join(OUT, "12_部署飞行中.png"))
     print("  写出 12_部署飞行中.png")
+
+    # 指向箭头（攻击 / 机动 / 非法）
+    b6 = B.PygameBoard(app, game=g, on_intent=app.pyboard_intent)
+    b6.anim_enabled = True
+    b6.sync()
+    atk = me.board[0]
+    tgt = foe.board[0]
+    b6.drag = {"kind": "unit", "unit": atk,
+               "pos": b6.unit_refs[id(tgt)].rect.center,
+               "sx": 0, "sy": 0, "moved": True,
+               "src_rect": pygame.Rect(b6.unit_refs[id(atk)].rect)}
+    b6.draw(surf)
+    pygame.image.save(surf, os.path.join(OUT, "13_指向_攻击.png"))
+    print("  写出 13_指向_攻击.png")
+
+    L6 = b6.layout()
+    b6.drag["pos"] = L6["row_my_front"].center
+    b6.draw(surf)
+    pygame.image.save(surf, os.path.join(OUT, "14_指向_机动.png"))
+    print("  写出 14_指向_机动.png")
+
+    atk.attacks_made = 99          # 已出手 → 打总部非法（红箭头）
+    b6.drag["pos"] = b6.hq_ref.rect.center
+    b6.draw(surf)
+    pygame.image.save(surf, os.path.join(OUT, "15_指向_非法.png"))
+    print("  写出 15_指向_非法.png")
+    b6.drag = None
+    atk.attacks_made = 0
     print("输出目录:", OUT)
 
 

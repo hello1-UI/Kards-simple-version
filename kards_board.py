@@ -1757,20 +1757,101 @@ class PygameBoard:
             self._draw_card(surf, card, r, g, me, True)
             rr(surf, r, border, radius=8, width=3)
         else:
-            u = d["unit"]
-            r = pygame.Rect(px - self.UNIT_W // 2, py - self.UNIT_H // 2,
-                            self.UNIT_W, self.UNIT_H)
-            kind, _extra = self.zone_at(d["pos"])
-            ok = self.valid_drop(kind, _extra) if kind else False
-            rr(surf, r, C(CARD_BG), radius=6,
-               border_color=C(GOLD) if ok else C("#7a4a4a"))
-            nf = font(14, True)
-            name = truncate(u.name, nf, r.w - 16)
-            surf.blit(nf.render(name, True, C(TEXT)), (r.x + 8, r.y + 6))
-            af = font(16, True)
-            surf.blit(af.render(f"{u.attack}/{u.defense}", True, C(TEXT)),
-                      (r.centerx - af.size(f"{u.attack}/{u.defense}")[0] // 2,
-                       r.centery))
+            # 单位操作（攻击 / 机动）用**箭头指向**，不再拖一张幽灵卡：
+            # 幽灵卡盖住半个战场，玩家看不清到底点在谁身上；箭头从单位
+            # 射向指针，落点合法与否用颜色区分，一眼就能判断。
+            self._draw_aim_arrow(surf, d)
+
+    # ---- 指向箭头 ----
+
+    @staticmethod
+    def _mix(c1, c2, t):
+        """两色线性混合（0=全 c1，1=全 c2）"""
+        t = max(0.0, min(1.0, t))
+        return tuple(int(a + (b - a) * t) for a, b in zip(c1, c2))
+
+    def _aim_points(self, start, end, steps=20):
+        """二次贝塞尔：从起点弯向指针，返回采样点 + 末端方向向量"""
+        sx, sy = start
+        ex, ey = end
+        dx, dy = ex - sx, ey - sy
+        dist = math.hypot(dx, dy)
+        if dist < 2:
+            return [start, end], (0.0, 0.0)
+        # 法线朝上（y 为负），弧顶统一往上鼓，斜向/水平都好看
+        nx, ny = -dy / dist, dx / dist
+        if ny > 0:
+            nx, ny = -nx, -ny
+        sag = min(70.0, dist * 0.22)
+        cx, cy = (sx + ex) / 2 + nx * sag, (sy + ey) / 2 + ny * sag
+        pts = []
+        for i in range(steps + 1):
+            t = i / steps
+            u = 1 - t
+            pts.append((int(u * u * sx + 2 * u * t * cx + t * t * ex),
+                        int(u * u * sy + 2 * u * t * cy + t * t * ey)))
+        tdx, tdy = ex - cx, ey - cy
+        n = math.hypot(tdx, tdy) or 1.0
+        return pts, (tdx / n, tdy / n)
+
+    @staticmethod
+    def _aim_color(kind, ok):
+        """指向箭头的颜色语义：金=攻击 / 绿=机动 / 红=非法 / 灰=无目标"""
+        if kind is None:
+            return C(MUTE)
+        if not ok:
+            return C(RED)
+        return C(GOLD) if kind in ("enemy_card", "hq") else C(GREEN)
+
+    def _draw_aim_arrow(self, surf, d):
+        """从选中单位指向鼠标的弧形箭头（金=攻击 / 绿=机动 / 红=非法）"""
+        u = d.get("unit")
+        ref = self.unit_refs.get(id(u)) if u is not None else None
+        src = d.get("src_rect")
+        if src is None and ref is not None:
+            src = ref.rect
+        if src is None:
+            return
+        start = (src.centerx, src.centery)
+        end = tuple(d["pos"])
+        kind, extra = self.zone_at(end)
+        ok = bool(kind) and self.valid_drop(kind, extra)
+        col = self._aim_color(kind, ok)
+
+        pulse = 0.5 + 0.5 * math.sin(self.t_now / 150.0)
+
+        # 起点：选中光圈（呼吸）
+        pygame.draw.circle(surf, col, start, int(20 + 4 * pulse), 2)
+        pygame.draw.circle(surf, self._mix(col, C(BG), 0.55), start,
+                           int(26 + 4 * pulse), 1)
+
+        pts, (vx, vy) = self._aim_points(start, end)
+        if len(pts) >= 2:
+            # 三级描边做出"光晕"：暗底 → 主色 → 高亮芯
+            pygame.draw.lines(surf, self._mix(col, C(BG), 0.55), False, pts, 9)
+            pygame.draw.lines(surf, col, False, pts, 5)
+            pygame.draw.lines(surf, self._mix(col, (255, 255, 255), 0.45),
+                              False, pts, 2)
+
+        # 箭头（末端三角）
+        if vx or vy:
+            L_, W_ = 20, 10
+            tip = end
+            bx, by = end[0] - vx * L_, end[1] - vy * L_
+            px_, py_ = -vy * W_, vx * W_
+            head = [(tip[0], tip[1]),
+                    (bx + px_, by + py_),
+                    (bx + 0.45 * vx * L_, by + 0.45 * vy * L_),
+                    (bx - px_, by - py_)]
+            pygame.draw.polygon(surf, col, head)
+            pygame.draw.polygon(surf, self._mix(col, (255, 255, 255), 0.5),
+                                head, 1)
+
+        # 指针处：合法目标加一个准星环
+        if kind is not None and ok:
+            r = int(10 + 4 * pulse)
+            pygame.draw.circle(surf, col, end, r, 2)
+            pygame.draw.circle(surf, col, end, r + 5, 1)
 
     def _draw_fx(self, surf):
         # 冲击环
