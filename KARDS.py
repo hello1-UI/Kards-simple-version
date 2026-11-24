@@ -2884,7 +2884,7 @@ class App(tk.Tk):
 
         tk.Button(self.start_frame, text=i18n.t("btn_back"), bg=BTN, fg=TEXT,
                   font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
-                  command=lambda: self._build_start()).pack(anchor="w", padx=18, pady=12)
+                  command=self._casual_back).pack(anchor="w", padx=18, pady=12)
 
         hero = tk.Frame(self.start_frame, bg=BG)
         hero.pack(expand=True)
@@ -2910,6 +2910,18 @@ class App(tk.Tk):
         bind_hover_tree(mp)
         tk.Label(hero, text=i18n.t("casual_note"), bg=BG, fg=MUTE,
                  font=FONT_S).pack(pady=(26, 0))
+
+    def _casual_back(self):
+        """休闲选择页 → 主菜单。
+
+        ⚠ `_build_start()` 只会重新赋值 self.start_frame、**不销毁旧界面**，
+        所以这里必须先 destroy 再建 —— 否则休闲选择页还挂在窗口上，
+        和主菜单同屏叠加（实测 bug：返回后上下两套界面同时可见）。
+        其它入口（大厅返回 / 语言切换 / back_to_menu）都是先 destroy 再建，
+        当时唯独这个 lambda 直接调 _build_start() 漏了。
+        """
+        self.start_frame.destroy()
+        self._build_start()
 
     # ---------------- 联机大厅（服务器模式） ----------------
     def _build_lobby(self, casual=False):

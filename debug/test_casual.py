@@ -248,6 +248,23 @@ def client_tests():
     import kards_i18n as i18n
     import KARDS as gui
 
+    def _exists_text(root, needle):
+        """在控件树里找含 needle 的 Label/Button 文本"""
+        found = []
+
+        def _walk(w):
+            try:
+                t = str(w.cget("text"))
+                if needle in t:
+                    found.append(t)
+            except (tk.TclError, AttributeError):
+                pass
+            for ch in w.winfo_children():
+                _walk(ch)
+
+        _walk(root)
+        return bool(found)
+
     tmp = os.path.join(tempfile.gettempdir(), "kards_casual_settings.json")
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump({"language": "zh"}, fh)
@@ -349,6 +366,29 @@ def client_tests():
     check("有「对战 AI」", any("对战 AI" in t for t in texts), texts)
     check("有「对战真人」", any("对战真人" in t for t in texts), texts)
     check("说明含不加星", any("不加星" in t or "不掉星" in t for t in texts), texts)
+
+    print("5b. 返回主菜单：旧界面必须销毁（叠加 bug 回归）")
+    app._casual_back()
+    app.update()
+    check("休闲选择页已销毁（标题不在控件树里）",
+          not _exists_text(app, "休闲模式"), None)
+    check("主菜单已重建（三入口卡可见）",
+          _exists_text(app, "♣ 休闲") and _exists_text(app, "⚔ 战斗"), None)
+    # root 直属 Frame 只应有一个 start_frame
+    tops = [w for w in app.winfo_children() if isinstance(w, tk.Frame)]
+    check("主窗口下只挂一个界面 Frame", len(tops) == 1,
+          [(type(w).__name__, str(getattr(w, "winfo_width", lambda: 0)())) for w in tops])
+    texts.clear(); walk(app.start_frame)
+    check("返回后休闲子页文案消失",
+          not any("对战真人" in t for t in texts), texts)
+
+    print("5c. 再进休闲选择再返回（往返一次仍正常）")
+    app._build_casual_select()
+    app.update()
+    app._casual_back()
+    app.update()
+    check("第二次返回后界面唯一",
+          len([w for w in app.winfo_children() if isinstance(w, tk.Frame)]) == 1)
 
     print("6. 休闲入口把标志一路带进对局")
     app._build_nation_select(casual=True)
