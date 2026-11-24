@@ -1790,7 +1790,11 @@ class App(tk.Tk):
             row.pack(pady=14)
             tk.Button(row, text=i18n.t("account_logout"), bg=DANGER, fg=TEXT,
                       font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
-                      command=do_logout).pack()
+                      command=do_logout).pack(side="left", padx=6)
+            tk.Button(row, text=i18n.t("account_delete"), bg=BTN, fg=RED,
+                      font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
+                      command=lambda: self._confirm_delete_account(win)
+                      ).pack(side="left", padx=6)
             return
 
         # 登录 / 注册表单
@@ -1846,6 +1850,136 @@ class App(tk.Tk):
         tk.Button(row, text=i18n.t("account_register"), bg=SUCCESS, fg=TEXT,
                   font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
                   command=try_register).pack(side="left", padx=8)
+
+    def _confirm_delete_account(self, parent=None):
+        """删除账号确认框：红色警示 + 「同时删除服务器数据」复选框。
+
+        ⚠ 复选框只在「当前是服务器账号且连接可用」时可勾：本地账号 /
+        断网时勾了也删不到，给一个可点的复选框只会导致注定失败的请求。
+        默认值也跟随可用性 —— 能删服务器数据时默认勾上（大多数人想要的是
+        彻底删除），不能删时自然是未勾状态。
+        """
+        name = self.account
+        if not name:
+            return
+        # 单实例：连点两次不要叠出两个确认框
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "acct_del":
+                try:
+                    w.lift()
+                    w.focus_force()
+                except tk.TclError:
+                    pass
+                return
+
+        can_server = account.online() and account.backend() == "server"
+
+        win = tk.Toplevel(self)
+        win.role = "acct_del"
+        win.title(i18n.t("acct_del_title"))
+        win.configure(bg=BG)
+        win.geometry("480x470")
+        win.resizable(False, False)
+        win.transient(parent or self)
+
+        head = tk.Frame(win, bg=BG)
+        head.pack(fill="x", padx=20, pady=(18, 6))
+        tk.Label(head, text=i18n.t("acct_del_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(anchor="w")
+        tk.Label(head, text=name, bg=BG, fg=GOLD, font=FONT).pack(
+            anchor="w", pady=(4, 0))
+
+        tk.Label(win, text=i18n.t("acct_del_warn"), bg=BG, fg=RED,
+                 font=FONT_B, wraplength=420, justify="left").pack(
+            anchor="w", padx=20, pady=(6, 6))
+        tk.Label(win, text=i18n.t("acct_del_local"), bg=BG, fg=MUTE,
+                 font=FONT_S, wraplength=420, justify="left").pack(
+            anchor="w", padx=20)
+
+        box = tk.Frame(win, bg=PANEL)
+        box.pack(fill="x", padx=20, pady=(14, 0))
+        var = tk.BooleanVar(value=can_server)
+        tk.Checkbutton(
+            box, text=i18n.t("acct_del_server"), variable=var,
+            bg=PANEL, fg=TEXT, activebackground=PANEL, activeforeground=TEXT,
+            selectcolor=BG_ALT, disabledforeground=DIM,
+            font=FONT_B, bd=0, highlightthickness=0, anchor="w",
+            justify="left", wraplength=390,
+            cursor="hand2" if can_server else "arrow",
+            state="normal" if can_server else "disabled",
+        ).pack(anchor="w", padx=10, pady=(10, 4))
+        tk.Label(box, text=i18n.t("acct_del_server_note" if can_server
+                                  else "acct_del_offline"),
+                 bg=PANEL, fg=DIM if can_server else GOLD,
+                 font=FONT_S, wraplength=390, justify="left").pack(
+            anchor="w", padx=10, pady=(0, 10))
+
+        row = tk.Frame(win, bg=BG)
+        row.pack(pady=18)
+        btn_cancel = tk.Button(row, text=i18n.t("acct_del_cancel"), bg=BTN,
+                               fg=TEXT, font=FONT, bd=0, padx=16, pady=6,
+                               cursor="hand2")
+        btn_del = tk.Button(row, text=i18n.t("acct_del_confirm"), bg=DANGER,
+                            fg=TEXT, font=FONT_B, bd=0, padx=16, pady=6,
+                            cursor="hand2")
+
+        def close():
+            try:
+                win.destroy()
+            except tk.TclError:
+                pass
+
+        def do_delete():
+            # 请求期间禁用两个按钮：网络慢时连点会重复删 / 删到一半关窗
+            btn_del.configure(state="disabled")
+            btn_cancel.configure(state="disabled")
+            try:
+                win.update_idletasks()
+            except tk.TclError:
+                pass
+            ok, err = account.delete_account(
+                name, server_data=bool(var.get()) if can_server else False)
+            if not ok:
+                btn_del.configure(state="normal")
+                btn_cancel.configure(state="normal")
+                messagebox.showerror(
+                    i18n.t("acct_del_title"),
+                    i18n.t("acct_del_fail",
+                           err=i18n.t("acct_del_err_" + (err or "server_failed"))),
+                    parent=win)
+                return
+            close()
+            self._after_account_deleted(parent)
+
+        btn_cancel.configure(command=close)
+        btn_del.configure(command=do_delete)
+        btn_cancel.pack(side="left", padx=8)
+        btn_del.pack(side="left", padx=8)
+
+        win.protocol("WM_DELETE_WINDOW", close)
+        win.bind("<Escape>", lambda e: close())
+
+    def _after_account_deleted(self, parent=None):
+        """删除成功后的界面收尾：切回游客、刷新按钮、关掉账号窗。"""
+        self.account = None
+        self.mp_user = None
+        self.rank_state = None
+        self._rank_last = {}
+        core.set_decks_dir(account.guest_decks_dir())
+        try:
+            if parent is not None and parent.winfo_exists():
+                parent.destroy()
+        except tk.TclError:
+            pass
+        self._refresh_account_btn()
+        if self._lobby_active:
+            try:
+                self._lobby_log(i18n.t("acct_del_done"), echo=False)
+                self._lobby_sync()
+            except tk.TclError:
+                pass
+        messagebox.showinfo(i18n.t("acct_del_title"), i18n.t("acct_del_done"),
+                            parent=self)
 
     # ---------------- 设置（分页） ----------------
 

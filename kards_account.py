@@ -26,6 +26,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import time
 
 from kards_engine import DATA_DIR
@@ -530,6 +531,94 @@ def logout():
     _is_guest = True
 
 
+def delete_account(name=None, server_data=False):
+    """永久删除账号，返回 (ok, err_key)。
+
+    err_key 是给界面层翻译的短标记（本模块不依赖 i18n）：
+        "no_user"       没有登录 / 传了 GUEST
+        "offline"       勾了「同时删除服务器数据」但当前没连服务器
+        "server_failed" 服务器没删成功（超时/拒绝/账号不存在）
+
+    ⚠ 勾选服务器删除时**先删服务器、再删本地**：服务器没删掉就直接
+    返回失败并且本地一点不动 —— 否则用户以为"全删干净了"，服务器上
+    还留着账号、战绩和云卡组，下次登录又全回来了。
+
+    不勾选时只清本机：账号行、免密会话、货币/商店外观/每日任务、
+    自组卡组目录；服务器账号仍可用原密码登录回来（远端保留）。
+    """
+    name = name or current()
+    if not name or name == GUEST:
+        return False, "no_user"
+    # 只清本机时，账号必须真的在本机存在（服务器账号由服务器判定）
+    if (not server_data and name not in _load()["users"]
+            and current() != name):
+        return False, "no_user"
+
+    if server_data:
+        if _BACKEND != "server" or _REMOTE is None or not _REMOTE.alive:
+            return False, "offline"
+        rep = _rpc({"m": "delete_account"}, key="delete_account", timeout=10.0)
+        if not (isinstance(rep, dict) and rep.get("m") == "account_deleted"
+                and rep.get("ok")):
+            return False, "server_failed"
+
+    _purge_local(name)
+    return True, ""
+
+
+def _purge_local(name):
+    """清掉本机属于该账号的一切（删除账号专用，不要单独调用）。"""
+    global _TOKEN, _is_guest
+
+    # 先记住「被删的是不是当前登录的人」：删别人（或别的本地账号）
+    # 不该把当前玩家一脚踢成游客。
+    was_current = current() == name
+
+    db = _load()
+    db["users"].pop(name, None)
+    if db.get("current") == name:
+        db["current"] = None
+    _save(db)
+
+    # 免密会话：只清这个账号的那份，别把同一台机器上别的账号一起登出
+    if _load_session().get("name") == name:
+        _drop_session()
+    if was_current:
+        _TOKEN = None
+
+    # 钱包：货币 / 商店外观 / 每日任务（本地与服务器两份都清）
+    keys = wallet_keys(name)
+    cur = _load_currency()
+    hit = False
+    for k in keys:
+        if k in cur:
+            cur.pop(k, None)
+            hit = True
+    if hit:
+        _save_currency(cur)
+    try:
+        import kards_shop as _shop
+        _shop.purge(name)
+    except Exception:                        # noqa: BLE001 清理失败不该阻断删除
+        pass
+    try:
+        import kards_quests as _quests
+        _quests.purge(name)
+    except Exception:                        # noqa: BLE001
+        pass
+
+    # 自组卡组目录（只删这个账号那一个，路径由 deck_dir 生成）
+    d = deck_dir(name)
+    if os.path.isdir(d):
+        try:
+            shutil.rmtree(d)
+        except OSError:
+            pass
+
+    if was_current:
+        _is_guest = True
+
+
 def _mkdir_decks(name):
     try:
         os.makedirs(deck_dir(name), exist_ok=True)
@@ -712,8 +801,11 @@ def _currency_key(name=None):
     且 `_is_guest` 为 False），这时按名字路由才不会把账记到别人头上。
     """
     name = name or current()
-    if name is None or name == GUEST or is_guest():
+    if name is None or name == GUEST:
         return "guest"
+    # ⚠ 显式传名优先于"当前是不是游客"：删号/登出后 `_is_guest` 为 True，
+    # 但调用方完全可能在问"乙乙的钱包"（结算旧账号、测试、清理），
+    # 这时必须读乙乙那一份，不能一律塞到 guest 池里（曾把别人的账读丢）。
     return f"{backend()}:{name}"
 
 
@@ -723,6 +815,18 @@ def wallet_key(name=None):
     游客统一 "guest"；正式账号按 "后端:名字"，避免本地与服务器重名混账。
     """
     return _currency_key(name)
+
+
+def wallet_keys(name):
+    """该用户名**可能留下**的所有钱包键（本地 + 服务器各一份）。
+
+    用途：删除账号时清账。玩家可能先在本地攒金币买外观，后来把账号
+    迁到服务器又攒了一份；只清当前 backend() 那份会留下孤儿数据，
+    换个后端登录同名账号就会"继承"上一任的钱和外观。
+    """
+    if not name or name == GUEST:
+        return ["guest"]
+    return [f"local:{name}", f"server:{name}"]
 
 
 def _load_currency():

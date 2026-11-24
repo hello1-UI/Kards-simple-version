@@ -53,6 +53,7 @@ jobs:
           python debug/test_server.py
           python debug/test_client_net.py
           python debug/test_account.py
+          python debug/test_account_delete.py
           python debug/test_mp_ready.py
           python debug/test_mp_ready_order.py
 

@@ -200,6 +200,21 @@ class Store:
     def drop_session(self, token):
         self.x("DELETE FROM sessions WHERE token=?", (token,))
 
+    def delete_account(self, name):
+        """彻底删除账号：用户行 + 所有会话 + 云卡组。
+
+        返回删除的用户行数（0 = 账号本来就不存在）。
+        会话必须一起删 —— 否则残留的 token 还能 resume 成一个
+        「不存在但已登录」的幽灵账号。
+        """
+        with DB_LOCK:
+            cur = self.conn.execute("DELETE FROM users WHERE name=?", (name,))
+            deleted = cur.rowcount or 0
+            self.conn.execute("DELETE FROM sessions WHERE name=?", (name,))
+            self.conn.execute("DELETE FROM decks WHERE name=?", (name,))
+            self.conn.commit()
+        return deleted
+
     def stats(self, name):
         rows = self.q("SELECT win,lose,draw FROM users WHERE name=?", (name,))
         if not rows:
@@ -714,6 +729,8 @@ class ClientHandler(socketserver.BaseRequestHandler):
         elif t == "deck_del":
             DB.deck_del(self.name, msg.get("nation", ""), msg.get("title", ""))
             self.send({"m": "deck_list", "decks": DB.deck_list(self.name)})
+        elif t == "delete_account":
+            self.do_delete_account()
         elif t == "leave_room":
             self.do_leave_room()
         else:
@@ -810,6 +827,39 @@ class ClientHandler(socketserver.BaseRequestHandler):
 
     def do_leave_room(self):
         self.teardown_room(notify=True)
+
+    def do_delete_account(self):
+        """删除当前账号（连接已认证，不必再输密码）。
+
+        顺序很重要：
+          1. 先退房间 / 退出匹配队列 —— 否则对手会对着一个已删除的
+             账号继续等待，"幽灵对局"永远不会结束；
+          2. 删库（users + sessions + decks）；
+          3. 从在线名单摘掉，再把本条连接的 name/token 置空。
+        会话一起删：残留 token 还能 resume，会变成"不存在但已登录"。
+        """
+        name = self.name
+        if not name:
+            self.send({"m": "account_deleted", "ok": False, "err": "未登录"})
+            return
+        self.teardown_room(notify=True)
+        with LOBBY_LOCK:
+            if self in MATCH_QUEUE:
+                MATCH_QUEUE.remove(self)
+
+        n = DB.delete_account(name)
+        if not n:
+            self.send({"m": "account_deleted", "ok": False, "err": "账号不存在"})
+            return
+
+        with LOBBY_LOCK:
+            if CLIENTS.get(name) is self:
+                CLIENTS.pop(name, None)
+        self.name = None
+        self.token = None
+        self.send({"m": "account_deleted", "ok": True})
+        log(f"删除账号: {name}")
+        broadcast_lobby()
 
     # ---------- 清理 ----------
 

@@ -182,6 +182,18 @@ def get_state(name=None):
     return _ensure(name)[0]
 
 
+def purge(name):
+    """删除账号时清掉该玩家的每日任务档（本地/服务器两个钱包键都清）。"""
+    d = _load()
+    hit = False
+    for k in account.wallet_keys(name):
+        if k in d:
+            d.pop(k, None)
+            hit = True
+    if hit:
+        _save(d)
+
+
 def daily(name=None):
     """今天的任务列表：每项带进度、是否完成、是否已领。"""
     st = get_state(name)

@@ -371,6 +371,8 @@ _REPLY_MAP = {
     "rank_add_ai":  _m_is("rank", "err"),
     "rank_seed":    _m_is("rank", "err"),
     "rank_board":   _m_is("rank_board", "err"),
+    # 删除账号（应答 account_deleted 带 ok 字段；服务端拒绝时 err）
+    "delete_account": _m_is("account_deleted", "err"),
 }
 
 

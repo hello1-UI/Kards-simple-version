@@ -306,6 +306,21 @@ def reroll(name=None):
     return True, None, cost
 
 
+def purge(name):
+    """删除账号时清掉该玩家的商店档（本地/服务器两个钱包键都清）。
+
+    只动这一个玩家的条目，别人的货架与已购外观不受影响。
+    """
+    d = _load()
+    hit = False
+    for k in account.wallet_keys(name):
+        if k in d:
+            d.pop(k, None)
+            hit = True
+    if hit:
+        _save(d)
+
+
 def _mutate(name, fn):
     d = _load()
     k = _key(name)
