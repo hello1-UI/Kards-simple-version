@@ -448,6 +448,9 @@ class App(tk.Tk):
         self.rank_state = None
         self._rank_last = None       # 最近一场的段位变化（结算页展示）
         self._game_online = False    # 当前对局是否联机（决定走排位还是人机结算）
+        # 休闲模式：AI / 真人都能打，但**不结算段位**（战绩、金币、任务照算）。
+        # 从休闲入口进大厅/选国家时置 True，回主菜单或进排位大厅时复位。
+        self.casual = False
         # ---- 账号 / 游客 ----
         # 产品规则：未登录即「游客」——能打人机，不能联机。
         # 游客是临时会话（不落盘），所以这里只设个内存标志，不建目录、不写文件。
@@ -592,9 +595,10 @@ class App(tk.Tk):
     def _build_start(self):
         """主菜单。
 
-        视觉分层（自上而下）：顶部强调条 → 账号/工具条 → 标题区 → 两张入口卡
+        视觉分层（自上而下）：顶部强调条 → 账号/工具条 → 标题区 → 三张入口卡
         → 底部版本水印。所有颜色都走主题 token，换主题时整体跟着变。
         """
+        self.casual = False          # 回主菜单 = 退出休闲流程
         self.start_frame = tk.Frame(self, bg=BG)
         self.start_frame.pack(expand=True, fill="both")
 
@@ -672,22 +676,29 @@ class App(tk.Tk):
         tk.Label(hero, text=i18n.t("app_subtitle"), bg=BG, fg=DIM,
                  font=FONT).pack(pady=(0, 34))
 
-        # ---- 两张入口卡 ----
+        # ---- 三张入口卡：排位联机 / 练习 / 休闲 ----
         row = tk.Frame(hero, bg=BG)
         row.pack()
         battle = CardWidget(row, title=i18n.t("battle_title"),
                             sub=i18n.t("battle_sub"), cost=None,
                             color=DANGER, big=True, on_click=self.on_battle,
                             hint=i18n.t("home_card_battle_hint"))
-        battle.pack(side="left", padx=16, ipady=10)
+        battle.pack(side="left", padx=12, ipady=10)
         practice = CardWidget(row, title=i18n.t("practice_title"),
                               sub=i18n.t("practice_sub"), cost=None,
                               color=PRIMARY, big=True,
                               on_click=lambda: self._build_nation_select(),
                               hint=i18n.t("home_card_practice_hint"))
-        practice.pack(side="left", padx=16, ipady=10)
+        practice.pack(side="left", padx=12, ipady=10)
+        casual = CardWidget(row, title=i18n.t("casual_title"),
+                            sub=i18n.t("casual_sub"), cost=None,
+                            color=ACCENT, big=True,
+                            on_click=self._build_casual_select,
+                            hint=i18n.t("home_card_casual_hint"))
+        casual.pack(side="left", padx=12, ipady=10)
         bind_hover_tree(battle)
         bind_hover_tree(practice)
+        bind_hover_tree(casual)
 
         tk.Label(hero, text=i18n.t("home_hint"), bg=BG, fg=MUTE,
                  font=FONT_S).pack(pady=(26, 0))
@@ -2858,21 +2869,67 @@ class App(tk.Tk):
     def on_battle(self):
         self._build_lobby()
 
+    # ---------------- 休闲模式：选对手类型 ----------------
+
+    def _build_casual_select(self):
+        """休闲入口：先选「和 AI 打」还是「和真人打」。
+
+        两条路都**不结算段位**（`self.casual = True` 一路带到对局里），
+        战绩 / 金币 / 每日任务照常记 —— 休闲只是不打排位。
+        """
+        self.start_frame.destroy()
+        self.start_frame = tk.Frame(self, bg=BG)
+        self.start_frame.pack(expand=True, fill="both")
+        tk.Frame(self.start_frame, bg=ACCENT, height=4).pack(fill="x")
+
+        tk.Button(self.start_frame, text=i18n.t("btn_back"), bg=BTN, fg=TEXT,
+                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+                  command=lambda: self._build_start()).pack(anchor="w", padx=18, pady=12)
+
+        hero = tk.Frame(self.start_frame, bg=BG)
+        hero.pack(expand=True)
+        tk.Label(hero, text=i18n.t("casual_select_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(pady=(0, 6))
+        tk.Label(hero, text=i18n.t("casual_select_sub"), bg=BG, fg=DIM,
+                 font=FONT).pack(pady=(0, 30))
+        row = tk.Frame(hero, bg=BG)
+        row.pack()
+        ai = CardWidget(row, title=i18n.t("casual_ai_title"),
+                        sub=i18n.t("casual_ai_sub"), cost=None,
+                        color=SUCCESS, big=True,
+                        on_click=lambda: self._build_nation_select(casual=True),
+                        hint=i18n.t("casual_ai_hint"))
+        ai.pack(side="left", padx=16, ipady=10)
+        mp = CardWidget(row, title=i18n.t("casual_mp_title"),
+                        sub=i18n.t("casual_mp_sub"), cost=None,
+                        color=ACCENT, big=True,
+                        on_click=lambda: self._build_lobby(casual=True),
+                        hint=i18n.t("casual_mp_hint"))
+        mp.pack(side="left", padx=16, ipady=10)
+        bind_hover_tree(ai)
+        bind_hover_tree(mp)
+        tk.Label(hero, text=i18n.t("casual_note"), bg=BG, fg=MUTE,
+                 font=FONT_S).pack(pady=(26, 0))
+
     # ---------------- 联机大厅（服务器模式） ----------------
-    def _build_lobby(self):
+    def _build_lobby(self, casual=False):
         """大厅：① 连服务器 ② 在线玩家 ③ 出击（快速匹配 / 邀请码房间）
 
         轮询由 `_lobby_poll` 统一驱动，所有服务器事件走 `ServerLink.inbox`。
         这里只负责把「连上服务器 + 已登录」之后才该出现的东西置灰/激活。
+        `casual=True` 时是休闲大厅：匹配池与排位隔离，对局不结算段位。
         """
+        self.casual = bool(casual)
         self.start_frame.destroy()
         self.start_frame = tk.Frame(self, bg=BG)
         self.start_frame.pack(expand=True, fill="both")
         self._lobby_active = True
 
-        tk.Label(self.start_frame, text=i18n.t("lobby_title"), bg=BG, fg=TEXT,
-                 font=FONT_XL).pack(pady=(18, 2))
-        tk.Label(self.start_frame, text=i18n.t("lobby_sub"),
+        tk.Label(self.start_frame,
+                 text=i18n.t("casual_lobby_title") if casual else i18n.t("lobby_title"),
+                 bg=BG, fg=TEXT, font=FONT_XL).pack(pady=(18, 2))
+        tk.Label(self.start_frame,
+                 text=i18n.t("casual_lobby_sub") if casual else i18n.t("lobby_sub"),
                  bg=BG, fg=DIM, font=FONT_S).pack(pady=(0, 8))
         tk.Button(self.start_frame, text=i18n.t("btn_back"), bg=BTN, fg=TEXT,
                   font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
@@ -3002,9 +3059,12 @@ class App(tk.Tk):
         box.pack(fill="x")
         tk.Label(box, text=i18n.t("match_title"), bg=PANEL, fg=TEXT,
                  font=FONT_B).pack(anchor="w", padx=14, pady=(10, 6))
-        self.match_btn = tk.Button(box, text=i18n.t("btn_quick_match"), bg=SUCCESS,
-                                   fg=TEXT, font=FONT_B, bd=0, padx=16, pady=8,
-                                   cursor="hand2", command=self._mp_quick_match)
+        self.match_btn = tk.Button(box,
+                                   text=i18n.t("btn_casual_match") if self.casual
+                                   else i18n.t("btn_quick_match"),
+                                   bg=SUCCESS, fg=TEXT, font=FONT_B, bd=0,
+                                   padx=16, pady=8, cursor="hand2",
+                                   command=self._mp_quick_match)
         self.match_btn.pack(anchor="w", padx=14)
         self.room_btn = tk.Button(box, text=i18n.t("btn_create_room"), bg=PRIMARY,
                                   fg=TEXT, font=FONT_S, bd=0, padx=14, pady=6,
@@ -3079,9 +3139,12 @@ class App(tk.Tk):
         set_btn(self.room_btn, "normal" if (can_play or self.mp_room_code) else "disabled")
         set_btn(self.join_code_btn, "normal" if can_play else "disabled")
         if self.match_btn is not None and self.match_btn.winfo_exists():
+            if self.mp_matching:
+                key = "btn_cancel_casual_match" if self.casual else "btn_cancel_match"
+            else:
+                key = "btn_casual_match" if self.casual else "btn_quick_match"
             self.match_btn.configure(
-                text=i18n.t("btn_cancel_match") if self.mp_matching
-                else i18n.t("btn_quick_match"),
+                text=i18n.t(key),
                 bg=DANGER if self.mp_matching else SUCCESS)
         if self.room_btn is not None and self.room_btn.winfo_exists():
             self.room_btn.configure(
@@ -3637,7 +3700,12 @@ class App(tk.Tk):
             self.mp_role = "host" if msg.get("role") == "host" else "client"
             self.mp_opp_name = msg.get("opp")
             self.mp_room_id = msg.get("room")
+            # 以服务器的回传为准（邀请码房间可能是排位方建的，本地大厅
+            # 是休闲不代表这局休闲 —— 服务器才知道房主的模式）。
+            self.casual = bool(msg.get("casual", self.casual))
             self._lobby_log(i18n.t("matched", opp=msg.get("opp") or "?"))
+            if self.casual:
+                self._lobby_log(i18n.t("casual_no_rank"))
             self._lobby_sync()
             self._lobby_active = False
             # ⚠ 匹配成功就等于**离开大厅**了，必须停掉大厅轮询：否则它会继续
@@ -3645,7 +3713,8 @@ class App(tk.Tk):
             # （实测会刷 invalid command name），而且它只在开头判断
             # _lobby_active，一旦本次回调是"在途"的，就会把定时器又挂回来。
             self._cancel_timer("_t_lobby")
-            self.after(500, lambda: self._build_nation_select(mp=True))
+            self.after(500, lambda: self._build_nation_select(
+                mp=True, casual=self.casual))
         elif m == "matching":
             self.mp_matching = True
             self._lobby_log(i18n.t("matching"))
@@ -3754,7 +3823,9 @@ class App(tk.Tk):
             return
         if not self._mp_require_login():
             return
-        if not self._srv_send({"m": "match"}):
+        # casual 决定匹配池：休闲只和休闲配对，排位只和排位配对。
+        # 服务器把该标记在 matched 里回传，双方结算口径因此不会错位。
+        if not self._srv_send({"m": "match", "casual": 1 if self.casual else 0}):
             self._lobby_log(i18n.t("log_srv_down"))
             return
         self.mp_matching = True
@@ -3770,7 +3841,7 @@ class App(tk.Tk):
             return
         if not self._mp_require_login():
             return
-        if not self._srv_send({"m": "create_room"}):
+        if not self._srv_send({"m": "create_room", "casual": 1 if self.casual else 0}):
             self._lobby_log(i18n.t("log_srv_down"))
 
     def _mp_join_by_code(self):
@@ -3800,14 +3871,20 @@ class App(tk.Tk):
         self._build_start()
 
     # ---------------- 练习：选择主国 ----------------
-    def _build_nation_select(self, mp=False):
+    def _build_nation_select(self, mp=False, casual=False):
         self.mp_mode = mp
+        self.casual = bool(casual)
         self.start_frame.destroy()
         self.start_frame = tk.Frame(self, bg=BG)
         self.start_frame.pack(expand=True, fill="both")
-        tk.Label(self.start_frame, text=i18n.t("mode_mp") if mp else i18n.t("mode_sp"), bg=BG, fg=TEXT,
+        if casual:
+            title = i18n.t("mode_casual")
+        else:
+            title = i18n.t("mode_mp") if mp else i18n.t("mode_sp")
+        tk.Label(self.start_frame, text=title, bg=BG, fg=TEXT,
                  font=FONT_XL).pack(pady=(80, 6))
-        tk.Label(self.start_frame, text=i18n.t("nation_sub"),
+        tk.Label(self.start_frame,
+                 text=i18n.t("casual_nation_sub") if casual else i18n.t("nation_sub"),
                  bg=BG, fg=DIM, font=FONT).pack(pady=(0, 26))
         row = tk.Frame(self.start_frame, bg=BG)
         row.pack()
@@ -3816,7 +3893,8 @@ class App(tk.Tk):
             CardWidget(row, title=nation,
                        sub=f"{hq.name} {hq.hp} HP\n{hq.perk_desc}",
                        cost=None, color=NATION_COLOR[nation], big=True,
-                       on_click=lambda n=nation: self._build_deck_builder(n, mp=self.mp_mode)).pack(
+                       on_click=lambda n=nation: self._build_deck_builder(
+                           n, mp=self.mp_mode, casual=self.casual)).pack(
                 side="left", padx=8, ipady=8)
         # ⚠ 联机时从「匹配成功」到「双方都点开始」之间可能停留很久（组卡很慢）。
         # 这段时间大厅轮询已经停了，如果对手掉线 / 服务器断开，界面会一直停在
@@ -3848,8 +3926,9 @@ class App(tk.Tk):
         self._schedule("_t_prep", 500, self._mp_prep_watch)
 
     # ---------------- 组卡界面 ----------------
-    def _build_deck_builder(self, nation, mp=False):
+    def _build_deck_builder(self, nation, mp=False, casual=False):
         self.mp_mode = mp
+        self.casual = bool(casual)
         self.start_frame.destroy()
         self.deck_nation = nation
         self.deck_counts = {}   # 卡名 -> 数量
@@ -4480,10 +4559,11 @@ class App(tk.Tk):
             return
         random.shuffle(deck)
         self.builder_frame.destroy()
-        self.new_game(self.deck_nation, deck)
+        self.new_game(self.deck_nation, deck, casual=self.casual)
 
     # ---------------- 开新对局（随机匹配 + 随机先手）----------------
-    def new_game(self, nation, deck=None):
+    def new_game(self, nation, deck=None, casual=False):
+        self.casual = bool(casual)
         ai_nation = random.choice(core.MAIN_NATIONS)  # 随机匹配，可能内战
         # 对战界面只有 pygame 一种（经典 tkinter 界面已删除）。必须先激活：
         # 开局日志要进棋盘日志面板。激活失败说明 pygame 缺失/装坏 —— 直接
@@ -5010,10 +5090,12 @@ class App(tk.Tk):
                                    my_hq=me.hq, name=self.account)
             except Exception:                        # noqa: BLE001
                 pass
-            if online:
-                self._rank_settle("lose")
-            else:
-                self._rank_settle_ai("lose")
+            # 休闲对局中途退出：照样记一负 + 金币，但不碰段位（用户指定）
+            if not self.casual:
+                if online:
+                    self._rank_settle("lose")
+                else:
+                    self._rank_settle_ai("lose")
             try:
                 account.currency_reward("lose", name=self.account)
             except Exception:                        # noqa: BLE001
@@ -5242,12 +5324,17 @@ class App(tk.Tk):
             except Exception:                      # noqa: BLE001
                 pass
             # 联机 → 完整排位结算；人机 → 每 2 胜折算 1 星（负场不动段位）。
+            # 休闲模式（AI / 真人）**不结算段位**：星数一点不动，但战绩/金币/任务照记。
             # 平局按规则不存在；真出了也不动段位（不让异常结算打花数据）。
             if result in ("win", "lose"):
-                if getattr(self, "_game_online", False):
+                if self.casual:
+                    rank_line = i18n.t("casual_no_rank")
+                elif getattr(self, "_game_online", False):
                     rank_line = self._rank_settle(result)
                 else:
                     rank_line = self._rank_settle_ai(result)
+            elif self.casual:
+                rank_line = i18n.t("casual_no_rank")
             self._refresh_account_btn()
             self._refresh_quest_btn()
         rw = account.currency_reward(result, name=self.account)

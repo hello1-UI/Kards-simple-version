@@ -479,6 +479,7 @@ class ClientHandler(socketserver.BaseRequestHandler):
         self.room = None
         self.role = None
         self.code = None       # 自己创建的房间邀请码（等待对手加入）
+        self.match_casual = False  # 匹配/房间是否为休闲模式（None/False = 排位）
         self.last_rx = time.time()
         self._buf = b""
 
@@ -674,11 +675,11 @@ class ClientHandler(socketserver.BaseRequestHandler):
         elif t == "lobby":
             self.send({"m": "lobby", "players": lobby_snapshot()})
         elif t == "match":
-            self.do_match()
+            self.do_match(msg.get("casual"))
         elif t == "cancel_match":
             self.do_cancel_match()
         elif t == "create_room":
-            self.do_create_room()
+            self.do_create_room(msg.get("casual"))
         elif t == "join_room":
             self.do_join_room(msg.get("code"))
         elif t in ("act", "seed", "ready", "concede", "chat"):
@@ -738,29 +739,46 @@ class ClientHandler(socketserver.BaseRequestHandler):
 
     # ---------- 匹配 / 房间 ----------
 
-    def do_match(self):
+    def do_match(self, casual=False):
+        """快速匹配。casual=True 走休闲池，与排位池**互不配对**。
+
+        池子隔离而不是"同一局里带个标记"：排位玩家匹配到休闲玩家，双方对
+        「这局算不算星」的预期必然冲突（排位方认为该加，休闲方认为不该加），
+        服务器又没有权威胜负判定，事后无从纠正。分开队列最省事也最安全。
+        """
         if self.room is not None:
             self.send({"m": "err", "err": "你已在对局中"})
             return
+        casual = bool(casual)
         with LOBBY_LOCK:
             if self in MATCH_QUEUE:
                 return
-            # 找一个活着的、还没进房间的对手
+            self.match_casual = casual
+            # 找一个活着、还没进房间、**模式一致**的对手。
+            # 注意不能像以前那样 pop 掉不合适的候选就丢：那些是别人的排队，
+            # 误删会让对方永远等不到匹配（静默卡死）。逐个挑，剩下的原序放回。
             foe = None
-            while MATCH_QUEUE:
-                cand = MATCH_QUEUE.pop(0)
-                if cand.alive and cand.room is None and cand is not self:
+            keep = []
+            for cand in MATCH_QUEUE:
+                if (foe is None and cand is not self and cand.alive
+                        and cand.room is None
+                        and bool(getattr(cand, "match_casual", False)) == casual):
                     foe = cand
-                    break
+                else:
+                    keep.append(cand)
+            MATCH_QUEUE[:] = keep
             if foe is None:
                 MATCH_QUEUE.append(self)
-                self.send({"m": "matching"})
+                self.send({"m": "matching", "casual": casual})
                 return
             room = Room(foe, self)
             ROOMS.append(room)
-        log(f"匹配成功: {foe.name} vs {self.name} (房间 #{room.id})")
-        foe.send({"m": "matched", "room": room.id, "role": "host", "opp": self.name})
-        self.send({"m": "matched", "room": room.id, "role": "guest", "opp": foe.name})
+        log(f"匹配成功: {foe.name} vs {self.name} (房间 #{room.id}"
+            f"{'，休闲' if casual else ''})")
+        foe.send({"m": "matched", "room": room.id, "role": "host",
+                  "opp": self.name, "casual": casual})
+        self.send({"m": "matched", "room": room.id, "role": "guest",
+                   "opp": foe.name, "casual": casual})
         broadcast_lobby()
 
     def do_cancel_match(self):
@@ -769,17 +787,19 @@ class ClientHandler(socketserver.BaseRequestHandler):
                 MATCH_QUEUE.remove(self)
         self.send({"m": "match_cancelled"})
 
-    def do_create_room(self):
+    def do_create_room(self, casual=False):
         if self.room is not None:
             self.send({"m": "err", "err": "你已在对局中"})
             return
         code = secrets.token_hex(3).upper()
+        casual = bool(casual)
         with LOBBY_LOCK:
             if self.code:
                 ROOMS_BY_CODE.pop(self.code, None)
             self.code = code
+            self.match_casual = casual
             ROOMS_BY_CODE[code] = self      # 先存房主，对手进来后替换成 Room
-        self.send({"m": "room_created", "code": code})
+        self.send({"m": "room_created", "code": code, "casual": casual})
 
     def do_join_room(self, code):
         code = (code or "").strip().upper()
@@ -805,9 +825,13 @@ class ClientHandler(socketserver.BaseRequestHandler):
             ROOMS.append(room)
             ROOMS_BY_CODE.pop(code, None)
             host.code = None
-        log(f"房间 {code} 开局: {host.name} vs {self.name}")
-        host.send({"m": "matched", "room": room.id, "role": "host", "opp": self.name})
-        self.send({"m": "matched", "room": room.id, "role": "guest", "opp": host.name})
+            casual = bool(getattr(host, "match_casual", False))
+        log(f"房间 {code} 开局: {host.name} vs {self.name}"
+            f"{'（休闲）' if casual else ''}")
+        host.send({"m": "matched", "room": room.id, "role": "host",
+                   "opp": self.name, "casual": casual})
+        self.send({"m": "matched", "room": room.id, "role": "guest",
+                   "opp": host.name, "casual": casual})
         broadcast_lobby()
 
     def do_relay(self, msg):
