@@ -35,6 +35,10 @@
       def 时就绑定了，换主题不会跟着变。用 `color=None` 再在函数体里取。
 """
 
+import json
+import os
+import re
+
 import kards_engine as core
 
 # ---------------------------------------------------------------- 颜色工具
@@ -244,6 +248,19 @@ PRESETS = {
 
 DEFAULT_PRESET = "frontline"
 
+# 自定义模板的键前缀。用命名空间而不是直接拿名字当键：
+#   1. 不会和内置 preset 撞名（用户可能就叫 "paper"）；
+#   2. `preset_name()` 一眼能看出这是用户模板，落盘/删除时也好定位。
+CUSTOM_PREFIX = "custom:"
+
+# 一个模板需要描述的字段（与 PRESETS 的骨架一致）。
+# _finalize() 会从这里派生 primary/border/card_sel 等全部 token。
+BASE_KEYS = (
+    "accent", "bg", "bg_alt", "panel", "panel_alt", "card", "card_dim",
+    "text", "dim", "mute", "border", "border_hi", "red", "green", "gold",
+    "btn", "row_bg", "row_edge", "mid_bg", "log_bg", "hand_area",
+)
+
 # 可选主色（键 → 色值）。名称走 i18n（theme_a_<key>）。
 ACCENTS = {
     "blue": "#4c7fb8",
@@ -271,7 +288,7 @@ TOKENS = (
 )
 
 
-def _finalize(base, accent):
+def _finalize(base, accent, raw=None):
     """把「骨架 + 主色」算成一整套 token。
 
     主色不是只给按钮上色 —— 它会给底色做 4%~6% 的染色，
@@ -283,11 +300,17 @@ def _finalize(base, accent):
     if not (isinstance(acc, str) and len(acc) == 7 and acc.startswith("#")):
         acc = base.get("accent") or ACCENTS["blue"]
 
-    # 底色轻微向主色靠拢：暗色 5%，亮色 3%（亮色染多了会发脏）
-    tint = 0.03 if light else 0.05
-    for key in ("bg", "bg_alt", "panel", "panel_alt", "card", "row_bg",
-                "hand_area"):
-        p[key] = mix(p[key], acc, tint)
+    # 自定义模板按用户填的**原色**渲染：预设那套「底色向主色靠 5%」
+    # 是设计上的润色，但用户手工调出来的配色再被悄悄染色，会觉得
+    # 「我选的 #123456 怎么不是 #123456」。预设保持原行为。
+    if raw is None:
+        raw = bool(base.get("raw"))
+    if not raw:
+        # 底色轻微向主色靠拢：暗色 5%，亮色 3%（亮色染多了会发脏）
+        tint = 0.03 if light else 0.05
+        for key in ("bg", "bg_alt", "panel", "panel_alt", "card", "row_bg",
+                    "hand_area"):
+            p[key] = mix(p[key], acc, tint)
 
     p["accent"] = acc
     p["primary"] = acc
@@ -331,10 +354,300 @@ def _finalize(base, accent):
     return p
 
 
+# ---------------------------------------------------------------- 自定义模板
+# 用户可以在设置里从当前配色出发，逐项调色并存成自己的模板。
+# 存放位置：<数据目录>/themes/<slug>.json —— 与账号/商店同级的用户数据，
+# 卸载重装不丢、也不需要写注册表。
+#
+# 设计取舍：
+#   * **一个模板一个文件**：坏一个只丢一个，不至于整份配置读不出来；
+#   * **落盘前必过 normalize_preset()**：手改坏的 JSON（少字段、颜色写成
+#     "red"、多打个分号）不能让游戏起不来 —— 非法值一律回落到底色预设；
+#   * **文件名走 slug，显示名另存**：允许重名显示、允许中文文件名，
+#     但 `/ \ : * ? " < > |` 这些会被剔掉，防止路径穿越。
+_CUSTOM_DIR_OVERRIDE = None
+_custom_cache = {"sig": None, "items": {}}
+
+
+def custom_dir():
+    """模板目录（测试可用 set_custom_dir 改到临时目录）。"""
+    if _CUSTOM_DIR_OVERRIDE:
+        return _CUSTOM_DIR_OVERRIDE
+    base = getattr(core, "DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "themes")
+
+
+def set_custom_dir(path):
+    """把模板目录指到别处（只给测试用；None 恢复真实目录）。"""
+    global _CUSTOM_DIR_OVERRIDE
+    _CUSTOM_DIR_OVERRIDE = path
+    _custom_cache["sig"] = None
+    _custom_cache["items"] = {}
+
+
+def _norm_hex(value):
+    """任意写法（#RGB / #RRGGBB / RRGGBB / 大小写）→ '#rrggbb'；非法返回 None。
+
+    绝不抛异常：颜色既可能来自用户输入框，也可能来自手改的 JSON。
+    """
+    if not isinstance(value, str):
+        return None
+    s = value.strip()
+    if not s:
+        return None
+    if not s.startswith("#"):
+        s = "#" + s
+    if len(s) == 4:
+        s = "#" + "".join(ch * 2 for ch in s[1:])
+    if len(s) != 7:
+        return None
+    try:
+        int(s[1:], 16)
+    except ValueError:
+        return None
+    return s.lower()
+
+
+def _slug(name):
+    """显示名 → 文件名主体。去掉路径分隔符/保留字符，空白折成连字符。"""
+    s = str(name or "")
+    s = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", s)
+    s = re.sub(r"\s+", "-", s.strip()).strip(".-")
+    return s[:40]
+
+
+def _unique_name(name, exclude_key=None):
+    """显示名去重（"模板" 已存在 → "模板 2"）。"""
+    name = str(name or "").strip()[:40] or "模板"
+    existing = {info["name"].lower() for k, info in custom_presets().items()
+                if k != exclude_key}
+    if name.lower() not in existing:
+        return name
+    for i in range(2, 100):
+        cand = "%s %d" % (name, i)
+        if cand.lower() not in existing:
+            return cand
+    return "%s %d" % (name, len(existing) + 2)
+
+
+def normalize_preset(data, base=None):
+    """把「用户/文件给的半成品」补成一整套合法骨架。
+
+    - 缺字段 → 用 base（内置 preset 键或骨架 dict，默认 DEFAULT_PRESET）补齐；
+    - 颜色认不出来 → 用 base 的值，**不报错**；
+    - light 强制 bool；
+    - 打上 raw=True：自定义模板按原色渲染，不再被主色染色。
+    """
+    data = data if isinstance(data, dict) else {}
+    colors = data.get("colors") if isinstance(data.get("colors"), dict) else {}
+    # 键大小写不敏感：手改 JSON 很容易写成 "BG"/"Panel"，不该因此被忽略
+    src = {}
+    for k, v in colors.items():
+        src[str(k).strip().lower()] = v
+    for k, v in data.items():
+        if k != "colors":
+            src[str(k).strip().lower()] = v
+
+    if isinstance(base, dict):
+        base_data = base
+        base_key = src.get("base") if src.get("base") in PRESETS else DEFAULT_PRESET
+    else:
+        cand = base if (isinstance(base, str) and base in PRESETS) else src.get("base")
+        base_key = cand if cand in PRESETS else DEFAULT_PRESET
+        base_data = PRESETS[base_key]
+
+    out = {"base": base_key, "raw": True}
+    out["light"] = bool(src.get("light", base_data.get("light", False)))
+    for key in BASE_KEYS:
+        val = _norm_hex(src.get(key))
+        out[key] = val if val is not None else base_data[key]
+    return out
+
+
+def _custom_sig():
+    """目录指纹（文件名 + mtime + size）。目录变了才重读，避免每次调色都打盘。"""
+    d = custom_dir()
+    rows = []
+    try:
+        for entry in os.scandir(d):
+            if not entry.is_file() or not entry.name.lower().endswith(".json"):
+                continue
+            try:
+                st = entry.stat()
+            except OSError:
+                continue
+            rows.append((entry.name, int(st.st_mtime_ns), int(st.st_size)))
+    except OSError:
+        rows = []
+    rows.sort()
+    return (d, tuple(rows))
+
+
+def _scan_custom():
+    """读盘并解析所有自定义模板；坏文件跳过（绝不因一个坏文件起不来）。"""
+    sig = _custom_sig()
+    if sig == _custom_cache["sig"]:
+        return _custom_cache["items"]
+    items = {}
+    d = sig[0]
+    for filename, _mtime, _size in sig[1]:
+        path = os.path.join(d, filename)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        slug = os.path.splitext(filename)[0]
+        data = normalize_preset(raw)
+        name = str(raw.get("name") or slug).strip()[:40] or slug
+        items[CUSTOM_PREFIX + slug] = {"name": name, "data": data,
+                                       "path": path, "slug": slug}
+    _custom_cache["sig"] = sig
+    _custom_cache["items"] = items
+    return items
+
+
+def custom_presets():
+    """{key: {"name", "data", "path", "slug"}} —— 按文件名排序，保证界面稳定。"""
+    return dict(_scan_custom())
+
+
+def all_presets():
+    """内置 + 自定义的全部模板骨架（键 → dict）。"""
+    out = {k: dict(v) for k, v in PRESETS.items()}
+    for key, info in custom_presets().items():
+        out[key] = dict(info["data"])
+    return out
+
+
+def _valid_key(key):
+    if not isinstance(key, str):
+        return DEFAULT_PRESET
+    if key in PRESETS:
+        return key
+    return key if key in custom_presets() else DEFAULT_PRESET
+
+
+def _base_for(key):
+    if key in PRESETS:
+        return PRESETS[key]
+    info = custom_presets().get(key)
+    if info:
+        return info["data"]
+    return PRESETS[DEFAULT_PRESET]
+
+
+def is_custom(key):
+    return isinstance(key, str) and key in custom_presets()
+
+
+def base_of(key):
+    """取某个模板的骨架（键 → 颜色，未经 _finalize 派生）。
+
+    编辑器的起点用它：自定义模板取自己的原色，内置模板取预设原色。
+    """
+    return dict(_base_for(_valid_key(key)))
+
+
+def preset_label(key):
+    """界面显示名：内置走 i18n，自定义用用户起的名字。"""
+    if is_custom(key):
+        return custom_presets()[key]["name"]
+    try:
+        import kards_i18n as i18n
+        return i18n.t("theme_p_" + str(key))
+    except Exception:                                        # noqa: BLE001
+        return str(key)
+
+
+def save_custom(name, data=None, key=None):
+    """新建或更新一个自定义模板，返回模板键（`custom:<slug>`）。
+
+    key 给定时视为「编辑现有模板」：文件名不变（改名只改显示名），
+    这样即使别处已经引用了这个键也不会失效。
+    """
+    name = _unique_name(name, exclude_key=key)
+    old = custom_presets().get(key) if key else None
+    base = old["data"] if old else DEFAULT_PRESET
+    norm = normalize_preset(data if data is not None else (old or {}), base=base)
+
+    d = custom_dir()
+    os.makedirs(d, exist_ok=True)
+    if old:
+        slug = old["slug"]
+    else:
+        root = _slug(name) or "theme"
+        slug = root
+        existing = {info["slug"].lower() for info in custom_presets().values()}
+        i = 2
+        while slug.lower() in existing or os.path.exists(
+                os.path.join(d, slug + ".json")):
+            slug = "%s-%d" % (root, i)
+            i += 1
+
+    payload = {"version": 1, "name": name, "base": norm["base"],
+               "light": norm["light"],
+               "colors": {k: norm[k] for k in BASE_KEYS}}
+    path = os.path.join(d, slug + ".json")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    _custom_cache["sig"] = None
+    return CUSTOM_PREFIX + slug
+
+
+def delete_custom(key):
+    """删除模板文件。删的是当前主题时自动回落到默认，避免"主题指向空"。"""
+    info = custom_presets().get(key)
+    if not info:
+        return False
+    try:
+        os.remove(info["path"])
+    except OSError:
+        return False
+    _custom_cache["sig"] = None
+    if _current["preset"] == key:
+        apply(DEFAULT_PRESET, None)
+    return True
+
+
+def export_custom(key, path):
+    """把模板导出成可分享的 JSON（只含显示名与颜色，不含本机路径）。"""
+    info = custom_presets().get(key)
+    if not info:
+        raise ValueError("unknown template: %r" % (key,))
+    data = info["data"]
+    payload = {"version": 1, "name": info["name"], "base": data["base"],
+               "light": data["light"],
+               "colors": {k: data[k] for k in BASE_KEYS}}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+    return path
+
+
+def import_custom(path, name=None):
+    """从 JSON 导入模板，返回新模板键。文件坏了抛 ValueError（界面据此提示）。"""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise ValueError(str(exc)) from exc
+    if not isinstance(raw, dict):
+        raise ValueError("not a template object")
+    if not isinstance(raw.get("colors"), dict) and not any(
+            k in raw for k in BASE_KEYS):
+        raise ValueError("no colours in file")
+    nm = name or raw.get("name") or os.path.splitext(os.path.basename(path))[0]
+    return save_custom(nm, raw)
+
+
 def palette(preset=None, accent=None):
     """取一整套 token（不改变当前主题，供预览/测试使用）。"""
-    key = preset if preset in PRESETS else DEFAULT_PRESET
-    return _finalize(PRESETS[key], accent)
+    key = _valid_key(preset)
+    return _finalize(_base_for(key), accent)
 
 
 def preview(preset):
@@ -372,13 +685,17 @@ def _write_module_globals(p):
 def apply(preset=None, accent=None):
     """切换主题并刷新本模块的常量。返回新的 token 字典。
 
-    preset 非法 → 用默认；accent 为空 → 用预设自带主色。
+    preset 合法（内置或自定义）就用它；非法 → 回落到默认；
+    preset 为 None → 保持当前。
+    accent 为空 → 用模板自带主色；与模板一致则记为空（跟随模板）。
     调用方（KARDS.py / kards_board.py）还需要 `sync(globals())`。
     """
-    key = preset if preset in PRESETS else (_current["preset"] or DEFAULT_PRESET)
-    p = palette(key, accent or None)
+    key = _valid_key(preset) if preset else _valid_key(_current["preset"])
+    accent = _norm_hex(accent) if accent else None
+    p = palette(key, accent)
     _current["preset"] = key
-    _current["accent"] = accent if (accent and accent != PRESETS[key]["accent"]) else ""
+    base_accent = _norm_hex(_base_for(key).get("accent")) or ""
+    _current["accent"] = accent if (accent and accent != base_accent) else ""
     _current["palette"] = p
     _write_module_globals(p)
     return p
@@ -407,18 +724,20 @@ _PREF_ACCENT = "theme_accent"
 
 
 def load():
-    """从 settings.json 恢复主题；没有/非法就用默认。返回 preset 名。"""
+    """从 settings.json 恢复主题；没有/非法就用默认。返回 preset 名。
+
+    自定义模板被删掉后，上次存的 `custom:xxx` 会失效 —— 这里回落到默认，
+    而不是让界面带着一套不存在的模板启动。
+    """
     try:
         import kards_i18n as i18n
         preset = i18n.get_pref(_PREF_PRESET, DEFAULT_PRESET)
         accent = i18n.get_pref(_PREF_ACCENT, "") or ""
     except Exception:                                        # noqa: BLE001
         preset, accent = DEFAULT_PRESET, ""
-    if preset not in PRESETS:
+    if not isinstance(preset, str) or _valid_key(preset) != preset:
         preset = DEFAULT_PRESET
-    if accent and not (isinstance(accent, str) and len(accent) == 7
-                       and accent.startswith("#")):
-        accent = ""
+    accent = _norm_hex(accent) or ""
     apply(preset, accent or None)
     return preset
 

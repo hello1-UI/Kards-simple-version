@@ -44,3 +44,6 @@ assets/musicpack/*.zip
 # Github Push 相关文件
 *.gp_push
 .gp_push
+
+# 自定义 UI 模板（用户数据，见 kards_theme.py）
+themes/

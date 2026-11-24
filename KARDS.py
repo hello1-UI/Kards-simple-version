@@ -29,7 +29,7 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, simpledialog
+from tkinter import colorchooser, filedialog, messagebox, simpledialog
 
 
 import kards_engine as core
@@ -206,6 +206,83 @@ def bind_hover_tree(widget):
         if child.winfo_children():
             bind_hover_tree(child)
     return widget
+
+
+class ScrollBox(tk.Frame):
+    """带纵向滚动的容器（设置页内容会随模板数量增长，不能靠加高窗口硬扛）。
+
+    用法：
+        box = ScrollBox(parent);  box.pack(fill="both", expand=True)
+        ... 往 box.body 里 pack/grid 内容 ...
+
+    ⚠ 内容超出时只靠滚轮：要把 <MouseWheel> 绑到**每个子控件**上，
+      否则鼠标压在 Label 上滚不动（Tk 的事件只发给指针下的控件）。
+      这里在 body 每次 Configure 时递归补绑（add="+" 不覆盖原有绑定）。
+    """
+
+    def __init__(self, parent, bg=None):
+        bg = bg or BG
+        super().__init__(parent, bg=bg)
+        self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0, bd=0)
+        self.vbar = tk.Scrollbar(self, orient="vertical", bd=0,
+                                 highlightthickness=0, width=10,
+                                 bg=PANEL, troughcolor=BG_ALT,
+                                 activebackground=BORDER_HI,
+                                 command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self._on_scroll)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.body = tk.Frame(self.canvas, bg=bg)
+        self._win = self.canvas.create_window((0, 0), window=self.body,
+                                              anchor="nw")
+        self.body.bind("<Configure>", self._on_body)
+        self.canvas.bind("<Configure>", self._on_canvas)
+
+    def _on_body(self, _event=None):
+        try:
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            self._bind_wheel(self.body)
+        except tk.TclError:
+            pass
+
+    def _on_canvas(self, event):
+        try:
+            self.canvas.itemconfigure(self._win, width=event.width)
+        except tk.TclError:
+            pass
+
+    def _on_scroll(self, first, last):
+        # 内容装得下时不显示滚动条（免得界面上多一条没用的灰条）
+        try:
+            if float(first) <= 0.0 and float(last) >= 1.0:
+                self.vbar.pack_forget()
+            else:
+                self.vbar.pack(side="right", fill="y", before=self.canvas)
+        except tk.TclError:
+            pass
+        self.vbar.set(first, last)
+
+    def _walk(self, widget):
+        yield widget
+        try:
+            kids = widget.winfo_children()
+        except tk.TclError:
+            return
+        for child in kids:
+            yield from self._walk(child)
+
+    def _bind_wheel(self, root):
+        for w in self._walk(root):
+            try:
+                w.bind("<MouseWheel>", self._wheel, add="+")
+            except tk.TclError:
+                pass
+
+    def _wheel(self, event):
+        first, last = self.canvas.yview()
+        if first <= 0.0 and last >= 1.0:
+            return None                 # 不需要滚 → 不吞事件
+        self.canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        return "break"
 
 
 def bind_tooltip(widget, get_text, delay=420):
@@ -2151,6 +2228,294 @@ class App(tk.Tk):
                   command=lambda: pick(theme.DEFAULT_PRESET, None)
                   ).pack(anchor="w", pady=(14, 0))
 
+        self._theme_custom_section(parent, cur, pick, on_change)
+
+    def _theme_custom_section(self, parent, cur, pick, on_change=None):
+        """自定义模板区（设置窗与对局内外观窗共用）。
+
+        这里只放「胶囊 + 三个按钮」：胶囊点一下即应用，右侧「编辑」进编辑器。
+        真正调色在 `open_theme_editor()` 里做 —— 21 个色块塞进设置页会把
+        窗口顶爆，独立窗口才有地方放两列 + 实时预览。
+        """
+        tk.Label(parent, text=i18n.t("tpl_section"), bg=BG, fg=TEXT,
+                 font=FONT_B).pack(anchor="w", pady=(18, 2))
+        tk.Label(parent, text=i18n.t("tpl_hint"), bg=BG, fg=DIM, font=FONT_S,
+                 wraplength=860, justify="left").pack(anchor="w")
+
+        customs = theme.custom_presets()
+        row = tk.Frame(parent, bg=BG)
+        row.pack(anchor="w", pady=(8, 2))
+        if not customs:
+            tk.Label(row, text=i18n.t("tpl_empty"), bg=BG, fg=MUTE,
+                     font=FONT_S).pack(anchor="w", pady=(2, 6))
+        for i, (key, info) in enumerate(customs.items()):
+            pv = theme.preview(key)
+            chosen = (key == cur)
+            chip = tk.Frame(row, bg=pv["panel"], width=212, height=46,
+                            cursor="hand2", highlightthickness=2,
+                            highlightbackground=ACCENT if chosen else pv["border"])
+            chip.grid(row=i // 4, column=i % 4, padx=(0, 10), pady=(0, 8))
+            chip.pack_propagate(False)
+            dot = tk.Frame(chip, bg=pv["accent"], width=6, height=46)
+            dot.pack(side="left", fill="y")
+            nm = tk.Label(chip, text=info["name"], bg=pv["panel"], fg=pv["text"],
+                          font=(FONT_FAMILY, 11, "bold"), anchor="w")
+            nm.pack(side="left", fill="both", expand=True, padx=(8, 4))
+            edit = tk.Label(chip, text=i18n.t("tpl_edit"), bg=pv["panel"],
+                            fg=pv["dim"], font=(FONT_FAMILY, 9), cursor="hand2")
+            edit.pack(side="right", padx=(0, 8))
+            for w in (chip, nm, dot):
+                w.bind("<Button-1>", lambda e, k=key: pick(k, None))
+            edit.bind("<Button-1>", lambda e, k=key: self.open_theme_editor(
+                edit_key=k, on_done=on_change))
+
+        tools = tk.Frame(parent, bg=BG)
+        tools.pack(anchor="w", pady=(2, 0))
+
+        def new_template():
+            self.open_theme_editor(base_key=cur, on_done=on_change)
+
+        def import_template():
+            path = filedialog.askopenfilename(
+                parent=self, title=i18n.t("tpl_import_title"),
+                filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+            if not path:
+                return
+            try:
+                key = theme.import_custom(path)
+            except (ValueError, OSError) as exc:
+                messagebox.showerror(i18n.t("tpl_editor_title"),
+                                     i18n.t("tpl_import_fail", err=str(exc)),
+                                     parent=self)
+                return
+            self._pick_theme(key, None)
+            if on_change is not None:
+                on_change()
+
+        def export_template():
+            if not theme.is_custom(cur):
+                return
+            name = theme.preset_label(cur)
+            path = filedialog.asksaveasfilename(
+                parent=self, title=i18n.t("tpl_export_title"),
+                defaultextension=".json", initialfile=name + ".json",
+                filetypes=[("JSON", "*.json")])
+            if not path:
+                return
+            try:
+                theme.export_custom(cur, path)
+            except (ValueError, OSError) as exc:
+                messagebox.showerror(i18n.t("tpl_editor_title"),
+                                     i18n.t("tpl_import_fail", err=str(exc)),
+                                     parent=self)
+                return
+            messagebox.showinfo(i18n.t("tpl_editor_title"),
+                                i18n.t("tpl_export_ok", path=path), parent=self)
+
+        for text, cmd, color in ((i18n.t("tpl_new"), new_template, PRIMARY),
+                                 (i18n.t("tpl_import"), import_template, BTN),
+                                 (i18n.t("tpl_export"), export_template, BTN)):
+            can = not (text == i18n.t("tpl_export") and not theme.is_custom(cur))
+            b = tk.Button(tools, text=text, bg=color if can else BTN,
+                          fg=PRIMARY_FG if (can and color == PRIMARY) else
+                          (TEXT if can else MUTE),
+                          font=FONT_S, bd=0, padx=14, pady=6,
+                          cursor="hand2" if can else "arrow",
+                          state="normal" if can else "disabled",
+                          activebackground=theme.hover_of(color) if can else BTN,
+                          activeforeground=TEXT,
+                          command=cmd if can else None)
+            b.pack(side="left", padx=(0, 8))
+            if can:
+                bind_hover(b)
+
+    def open_theme_editor(self, edit_key=None, base_key=None, on_done=None):
+        """自定义模板编辑器：21 个色块 + 亮/暗标记 + 实时预览。
+
+        edit_key 给定 = 编辑已有模板（可改名、可删除）；
+        否则以 base_key（默认当前主题）为起点新建。
+        """
+        editing = bool(edit_key and theme.is_custom(edit_key))
+        if editing:
+            info = theme.custom_presets()[edit_key]
+            data = dict(info["data"])
+            shown_name = info["name"]
+        else:
+            data = theme.normalize_preset(theme.base_of(base_key or
+                                                        theme.preset_name()))
+            data["light"] = bool(data.get("light"))
+            shown_name = i18n.t("tpl_default_name")
+
+        win = tk.Toplevel(self)
+        win.role = "theme_editor"
+        win.title(i18n.t("tpl_editor_title"))
+        win.configure(bg=BG)
+        win.geometry("780x700")
+        win.minsize(740, 640)
+        win.transient(self)
+        try:
+            win.attributes("-topmost", True)
+            win.after(200, lambda: win.attributes("-topmost", False))
+        except tk.TclError:
+            pass
+
+        head = tk.Frame(win, bg=BG)
+        head.pack(fill="x", padx=22, pady=(18, 4))
+        tk.Label(head, text=i18n.t("tpl_name"), bg=BG, fg=TEXT,
+                 font=FONT_B).pack(side="left")
+        name_var = tk.StringVar(value=shown_name)
+        entry = tk.Entry(head, textvariable=name_var, bg=PANEL, fg=TEXT,
+                         insertbackground=TEXT, font=FONT, bd=0, width=28,
+                         highlightthickness=1, highlightbackground=BORDER,
+                         highlightcolor=ACCENT)
+        entry.pack(side="left", padx=(12, 0), ipady=5)
+        entry.focus_set()
+        entry.select_range(0, "end")
+
+        light_var = tk.BooleanVar(value=bool(data.get("light")))
+        tk.Checkbutton(win, text=i18n.t("tpl_light"), variable=light_var,
+                       bg=BG, fg=TEXT, selectcolor=PANEL, font=FONT_S, bd=0,
+                       highlightthickness=0, activebackground=BG,
+                       activeforeground=TEXT,
+                       command=lambda: refresh_preview()
+                       ).pack(anchor="w", padx=22, pady=(6, 0))
+        tk.Label(win, text=i18n.t("tpl_light_hint"), bg=BG, fg=MUTE,
+                 font=FONT_S, wraplength=720, justify="left").pack(
+            anchor="w", padx=22, pady=(0, 6))
+
+        body = tk.Frame(win, bg=BG)
+        body.pack(fill="both", expand=True, padx=22, pady=(4, 0))
+
+        swatches, hexes = {}, {}
+
+        def paint_row(field):
+            swatches[field].configure(bg=data[field],
+                                      activebackground=data[field])
+            hexes[field].configure(text=data[field].upper())
+
+        def choose_color(field):
+            res = colorchooser.askcolor(
+                color=data.get(field) or "#000000", parent=win,
+                title=i18n.t("tpl_pick_title",
+                             field=i18n.t("tpl_f_" + field)))
+            if not res or not res[1]:
+                return
+            data[field] = str(res[1]).lower()
+            paint_row(field)
+            refresh_preview()
+
+        for idx, field in enumerate(theme.BASE_KEYS):
+            cell = tk.Frame(body, bg=BG)
+            cell.grid(row=idx // 2, column=idx % 2, sticky="w",
+                      padx=(0, 20), pady=3)
+            tk.Label(cell, text=i18n.t("tpl_f_" + field), bg=BG, fg=DIM,
+                     font=FONT_S, width=10, anchor="w").pack(side="left")
+            sw = tk.Button(cell, text="", bg=data[field], width=4, height=1,
+                           bd=0, relief="flat", cursor="hand2",
+                           activebackground=data[field],
+                           command=lambda f=field: choose_color(f))
+            sw.pack(side="left", padx=(0, 8))
+            hx = tk.Label(cell, text=data[field].upper(), bg=BG, fg=TEXT,
+                          font=(FONT_FAMILY, 9))
+            hx.pack(side="left")
+            swatches[field] = sw
+            hexes[field] = hx
+
+        # 实时预览：面板 / 卡面 / 强调按钮 / 正文一起看，比只看色块直观
+        prev = tk.Frame(win, bg=data["bg"], height=66,
+                        highlightthickness=1, highlightbackground=BORDER)
+        prev.pack(fill="x", padx=22, pady=(10, 10))
+        prev.pack_propagate(False)
+        prev_panel = tk.Frame(prev, bg=data["panel"], width=190, height=46)
+        prev_panel.pack(side="left", padx=10, pady=10)
+        prev_panel.pack_propagate(False)
+        prev_label = tk.Label(prev_panel, text=i18n.t("tpl_preview"),
+                              bg=data["panel"], fg=data["text"], font=FONT_S)
+        prev_label.pack(expand=True)
+        prev_card = tk.Frame(prev, bg=data["card"], width=110, height=46)
+        prev_card.pack(side="left", pady=10, padx=(0, 10))
+        prev_card.pack_propagate(False)
+        prev_dim = tk.Label(prev_card, text=i18n.t("tpl_f_dim"),
+                            bg=data["card"], fg=data["dim"], font=FONT_S)
+        prev_dim.pack(expand=True)
+        prev_btn = tk.Button(prev, text=i18n.t("tpl_save"), bg=data["accent"],
+                             fg=theme.best_fg(data["accent"]), font=FONT_S,
+                             bd=0, padx=14, pady=6, activebackground=data["accent"],
+                             activeforeground=theme.best_fg(data["accent"]),
+                             state="disabled", disabledforeground=theme.best_fg(
+                                 data["accent"]))
+        prev_btn.pack(side="left", pady=10)
+
+        def refresh_preview():
+            light = bool(light_var.get())
+            # 亮/暗切换不改变用户选的原色，只影响预览里的派生效果
+            prev.configure(bg=data["bg"])
+            prev_panel.configure(bg=data["panel"])
+            prev_label.configure(bg=data["panel"],
+                                 fg=theme.ensure_contrast(data["text"],
+                                                          data["panel"], 4.5))
+            prev_card.configure(bg=data["card"])
+            prev_dim.configure(bg=data["card"],
+                               fg=theme.ensure_contrast(data["dim"],
+                                                        data["card"], 3.0))
+            fg = theme.best_fg(data["accent"])
+            prev_btn.configure(bg=data["accent"], fg=fg, activebackground=(
+                theme.lighten(data["accent"], 0.12) if not light
+                else theme.darken(data["accent"], 0.10)),
+                activeforeground=fg, disabledforeground=fg)
+            prev.configure(highlightbackground=data["border"])
+
+        refresh_preview()
+
+        bar = tk.Frame(win, bg=BG)
+        bar.pack(fill="x", padx=22, pady=(0, 16))
+
+        def do_save():
+            nm = name_var.get().strip()
+            if not nm:
+                messagebox.showwarning(i18n.t("tpl_editor_title"),
+                                       i18n.t("tpl_name_empty"), parent=win)
+                entry.focus_set()
+                return
+            data["light"] = bool(light_var.get())
+            try:
+                key = theme.save_custom(nm, data,
+                                        key=edit_key if editing else None)
+            except (OSError, ValueError) as exc:
+                messagebox.showerror(i18n.t("tpl_editor_title"), str(exc),
+                                     parent=win)
+                return
+            win.destroy()
+            self._pick_theme(key, None)
+            if on_done is not None:
+                on_done()
+
+        def do_delete():
+            if not messagebox.askyesno(
+                    i18n.t("tpl_editor_title"),
+                    i18n.t("tpl_delete_confirm", name=shown_name), parent=win):
+                return
+            theme.delete_custom(edit_key)
+            win.destroy()
+            self._pick_theme(theme.preset_name(), None)
+            if on_done is not None:
+                on_done()
+
+        tk.Button(bar, text=i18n.t("tpl_save"), bg=SUCCESS, fg=TEXT,
+                  font=FONT_B, bd=0, padx=18, pady=8, cursor="hand2",
+                  activebackground=SUCCESS_HOVER, activeforeground=TEXT,
+                  command=do_save).pack(side="right")
+        tk.Button(bar, text=i18n.t("tpl_cancel"), bg=BTN, fg=TEXT,
+                  font=FONT_S, bd=0, padx=16, pady=8, cursor="hand2",
+                  activebackground=BTN_HOVER, activeforeground=TEXT,
+                  command=win.destroy).pack(side="right", padx=(0, 8))
+        if editing:
+            tk.Button(bar, text=i18n.t("tpl_delete"), bg=DANGER, fg=TEXT,
+                      font=FONT_S, bd=0, padx=16, pady=8, cursor="hand2",
+                      activebackground=DANGER_HOVER, activeforeground=TEXT,
+                      command=do_delete).pack(side="left")
+        win.bind("<Escape>", lambda e: win.destroy())
+
     def _pick_theme(self, preset=None, accent=None):
         """应用主题（并落盘），然后把所有已经打开的界面换成新配色。"""
         theme.apply(preset or theme.preset_name(), accent or None)
@@ -2230,8 +2595,11 @@ class App(tk.Tk):
         state = {"tab": tab if tab in tabs else "appearance"}
         bar = tk.Frame(win, bg=BG)
         bar.pack(fill="x", padx=22)
-        body = tk.Frame(win, bg=BG)
-        body.pack(fill="both", expand=True, padx=22, pady=(12, 16))
+        # 外观页会随着自定义模板增多而变长 —— 用可滚动容器兜住，
+        # 而不是继续加高窗口（高到一定程度就顶出屏幕）。
+        scroll = ScrollBox(win, BG)
+        scroll.pack(fill="both", expand=True, padx=22, pady=(12, 16))
+        body = scroll.body
 
         tab_btns = {}
 
@@ -5118,7 +5486,7 @@ class App(tk.Tk):
         win.role = "theme"
         win.title(i18n.t("theme_section"))
         win.configure(bg=BG)
-        win.geometry("800x580")
+        win.geometry("800x600")
         win.transient(self)
         head = tk.Frame(win, bg=BG)
         head.pack(fill="x", padx=22, pady=(18, 6))
@@ -5131,8 +5499,9 @@ class App(tk.Tk):
         x_btn.pack(side="right")
         bind_hover(x_btn)
         tk.Frame(win, bg=BORDER, height=1).pack(fill="x", padx=22, pady=(6, 12))
-        body = tk.Frame(win, bg=BG)
-        body.pack(fill="both", expand=True, padx=22)
+        scroll = ScrollBox(win, BG)
+        scroll.pack(fill="both", expand=True, padx=22)
+        body = scroll.body
 
         def reload():
             try:
