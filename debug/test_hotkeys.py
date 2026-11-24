@@ -59,6 +59,18 @@ class Ev:
         self.keysym = keysym
 
 
+def _one_screen(app):
+    """主窗口直属的、还活着的 Frame —— 正常永远 ≤1 个（叠屏是历史 bug）。"""
+    n = 0
+    for w in app.winfo_children():
+        try:
+            if w.winfo_exists() and w.winfo_class() == "Frame":
+                n += 1
+        except Exception:                              # noqa: BLE001
+            pass
+    return n <= 1
+
+
 def headless():
     print("1. 键位表（用户指定的 11 个键）")
     import KARDS as gui
@@ -230,6 +242,104 @@ def gui_tests():
         check("音乐按钮换文案后 Y 角标不丢", chips == ["Y"], chips)
         check("工具条按钮已重新包装（music_btn 仍在）",
               isinstance(app.music_btn, tk.Button))
+
+        # ---- P：子界面返回（与 Q~H 相反：只在子界面生效）----
+        print("  -- P 返回 --")
+        for name, fn in saved.items():
+            setattr(app, name, fn)
+
+        app._build_start()
+        app.update()
+        dispatch("p")
+        check("主菜单按 P 无动作", app._on_main_menu() is True,
+              app._on_main_menu())
+        check("主菜单没有登记返回动作", app._back_action is None)
+        check("按 P 不触发任何快捷键", dispatch("p") == [], dispatch("p"))
+
+        app._build_casual_select()
+        app.update()
+        check("休闲选择页登记了返回动作",
+              callable(app._back_action), app._back_action)
+        check("休闲选择页有 P 提示的返回按钮",
+              any(str(w.cget("text")).endswith("P")
+                  for w in walk(app, []) if isinstance(w, tk.Button)))
+        dispatch("p")
+        app.update()
+        check("休闲选择页按 P 回主菜单", app._on_main_menu() is True)
+        check("主菜单只有一套界面", _one_screen(app))
+
+        app._build_nation_select()
+        app.update()
+        dispatch("p")
+        app.update()
+        check("练习·选国家按 P 回主菜单", app._on_main_menu() is True)
+        check("选国家返回后不叠屏", _one_screen(app))
+
+        # 组卡页 → 选国家（上一级不是主菜单）
+        app._build_nation_select()
+        app.update()
+        app._build_deck_builder("德国")
+        app.update()
+        check("组卡页登记了返回动作", callable(app._back_action))
+        dispatch("p")
+        app.update()
+        check("组卡页按 P 回选国家（不是直接回主菜单）",
+              app._on_main_menu() is False and
+              any(str(w.cget("text")).startswith(i18n.t("btn_back"))
+                  for w in walk(app, []) if isinstance(w, tk.Button)))
+        check("组卡返回后不叠屏", _one_screen(app))
+
+        # 大厅 → 主菜单（必须顺手脱队）
+        app._build_lobby()
+        app.update()
+        app.mp_matching = True
+        dispatch("p")
+        app.update()
+        check("大厅按 P 回主菜单", app._on_main_menu() is True)
+        check("大厅按 P 顺带取消排队标志", app.mp_matching is False)
+        check("大厅返回后不叠屏", _one_screen(app))
+
+        # ---- P 的守门条件 ----
+        app._build_casual_select()
+        app.update()
+        app.game = object()
+        dispatch("p")
+        app.update()
+        check("对局中按 P 不返回（要 Esc 走判负确认）",
+              app._on_main_menu() is False)
+        app.game = None
+        app._pyboard = object()
+        dispatch("p")
+        app.update()
+        check("pygame 棋盘里按 P 不返回", app._on_main_menu() is False)
+        app._pyboard = None
+
+        dlg2 = tk.Toplevel(app)
+        dlg2.role = "shop"
+        app.update()
+        dispatch("p")
+        app.update()
+        check("对话框开着按 P 不关对话框也不跳屏", app._on_main_menu() is False)
+        dlg2.destroy()
+        app.update()
+
+        entry2 = tk.Entry(app)
+        app.focus_get = lambda: entry2
+        dispatch("p")
+        app.update()
+        check("焦点在输入框时 P 只是字母 p", app._on_main_menu() is False)
+        app.focus_get = real_focus
+
+        # 连发保护：这里必须直接调 on_hotkey（dispatch 会重置时间戳，
+        # 那等于把要测的保护关掉了）
+        app._hotkey_at = __import__("time").monotonic()
+        app.on_hotkey(Ev("p"))
+        app.update()
+        check("0.25s 内的重复 P 被吞掉", app._on_main_menu() is False)
+
+        dispatch("p")
+        app.update()
+        check("守门解除后 P 恢复正常", app._on_main_menu() is True)
 
         for name, fn in saved.items():
             setattr(app, name, fn)

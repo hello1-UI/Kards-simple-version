@@ -568,6 +568,8 @@ class App(tk.Tk):
         # 绑定在 Tk 层（bind_all）而不是窗口上：主菜单重建后不用重新绑。
         self._menu_cards = ()
         self._hotkey_at = 0.0
+        # 子界面「返回」动作（P 键）。各界面构造函数自己登记，主菜单清空。
+        self._back_action = None
         # 换屏时间戳：CardWidget 用它做「刚换屏 N 秒内忽略点击」的穿透保护
         # （结算页整屏点击 + 玩家连点会误触新主菜单的入口卡）。
         self._screen_built_at = 0.0
@@ -831,10 +833,13 @@ class App(tk.Tk):
         return False
 
     def on_hotkey(self, event=None):
-        """主菜单字母快捷键（Q/W/E/R/T/Y/A/S/F/G/H）。"""
+        """主菜单字母快捷键（Q/W/E/R/T/Y/A/S/F/G/H）+ 各子界面的 P（返回）。"""
         if event is None:
             return None
-        name = self.HOTKEYS.get((event.keysym or "").lower())
+        key = (event.keysym or "").lower()
+        if key == "p":
+            return self._hotkey_back()
+        name = self.HOTKEYS.get(key)
         if name is None:
             return None
         if self._hotkey_blocked():
@@ -852,6 +857,39 @@ class App(tk.Tk):
             fn()
         except Exception:                              # noqa: BLE001
             # 快捷键是附加能力：任何异常都不许把主菜单搞崩
+            pass
+        return "break"
+
+    def _hotkey_back(self):
+        """P：等价于当前界面上的「← 返回」。
+
+        与 Q~H 相反 —— 那些只在主菜单生效，P 只在**子界面**生效。
+        每个界面的返回动作不同（大厅要通知服务器脱队、联机准备要放弃房间、
+        组卡页要回选国家），所以统一由各构造函数登记到 `self._back_action`，
+        这里不猜「上一层是哪」。
+        """
+        if self.game is not None or getattr(self, "_pyboard", None) is not None:
+            return None            # 对局中：请用 Esc（涉及判负确认，不能一键走）
+        if self._dialog_open():
+            return None            # 对话框有自己的关闭按钮 / Esc
+        if self._on_main_menu():
+            return None            # 主菜单没有上一层
+        try:
+            focus = self.focus_get()
+        except (KeyError, tk.TclError):
+            focus = None
+        if isinstance(focus, (tk.Entry, tk.Text, tk.Spinbox)):
+            return None            # 正在打字：卡组名/邀请码里的 p
+        now = time.monotonic()
+        if now - getattr(self, "_hotkey_at", 0.0) < 0.25:
+            return "break"
+        fn = getattr(self, "_back_action", None)
+        if not callable(fn):
+            return None
+        self._hotkey_at = now
+        try:
+            fn()
+        except Exception:                              # noqa: BLE001
             pass
         return "break"
 
@@ -967,6 +1005,7 @@ class App(tk.Tk):
         casual.pack(side="left", padx=12, ipady=10)
         # 主菜单判据（见 _on_main_menu）：这三张卡随主菜单一起生灭
         self._menu_cards = (battle, practice, casual)
+        self._back_action = None      # 主菜单没有上一层（P 不响应）
         bind_hover_tree(battle)
         bind_hover_tree(practice)
         bind_hover_tree(casual)
@@ -3477,9 +3516,10 @@ class App(tk.Tk):
         self.start_frame = tk.Frame(self, bg=BG)
         self.start_frame.pack(expand=True, fill="both")
         tk.Frame(self.start_frame, bg=ACCENT, height=4).pack(fill="x")
-        tk.Button(self.start_frame, text=i18n.t("btn_back"), bg=BTN, fg=TEXT,
-                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+        tk.Button(self.start_frame, text=i18n.t("btn_back") + "  P", bg=BTN,
+                  fg=TEXT, font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
                   command=self._casual_back).pack(anchor="w", padx=18, pady=12)
+        self._back_action = self._casual_back       # P 键 = 这个返回按钮
 
         hero = tk.Frame(self.start_frame, bg=BG)
         hero.pack(expand=True)
@@ -3539,10 +3579,11 @@ class App(tk.Tk):
         tk.Label(self.start_frame,
                  text=i18n.t("casual_lobby_sub") if casual else i18n.t("lobby_sub"),
                  bg=BG, fg=DIM, font=FONT_S).pack(pady=(0, 8))
-        tk.Button(self.start_frame, text=i18n.t("btn_back"), bg=BTN, fg=TEXT,
-                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+        tk.Button(self.start_frame, text=i18n.t("btn_back") + "  P", bg=BTN,
+                  fg=TEXT, font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
                   command=self._lobby_back).place(relx=1.0, rely=0.0,
                                                   anchor="ne", x=-16, y=10)
+        self._back_action = self._lobby_back        # P：脱队 + 回主菜单
 
         cols = tk.Frame(self.start_frame, bg=BG)
         cols.pack(fill="both", expand=True, padx=22)
@@ -4519,10 +4560,11 @@ class App(tk.Tk):
         self.start_frame = tk.Frame(self, bg=BG)
         self.start_frame.pack(expand=True, fill="both")
         # 返回：练习/休闲 → 上一级菜单；联机准备 → 放弃房间回大厅
-        tk.Button(self.start_frame, text=i18n.t("btn_back"), bg=BTN, fg=TEXT,
-                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+        tk.Button(self.start_frame, text=i18n.t("btn_back") + "  P", bg=BTN,
+                  fg=TEXT, font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
                   command=self._nation_back).place(relx=0.0, rely=0.0,
                                                    anchor="nw", x=18, y=12)
+        self._back_action = self._nation_back       # P：练习/休闲回上一级，联机弃房
         if casual:
             title = i18n.t("mode_casual")
         else:
@@ -4608,9 +4650,10 @@ class App(tk.Tk):
         top = tk.Frame(self.builder_frame, bg=BG)
         top.pack(fill="x", padx=20, pady=(12, 4))
         # 返回：组卡页以前**没有**返回路径，进来只能开一局才能出去（用户实测卡死点）
-        tk.Button(top, text=i18n.t("btn_back"), bg=BTN, fg=TEXT,
+        tk.Button(top, text=i18n.t("btn_back") + "  P", bg=BTN, fg=TEXT,
                   font=FONT_S, bd=0, padx=12, pady=5, cursor="hand2",
                   command=self._deck_back).pack(side="left", padx=(0, 12))
+        self._back_action = self._deck_back         # P：组卡页回选国家
         left_t = tk.Frame(top, bg=BG)
         left_t.pack(side="left")
         tk.Label(left_t, text=f"组建 {nation} 卡组", bg=BG, fg=TEXT,

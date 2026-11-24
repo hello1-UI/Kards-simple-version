@@ -153,7 +153,10 @@ def only_one_screen(app, name):
 
 
 def has_back(app):
-    return any(str(t).strip() == i18n.t("btn_back") for t in screen_texts(app))
+    # 返回按钮的文案带快捷键后缀（"← 返回  P"），用 startswith 判，
+    # 免得每次改提示都要跟着改探针。
+    back = i18n.t("btn_back")
+    return any(str(t).strip().startswith(back) for t in screen_texts(app))
 
 
 # ---------------------------------------------------------------- 桩

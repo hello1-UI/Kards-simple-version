@@ -102,6 +102,12 @@ def main():
     p2 = os.path.join(OUT, "26_hotkeys_zoom.png")
     top.save(p2)
     print("  写出 26_hotkeys_zoom.png", top.size)
+    # 子界面的返回按钮（带 P 提示）
+    app._build_casual_select()
+    for _ in range(8):
+        app.update_idletasks()
+        app.update()
+    grab(app, "27_back_hint.png")
     app.destroy()
 
 
