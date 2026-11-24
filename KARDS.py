@@ -392,7 +392,7 @@ class GUIGame(core.Game):
 class CardWidget(tk.Frame):
     def __init__(self, master, title, sub, cost, color, on_click=None,
                  atk=None, defense=None, big=False, selected=False, draggable=False,
-                 rarity=None, border=None, dim=False, hint=None):
+                 rarity=None, border=None, dim=False, hint=None, hotkey=None):
         w, h = (200, 230) if big else (130, 150)
         bg = CARD_SEL if selected else (CARD_DIM if dim else CARD_BG)
         hl = GOLD if selected else (border or BORDER)
@@ -435,6 +435,14 @@ class CardWidget(tk.Frame):
             tk.Label(self, text=rarity, bg=rc, fg=theme.best_fg(rc),
                      font=(FONT_FAMILY, 8, "bold"), padx=3).place(
                 relx=1.0, x=-3, y=3, anchor="ne")
+        # 快捷键角标（左上角）：只在主菜单的入口卡上给，普通卡牌不传就没有。
+        # 用 place 而不是 pack —— 它必须在标题左侧留白区，不能挤动卡面布局。
+        if hotkey:
+            tk.Label(self, text=hotkey, bg=bg, fg=color or GOLD,
+                     font=(FONT_FAMILY, 9, "bold"), padx=4,
+                     highlightthickness=1,
+                     highlightbackground=color or BORDER
+                     ).place(x=6, y=4, anchor="nw")
         if color:
             tk.Frame(self, bg=color, height=4).pack(side="bottom", fill="x")
         if on_click:
@@ -556,6 +564,10 @@ class App(tk.Tk):
         # 休闲模式：AI / 真人都能打，但**不结算段位**（战绩、金币、任务照算）。
         # 从休闲入口进大厅/选国家时置 True，回主菜单或进排位大厅时复位。
         self.casual = False
+        # 主菜单字母快捷键：Q/W/E/R/T/Y/A/S/F/G/H（见 HOTKEYS）。
+        # 绑定在 Tk 层（bind_all）而不是窗口上：主菜单重建后不用重新绑。
+        self._menu_cards = ()
+        self._hotkey_at = 0.0
         # 换屏时间戳：CardWidget 用它做「刚换屏 N 秒内忽略点击」的穿透保护
         # （结算页整屏点击 + 玩家连点会误触新主菜单的入口卡）。
         self._screen_built_at = 0.0
@@ -575,6 +587,7 @@ class App(tk.Tk):
             core.set_decks_dir(account.guest_decks_dir())
         self.bind_all("<Escape>", self.on_esc)
         self.bind_all("<F1>", self.on_f1)
+        self.bind_all("<Key>", self.on_hotkey)   # 主菜单 Q/W/E/R/T/Y/A/S/F/G/H
         self._build_start()
         self._music_play("menu", fade_ms=1200)   # 进来先淡入主菜单曲
         if not self.account and self.anim_enabled:
@@ -728,6 +741,120 @@ class App(tk.Tk):
             except tk.TclError:
                 pass
 
+    def _chip(self, parent, text, command, key):
+        """主菜单工具条按钮 = 按钮 + 下方快捷键字母。返回 (外框, 按钮)。
+
+        ⚠ 外框是 tk.Frame：bind_hover() 只绑在按钮上（绑外框会让悬停
+        高亮落在空白处，看着像按钮"抖了一下"）。
+        """
+        box = tk.Frame(parent, bg=BG)
+        btn = tk.Button(box, text=text, command=command, bg=BTN, fg=TEXT,
+                        font=FONT_S, bd=0, padx=12, pady=6, cursor="hand2",
+                        activebackground=BTN_HOVER, activeforeground=TEXT)
+        btn.pack()
+        tk.Label(box, text=key, bg=BG, fg=MUTE,
+                 font=(FONT_FAMILY, 8, "bold")).pack(pady=(1, 0))
+        bind_hover(btn)
+        return box, btn
+
+    # ---------------- 主菜单快捷键 ----------------
+    # 键位 → 处理方法名。字母键统一按小写比对（keysym 大写的是 Shift+字母）。
+    # F/G/H 是三个入口，Q~Y 是工具条与对话框；S 与 F1 等价（关键词说明）。
+    HOTKEYS = {
+        "q": "open_start_settings",     # 设置
+        "w": "_home_theme_switch",      # 主题（设置窗的外观页）
+        "e": "open_rank_dialog",        # 段位
+        "r": "open_shop_dialog",        # 商店
+        "t": "open_quests_dialog",      # 每日任务
+        "y": "_toggle_music",           # 音乐开关
+        "a": "_account_dialog",         # 账号设置
+        "s": "open_keyword_guide",      # 关键词说明
+        "f": "on_battle",               # 战斗（排位/联机大厅）
+        "g": "_practice_entry",         # 练习
+        "h": "_build_casual_select",    # 休闲
+    }
+
+    def _practice_entry(self):
+        """练习入口。单独包一层：`_build_nation_select(mp, casual)` 带参数，
+        直接塞进快捷键表会传成「mp=事件对象」。"""
+        self._build_nation_select()
+
+    def _on_main_menu(self):
+        """当前是否停在主菜单。
+
+        判据是「三张入口卡还活着」——它们只存在于主菜单，随 start_frame
+        一起销毁。比维护一个 self._view 字符串可靠：任何新加的切屏路径
+        （大厅 / 选国家 / 组卡 / 休闲选择）都会销毁 start_frame，不用挨个去改。
+        """
+        for card in getattr(self, "_menu_cards", ()) or ():
+            try:
+                if card.winfo_exists():
+                    return True
+            except tk.TclError:
+                return False
+        return False
+
+    def _dialog_open(self):
+        """是否有带 role 的对话框开着（设置/段位/商店/账号…）。"""
+        for w in self.winfo_children():
+            if not isinstance(w, tk.Toplevel):
+                continue
+            if not getattr(w, "role", ""):
+                continue
+            try:
+                if w.winfo_exists() and w.state() != "withdrawn":
+                    return True
+            except tk.TclError:
+                continue
+        return False
+
+    def _hotkey_blocked(self):
+        """快捷键的守门人：这几种情况一律不响应。
+
+        ① 对局中（tkinter 棋盘或 pygame 棋盘）——字母键在别处有用；
+        ② 不在主菜单（大厅 / 选国家 / 组卡 / 休闲选择）；
+        ③ 有对话框开着 —— 否则会在对话框背后又开一个新界面；
+        ④ 焦点在输入框（账号 / 密码 / 卡组名 / 搜索）—— 否则打不出字母。
+        """
+        if self.game is not None or getattr(self, "_pyboard", None) is not None:
+            return True
+        if not self._on_main_menu():
+            return True
+        if self._dialog_open():
+            return True
+        try:
+            focus = self.focus_get()
+        except (KeyError, tk.TclError):
+            focus = None
+        if isinstance(focus, (tk.Entry, tk.Text, tk.Spinbox)):
+            return True
+        return False
+
+    def on_hotkey(self, event=None):
+        """主菜单字母快捷键（Q/W/E/R/T/Y/A/S/F/G/H）。"""
+        if event is None:
+            return None
+        name = self.HOTKEYS.get((event.keysym or "").lower())
+        if name is None:
+            return None
+        if self._hotkey_blocked():
+            return None
+        # 按住不放会连发 key-repeat：隔得太近的第二次直接吞掉，
+        # 免得「按住 F 一秒」把大厅开了又开。
+        now = time.monotonic()
+        if now - getattr(self, "_hotkey_at", 0.0) < 0.25:
+            return "break"
+        self._hotkey_at = now
+        fn = getattr(self, name, None)
+        if fn is None:
+            return None
+        try:
+            fn()
+        except Exception:                              # noqa: BLE001
+            # 快捷键是附加能力：任何异常都不许把主菜单搞崩
+            pass
+        return "break"
+
     def _build_start(self):
         """主菜单。
 
@@ -782,35 +909,26 @@ class App(tk.Tk):
 
         right = tk.Frame(top, bg=BG)
         right.pack(side="right")
-        self.music_btn = tk.Button(right, text=self._music_btn_text(), bg=BTN,
-                                   fg=TEXT, font=FONT_S, bd=0, padx=11, pady=7,
-                                   cursor="hand2", activebackground=BTN_HOVER,
-                                   activeforeground=TEXT, command=self._toggle_music)
-        self.music_btn.pack(side="right")
-        self.quest_btn = tk.Button(right, text=i18n.t("btn_quests"), bg=BTN,
-                                   fg=TEXT, font=FONT_S, bd=0, padx=12, pady=7,
-                                   cursor="hand2", activebackground=BTN_HOVER,
-                                   activeforeground=TEXT,
-                                   command=self.open_quests_dialog)
-        self.quest_btn.pack(side="right", padx=(0, 8))
-        tk.Button(right, text=i18n.t("btn_shop"), bg=BTN, fg=TEXT,
-                  font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
-                  activebackground=BTN_HOVER, activeforeground=TEXT,
-                  command=self.open_shop_dialog).pack(side="right", padx=(0, 8))
-        tk.Button(right, text=i18n.t("btn_rank"), bg=BTN, fg=TEXT,
-                  font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
-                  activebackground=BTN_HOVER, activeforeground=TEXT,
-                  command=self.open_rank_dialog).pack(side="right", padx=(0, 8))
-        tk.Button(right, text=i18n.t("btn_theme"), bg=BTN, fg=TEXT,
-                  font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
-                  activebackground=BTN_HOVER, activeforeground=TEXT,
-                  command=self._home_theme_switch).pack(side="right", padx=(0, 8))
-        tk.Button(right, text=i18n.t("btn_settings"), bg=BTN, fg=TEXT,
-                  font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
-                  activebackground=BTN_HOVER, activeforeground=TEXT,
-                  command=self.open_start_settings).pack(side="right", padx=(0, 8))
-        for w in right.winfo_children():
-            bind_hover(w)
+        # 工具条按钮统一走 _chip()：按钮下面挂一个 8px 的快捷键字母。
+        # 文案里塞 "(Q)" 会显脏，独立一行小字既能对齐又一眼扫得到。
+        self.music_box, self.music_btn = self._chip(
+            right, self._music_btn_text(), self._toggle_music, "Y")
+        self.music_box.pack(side="right")
+        self.quest_box, self.quest_btn = self._chip(
+            right, i18n.t("btn_quests"), self.open_quests_dialog, "T")
+        self.quest_box.pack(side="right", padx=(0, 8))
+        self.shop_box, _ = self._chip(
+            right, i18n.t("btn_shop"), self.open_shop_dialog, "R")
+        self.shop_box.pack(side="right", padx=(0, 8))
+        self.rank_box, _ = self._chip(
+            right, i18n.t("btn_rank"), self.open_rank_dialog, "E")
+        self.rank_box.pack(side="right", padx=(0, 8))
+        self.theme_box, _ = self._chip(
+            right, i18n.t("btn_theme"), self._home_theme_switch, "W")
+        self.theme_box.pack(side="right", padx=(0, 8))
+        self.settings_box, _ = self._chip(
+            right, i18n.t("btn_settings"), self.open_start_settings, "Q")
+        self.settings_box.pack(side="right", padx=(0, 8))
 
         # ---- 标题区 ----
         hero = tk.Frame(self.start_frame, bg=BG)
@@ -833,20 +951,22 @@ class App(tk.Tk):
         battle = CardWidget(row, title=i18n.t("battle_title"),
                             sub=i18n.t("battle_sub"), cost=None,
                             color=DANGER, big=True, on_click=self.on_battle,
-                            hint=i18n.t("home_card_battle_hint"))
+                            hint=i18n.t("home_card_battle_hint"), hotkey="F")
         battle.pack(side="left", padx=12, ipady=10)
         practice = CardWidget(row, title=i18n.t("practice_title"),
                               sub=i18n.t("practice_sub"), cost=None,
                               color=PRIMARY, big=True,
                               on_click=lambda: self._build_nation_select(),
-                              hint=i18n.t("home_card_practice_hint"))
+                              hint=i18n.t("home_card_practice_hint"), hotkey="G")
         practice.pack(side="left", padx=12, ipady=10)
         casual = CardWidget(row, title=i18n.t("casual_title"),
                             sub=i18n.t("casual_sub"), cost=None,
                             color=ACCENT, big=True,
                             on_click=self._build_casual_select,
-                            hint=i18n.t("home_card_casual_hint"))
+                            hint=i18n.t("home_card_casual_hint"), hotkey="H")
         casual.pack(side="left", padx=12, ipady=10)
+        # 主菜单判据（见 _on_main_menu）：这三张卡随主菜单一起生灭
+        self._menu_cards = (battle, practice, casual)
         bind_hover_tree(battle)
         bind_hover_tree(practice)
         bind_hover_tree(casual)

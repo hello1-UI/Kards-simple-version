@@ -117,7 +117,7 @@ LANGS = {
         "casual_no_rank": "休闲对战 · 段位不变",
         # ---- 外观 / 主题 ----
         "btn_theme": "◐ 主题",
-        "home_hint": "拖拽卡牌出牌　·　F1 查看关键词　·　F11 全屏",
+        "home_hint": "拖拽卡牌出牌　·　F/G/H 直接开局　·　F1 查看关键词　·　F11 全屏",
         "home_card_battle_hint": "联机 · 邀请码 · 快速匹配",
         "home_card_practice_hint": "单人 · 人机对战",
         "settings_tab_look": "外观",
@@ -673,7 +673,7 @@ LANGS = {
         "casual_no_rank": "Casual game · rank unchanged",
         # ---- Appearance / theme ----
         "btn_theme": "◐ Theme",
-        "home_hint": "Drag cards to play　·　F1 keywords　·　F11 fullscreen",
+        "home_hint": "Drag cards to play　·　F/G/H quick start　·　F1 keywords　·　F11 fullscreen",
         "home_card_battle_hint": "Online · invite code · quick match",
         "home_card_practice_hint": "Solo · vs AI",
         "settings_tab_look": "Appearance",
@@ -1224,7 +1224,7 @@ LANGS = {
         "casual_no_rank": "カジュアル対戦 · ランク変動なし",
         # ---- 外観 / テーマ ----
         "btn_theme": "◐ テーマ",
-        "home_hint": "カードをドラッグしてプレイ　·　F1 キーワード　·　F11 全画面",
+        "home_hint": "カードをドラッグしてプレイ　·　F/G/H でクイック開始　·　F1 キーワード　·　F11 全画面",
         "home_card_battle_hint": "オンライン · 招待コード · クイックマッチ",
         "home_card_practice_hint": "ソロ · AI 対戦",
         "settings_tab_look": "外観",
