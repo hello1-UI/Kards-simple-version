@@ -1043,7 +1043,13 @@ class PygameBoard:
             self.running = False
             return
         if self.end_state is not None:
-            if ev.type == pygame.MOUSEBUTTONDOWN and not self._end_clicked:
+            # 结算页：任意点击 / Enter / 空格 / Esc 都能回大厅。
+            # （以前只认鼠标，玩家习惯性按 Esc 会以为卡死，只能干等或点鼠标）
+            clicked = (ev.type == pygame.MOUSEBUTTONDOWN
+                       or (ev.type == pygame.KEYDOWN and ev.key in (
+                           pygame.K_ESCAPE, pygame.K_RETURN,
+                           pygame.K_KP_ENTER, pygame.K_SPACE)))
+            if clicked and not self._end_clicked:
                 # 必须等总部爆炸播完（full 阶段）才允许点击回大厅，
                 # 否则玩家一点就把"是哪边总部炸的"跳过去了。
                 if (self._end_phase() != "hq"

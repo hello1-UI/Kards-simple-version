@@ -384,6 +384,7 @@ LANGS = {
         "log_lobby_in": "{name} 进入大厅",
         "log_lobby_out": "{name} 离开大厅",
         "log_peer_left": "对手离开了对局。",
+        "log_match_stale": "⚠ 收到一条过期的匹配（你已不在大厅），已自动放弃。",
         "log_kicked": "⚠ 该账号在别处登录，本连接已被服务器断开。",
         "log_srv_down": "⚠ 与服务器的连接已断开。",
         # ---- 兼容旧键（局域网直连版遗留）----
@@ -901,6 +902,7 @@ LANGS = {
         "log_lobby_in": "{name} entered the lobby",
         "log_lobby_out": "{name} left the lobby",
         "log_peer_left": "Your opponent left the battle.",
+        "log_match_stale": "⚠ Stale match received (you left the lobby) — released automatically.",
         "log_kicked": "⚠ This account signed in elsewhere; the server closed this connection.",
         "log_srv_down": "⚠ Lost connection to the server.",
         # ---- legacy (LAN direct) ----
@@ -1411,6 +1413,7 @@ LANGS = {
         "log_lobby_in": "{name} がロビーに入りました",
         "log_lobby_out": "{name} がロビーを離れました",
         "log_peer_left": "相手が対戦を離れました。",
+        "log_match_stale": "⚠ 期限切れのマッチを受信しました（ロビーを離れています）— 自動的に破棄しました。",
         "log_kicked": "⚠ このアカウントは別の場所でログインしたため、サーバーが接続を切断しました。",
         "log_srv_down": "⚠ サーバーとの接続が切断されました。",
         # ---- 旧キー（LAN 直結版の名残）----

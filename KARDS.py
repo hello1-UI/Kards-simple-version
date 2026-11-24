@@ -361,12 +361,29 @@ class CardWidget(tk.Frame):
         if color:
             tk.Frame(self, bg=color, height=4).pack(side="bottom", fill="x")
         if on_click:
+            cb = self._guard_click(on_click)
             for child in self.winfo_children():
-                child.bind("<Button-1>", lambda e: on_click())
+                child.bind("<Button-1>", cb)
                 if isinstance(child, tk.Frame):
                     for c2 in child.winfo_children():
-                        c2.bind("<Button-1>", lambda e: on_click())
-            self.bind("<Button-1>", lambda e: on_click())
+                        c2.bind("<Button-1>", cb)
+            self.bind("<Button-1>", cb)
+
+    def _guard_click(self, fn):
+        """点击冷却：刚换屏的短时间内忽略点击。
+
+        ⚠ 结算页是「整屏任意点击」关闭的，玩家连点时第二下会落在**新出现的
+        主菜单**上（中间位置正好是入口卡），于是一局打完直接被踹进练习选国家。
+        换屏时记一个时间戳，短窗口内的点击一律吞掉（对人眼几乎无感）。
+        """
+        top = self.winfo_toplevel()
+
+        def go(_e=None):
+            ts = getattr(top, "_screen_built_at", 0.0)
+            if time.monotonic() - ts < getattr(top, "_click_guard_s", 0.35):
+                return
+            fn()
+        return go
 
 
 # ---------------------------------------------------------------- 主界面
@@ -434,6 +451,17 @@ class App(tk.Tk):
         self._srv_ready = False    # 是否曾经连接成功过
         self._lobby_track = set()  # 上一份大厅名单（用于算进出）
         self._lobby_rows = {}
+        # 大厅控件：只在 `_build_lobby` 里创建。先置 None —— 大厅之外的
+        # 服务器推送（迟到的 lobby / matched / matching）也会走 `_lobby_sync`，
+        # 属性不存在会直接 AttributeError（探针实测过）。
+        self.srv_btn = None
+        self.srv_status = None
+        self.srv_login_btn = None
+        self.lobby_count_lbl = None
+        self.lobby_players_box = None
+        self.match_btn = None
+        self.room_btn = None
+        self.room_lbl = None
         # 具名定时器（统一取消 + 代号防串台，见 _schedule 注释）
         self._timer_gen = {}
         self._timers = {}
@@ -451,6 +479,12 @@ class App(tk.Tk):
         # 休闲模式：AI / 真人都能打，但**不结算段位**（战绩、金币、任务照算）。
         # 从休闲入口进大厅/选国家时置 True，回主菜单或进排位大厅时复位。
         self.casual = False
+        # 换屏时间戳：CardWidget 用它做「刚换屏 N 秒内忽略点击」的穿透保护
+        # （结算页整屏点击 + 玩家连点会误触新主菜单的入口卡）。
+        self._screen_built_at = 0.0
+        self._click_guard_s = 0.35
+        self._menu_after_board = False   # 结算页已确认：棋盘退出后再回主菜单
+        self._finishing = False
         # ---- 账号 / 游客 ----
         # 产品规则：未登录即「游客」——能打人机，不能联机。
         # 游客是临时会话（不落盘），所以这里只设个内存标志，不建目录、不写文件。
@@ -592,6 +626,31 @@ class App(tk.Tk):
         box.configure(state="disabled")
 
     # ---------------- 开始界面：战斗 / 练习 ----------------
+    def _mark_screen(self):
+        """标记「刚换完屏」。
+
+        CardWidget 的点击回调会读这个时间戳：换屏后 `_click_guard_s` 秒内的
+        点击直接丢弃。专治结算页连点穿透（第二下落到新主菜单的入口卡上，
+        直接把人踹进练习选国家）。
+        """
+        self._screen_built_at = time.monotonic()
+
+    def _destroy_alive(self, *attrs):
+        """销毁给定的界面容器（不存在的静默跳过）。
+
+        ⚠ `_build_start()` 只重新赋值 self.start_frame、不销毁旧的，
+        所以每次切屏都要显式销毁 —— 漏一个就是两套界面同屏叠加。
+        """
+        for attr in attrs:
+            fr = getattr(self, attr, None)
+            if fr is None:
+                continue
+            try:
+                if fr.winfo_exists():
+                    fr.destroy()
+            except tk.TclError:
+                pass
+
     def _build_start(self):
         """主菜单。
 
@@ -599,6 +658,21 @@ class App(tk.Tk):
         → 底部版本水印。所有颜色都走主题 token，换主题时整体跟着变。
         """
         self.casual = False          # 回主菜单 = 退出休闲流程
+        # 回主菜单 = 离开大厅：排队/房间必须在这里统一脱队。
+        # ⚠ 任何一条回主菜单的路径（大厅返回 / 语言切换 / 主题切换 / 准备页
+        # 异常 / 结算返回）都走这里，漏一处就会出现「服务器还当你排队中」，
+        # 而迟到的 matched 会把玩家从主菜单硬拽进选国家页。
+        if self.mp_matching or self.mp_room_code:
+            self._leave_matchmaking()
+        self.mp_matching = False
+        self.mp_room_code = None
+        self._lobby_active = False
+        self._cancel_timer("_t_lobby")
+        self._cancel_timer("_t_prep")
+        # ⚠ 自己销毁旧界面：`_build_start()` 历史上只重新赋值 start_frame，
+        # 每个调用点都得记得先 destroy，漏一处就是两屏同挂（已经咬过两次）。
+        # 在这里兜底以后，调用点怎么写都不会叠屏。
+        self._destroy_alive("start_frame")
         self.start_frame = tk.Frame(self, bg=BG)
         self.start_frame.pack(expand=True, fill="both")
 
@@ -715,6 +789,10 @@ class App(tk.Tk):
         self._refresh_music_btn()
         # 立即应用一次主题（重建界面时也要走到，保证新控件拿到当前配色）
         theme.sync(globals())
+        # 回到主菜单 = 离开所有「模式」上下文：排位/休闲标志复位，
+        # 否则上一局休闲的 casual=True 会跟着下一次练习/排位一起走。
+        self.mp_mode = False
+        self._mark_screen()
 
     def _home_theme_switch(self):
         """主菜单直接换主题：打开设置窗并停在「外观」页。"""
@@ -2877,11 +2955,10 @@ class App(tk.Tk):
         两条路都**不结算段位**（`self.casual = True` 一路带到对局里），
         战绩 / 金币 / 每日任务照常记 —— 休闲只是不打排位。
         """
-        self.start_frame.destroy()
+        self._destroy_alive("start_frame")
         self.start_frame = tk.Frame(self, bg=BG)
         self.start_frame.pack(expand=True, fill="both")
         tk.Frame(self.start_frame, bg=ACCENT, height=4).pack(fill="x")
-
         tk.Button(self.start_frame, text=i18n.t("btn_back"), bg=BTN, fg=TEXT,
                   font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
                   command=self._casual_back).pack(anchor="w", padx=18, pady=12)
@@ -2910,6 +2987,7 @@ class App(tk.Tk):
         bind_hover_tree(mp)
         tk.Label(hero, text=i18n.t("casual_note"), bg=BG, fg=MUTE,
                  font=FONT_S).pack(pady=(26, 0))
+        self._mark_screen()
 
     def _casual_back(self):
         """休闲选择页 → 主菜单。
@@ -2920,7 +2998,7 @@ class App(tk.Tk):
         其它入口（大厅返回 / 语言切换 / back_to_menu）都是先 destroy 再建，
         当时唯独这个 lambda 直接调 _build_start() 漏了。
         """
-        self.start_frame.destroy()
+        self._destroy_alive("start_frame")
         self._build_start()
 
     # ---------------- 联机大厅（服务器模式） ----------------
@@ -2932,7 +3010,7 @@ class App(tk.Tk):
         `casual=True` 时是休闲大厅：匹配池与排位隔离，对局不结算段位。
         """
         self.casual = bool(casual)
-        self.start_frame.destroy()
+        self._destroy_alive("start_frame")
         self.start_frame = tk.Frame(self, bg=BG)
         self.start_frame.pack(expand=True, fill="both")
         self._lobby_active = True
@@ -2967,6 +3045,7 @@ class App(tk.Tk):
             self._lobby_connect()
         else:
             self._schedule("_t_lobby", 120, self._lobby_poll)
+        self._mark_screen()
 
     # ---- ① 服务器连接 ----
 
@@ -3708,6 +3787,17 @@ class App(tk.Tk):
             self._lobby_set_players(msg.get("players") or [])
         elif m == "matched":
             self.mp_matching = False
+            # ⚠ 迟到的匹配应答必须丢掉：只有「这会儿确实在大厅等匹配」
+            # 才配进准备页。否则（已经回主菜单 / 正在打别的局）会把玩家
+            # 从当前界面硬拽走 —— 实测「打完一局回菜单直接跳选国家」。
+            if self.game is not None or not self._lobby_active:
+                self.mp_room_code = None
+                self._srv_send({"m": "leave_room"})   # 别让对手干等一个不来的房
+                try:
+                    self._lobby_log(i18n.t("log_match_stale"))
+                except Exception:                     # noqa: BLE001
+                    pass
+                return
             self.mp_room_code = None
             self.mp_role = "host" if msg.get("role") == "host" else "client"
             self.mp_opp_name = msg.get("opp")
@@ -3870,6 +3960,11 @@ class App(tk.Tk):
         self._lobby_sync()
 
     def _lobby_back(self):
+        # ⚠ 离开大厅必须**通知服务器**退出排队 / 房间：只清本地标志的话，
+        # 服务器仍把你当排队者，稍后匹配成功会推一条 matched 过来，客户端
+        # 就会在任意界面（主菜单、甚至对局结算页）被硬拽进准备页 ——
+        # 实测现象：打完一局回菜单，直接跳到「选国家」。
+        self._leave_matchmaking()
         self._lobby_active = False
         self.mp_matching = False
         self.mp_room_code = None
@@ -3879,16 +3974,37 @@ class App(tk.Tk):
         self._cancel_timer("_t_reconnect")   # 在途的自动重连不许再进大厅
         self._cancel_timer("_t_retry")       # 在途的连接重试同上
         self._cancel_timer("_t_host")        # 等端口的轮询同上
-        self.start_frame.destroy()
+        self._destroy_alive("start_frame")
         self._build_start()
+
+    def _leave_matchmaking(self):
+        """告诉服务器「我不排队了 / 我退出房间」（幂等，链路断了就算了）。
+
+        本地标志由调用方清 —— 这里只管发消息，避免两处状态各清一半。
+        """
+        link = self.mp_link
+        if link is None or not getattr(link, "alive", False):
+            return
+        try:
+            if self.mp_matching:
+                link.send({"m": "cancel_match"})
+            if self.mp_room_code:
+                link.send({"m": "leave_room"})
+        except Exception:                            # noqa: BLE001
+            pass
 
     # ---------------- 练习：选择主国 ----------------
     def _build_nation_select(self, mp=False, casual=False):
         self.mp_mode = mp
         self.casual = bool(casual)
-        self.start_frame.destroy()
+        self._destroy_alive("start_frame")     # 组卡页进来时 start_frame 已销毁
         self.start_frame = tk.Frame(self, bg=BG)
         self.start_frame.pack(expand=True, fill="both")
+        # 返回：练习/休闲 → 上一级菜单；联机准备 → 放弃房间回大厅
+        tk.Button(self.start_frame, text=i18n.t("btn_back"), bg=BTN, fg=TEXT,
+                  font=FONT_S, bd=0, padx=14, pady=6, cursor="hand2",
+                  command=self._nation_back).place(relx=0.0, rely=0.0,
+                                                   anchor="nw", x=18, y=12)
         if casual:
             title = i18n.t("mode_casual")
         else:
@@ -3914,6 +4030,29 @@ class App(tk.Tk):
         # 轻量看门狗，只负责"发现链路死了就把界面退回主菜单并提示"。
         if mp:
             self._schedule("_t_prep", 500, self._mp_prep_watch)
+        self._mark_screen()
+
+    def _nation_back(self):
+        """选国家页 → 上一级。
+
+        · 练习（人机）→ 主菜单
+        · 休闲 AI     → 休闲选择页
+        · 联机准备    → 放弃房间回大厅（**必须通知服务器**，否则对手一直等）
+        """
+        if self.mp_mode:
+            self._srv_send({"m": "leave_room"})
+            self.mp_role = None
+            self.mp_opp_name = None
+            self.mp_room_id = None
+            self._mp_me_ready = False
+            self._cancel_timer("_t_prep")
+            self._build_lobby(casual=self.casual)
+            return
+        if self.casual:
+            self._build_casual_select()
+            return
+        self._destroy_alive("start_frame")
+        self._build_start()
 
     def _mp_prep_watch(self):
         """准备阶段的看门狗：只关心「连接是否还在」。
@@ -3941,7 +4080,7 @@ class App(tk.Tk):
     def _build_deck_builder(self, nation, mp=False, casual=False):
         self.mp_mode = mp
         self.casual = bool(casual)
-        self.start_frame.destroy()
+        self._destroy_alive("start_frame", "builder_frame")
         self.deck_nation = nation
         self.deck_counts = {}   # 卡名 -> 数量
         self.builder_frame = tk.Frame(self, bg=BG)
@@ -3950,6 +4089,10 @@ class App(tk.Tk):
         hq = core.HQ_CARDS[nation]
         top = tk.Frame(self.builder_frame, bg=BG)
         top.pack(fill="x", padx=20, pady=(12, 4))
+        # 返回：组卡页以前**没有**返回路径，进来只能开一局才能出去（用户实测卡死点）
+        tk.Button(top, text=i18n.t("btn_back"), bg=BTN, fg=TEXT,
+                  font=FONT_S, bd=0, padx=12, pady=5, cursor="hand2",
+                  command=self._deck_back).pack(side="left", padx=(0, 12))
         left_t = tk.Frame(top, bg=BG)
         left_t.pack(side="left")
         tk.Label(left_t, text=f"组建 {nation} 卡组", bg=BG, fg=TEXT,
@@ -4008,6 +4151,22 @@ class App(tk.Tk):
         self._make_scroll_list(rightw, "deck")
 
         self._builder_refresh()
+        self._mark_screen()
+
+    def _deck_back(self):
+        """组卡页 → 选国家（联机流程则放弃房间回大厅）。"""
+        if self.mp_mode:
+            self._srv_send({"m": "leave_room"})
+            self.mp_role = None
+            self.mp_opp_name = None
+            self.mp_room_id = None
+            self._mp_me_ready = False
+            self._cancel_timer("_t_prep")
+            self._destroy_alive("builder_frame")
+            self._build_lobby(casual=self.casual)
+            return
+        self._destroy_alive("builder_frame")
+        self._build_nation_select(mp=False, casual=self.casual)
 
     def _make_scroll_list(self, parent, key):
         canvas = tk.Canvas(parent, bg=BG, highlightthickness=0)
@@ -4549,6 +4708,7 @@ class App(tk.Tk):
 
     def _mp_cleanup_to_menu(self):
         """准备阶段出错：断开连接回主菜单"""
+        self._leave_matchmaking()      # 断链前先告诉服务器放人（幂等）
         self._close_server_link()
         self.mp_role = None
         self.mp_opp = None
@@ -4557,10 +4717,7 @@ class App(tk.Tk):
         self._mp_me_ready = False
         self._mp_pending_seed = None
         self._lobby_active = False
-        for attr in ("start_frame", "builder_frame"):
-            fr = getattr(self, attr, None)
-            if fr is not None and fr.winfo_exists():
-                fr.destroy()
+        self._destroy_alive("start_frame", "builder_frame")
         self._build_start()
 
     def _start_custom(self):
@@ -4836,6 +4993,12 @@ class App(tk.Tk):
             b.run(pump=self.update)
         finally:
             self._deactivate_pyboard()
+        # 结算页点「返回」只置了标志：棋盘窗口已销毁，现在才回主菜单
+        # （在事件回调里建界面会和窗口销毁抢顺序，见 finish 的 after_click）
+        if getattr(self, "_menu_after_board", False):
+            self._menu_after_board = False
+            self.back_to_menu()
+            return
         if b.result == "quit":
             self.destroy()
 
@@ -5131,10 +5294,18 @@ class App(tk.Tk):
         self._finishing = False
         if self._pyboard is not None:
             self._pyboard.quit()   # 让 pygame 主循环退出；视图方法由 _run_pyboard 还原
+        # 回主菜单 = 不再排队/不在房间：必须告诉服务器，否则迟到的 matched
+        # 会把玩家从主菜单拽进准备页（见 _lobby_handle_event 的守卫）。
+        self._leave_matchmaking()
         if self.mp_link is not None:
             if self.game is not None and not self._mp_game_over:
                 self.mp_link.send({"m": "concede"})   # 中途退出 = 投降
                 self.mp_link.send({"m": "leave_room"})
+        # 大厅轮询必须停：回菜单后它每 120ms 还在跑，控件已销毁 → 刷
+        # invalid command name；而且它会把 mailbox 里的迟到消息继续派发。
+        self._lobby_active = False
+        self._cancel_timer("_t_lobby")
+        self._cancel_timer("_t_prep")
         self._mp_game_over = False
         self.mp_role = None
         self.mp_opp = None
@@ -5356,7 +5527,13 @@ class App(tk.Tk):
 
         def after_click():
             self._finishing = False
-            self.back_to_menu()
+            # ⚠ 不在这里重建 Tk 界面：此刻仍在 pygame 的事件回调里，棋盘窗口
+            # 还没销毁，主菜单会建在它底下；玩家连点的第二下可能正好落在
+            # 新出现的入口卡上。先让棋盘循环退出（关窗），回到 _run_pyboard
+            # 之后再回菜单，顺序就干净了。
+            self._menu_after_board = True
+            if self._pyboard is not None:
+                self._pyboard.quit()
 
         self.show_end_animation(won, after_click, nation=me.nation,
                                 rank_line=rank_line)
