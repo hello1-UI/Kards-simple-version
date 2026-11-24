@@ -5,6 +5,8 @@
   也绝不能包含 email（urllib.request 依赖它解析响应头，排掉后运行会崩）。
 """
 import os
+import re
+import tempfile
 
 # SPECPATH 由 PyInstaller 注入，等于「spec 文件所在目录」（已是绝对路径）。
 # 项目根 = 它再往上一层。
@@ -14,11 +16,35 @@ ROOT = os.path.dirname(SPECPATH)
 # 也为将来「离线安装」留路。运行时落在 sys._MEIPASS/models。
 MODELS = os.path.join(ROOT, 'models')
 
+
+def _game_version():
+    """从 KARDS.py 抠 VERSION 元组 → "1.6.3.1"
+
+    ⚠ 安装器必须知道自己对应哪个版本：下载地址按 `releases/download/v{VER}/`
+    固定，否则 `latest` 资产一旦没更新，装完还是几个月前的旧版本。
+    """
+    try:
+        with open(os.path.join(ROOT, 'KARDS.py'), encoding='utf-8') as f:
+            m = re.search(r"^VERSION\s*=\s*\(([^)]+)\)", f.read(), re.M)
+        if m:
+            return ".".join(x.strip() for x in m.group(1).split(",") if x.strip())
+    except Exception:
+        pass
+    return ""
+
+
+_VER = _game_version()
+_VER_FILE = ""
+if _VER:
+    _VER_FILE = os.path.join(tempfile.mkdtemp(prefix="kards_ver_"), "VERSION.txt")
+    with open(_VER_FILE, "w", encoding="utf-8") as f:
+        f.write(_VER)
+
 a = Analysis(
     [os.path.join(ROOT, 'apk', 'install.py')],
     pathex=[ROOT],
     binaries=[],
-    datas=[(MODELS, 'models')],
+    datas=[(MODELS, 'models')] + ([(_VER_FILE, '.')] if _VER_FILE else []),
     hiddenimports=['winreg', 'setup_ui', 'installer_ui'],
     hookspath=[],
     hooksconfig={},

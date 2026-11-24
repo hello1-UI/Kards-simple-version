@@ -64,19 +64,68 @@ DEFAULT_DIR = r"C:\Program Files\Kards-Simple-Version"
 DATA_DIR = os.path.join(os.path.expanduser("~"), "AppData", APP_ID)
 FALLBACK_VERSION = "1.0.0.1"
 
-_PRIMARY = f"https://github.com/{REPO}/releases/latest/download/KARDS.zip"
-
-# 下载源（实测速度，2026-10-01）：
+# 镜像（实测速度，2026-10-01）：
 #   gh-proxy.com   ~6.8 MB/s   ★ 首选
 #   GitHub 直连     ~37 KB/s   慢但最可靠，作为兜底
 #   ghproxy.net    ~10 KB/s    很慢
 # 说明：镜像站可用性会变化，因此下面会先"竞速测速"再决定用哪个，而不是盲试。
-URLS = [
-    ("gh-proxy 镜像", "https://gh-proxy.com/" + _PRIMARY),
-    ("GitHub 官方", _PRIMARY),
-    ("ghproxy.net 镜像", "https://ghproxy.net/" + _PRIMARY),
-    ("ghfast.top 镜像", "https://ghfast.top/" + _PRIMARY),
+MIRRORS = [
+    ("gh-proxy 镜像", "https://gh-proxy.com/"),
+    ("GitHub 官方", ""),
+    ("ghproxy.net 镜像", "https://ghproxy.net/"),
+    ("ghfast.top 镜像", "https://ghfast.top/"),
 ]
+
+
+def app_version():
+    """本安装器对应的游戏版本（如 "1.6.3.1"）。
+
+    打包时 installer.spec 会把 KARDS.py 的 VERSION 写成 VERSION.txt 塞进 exe，
+    运行期从 sys._MEIPASS 读到；源码运行则直接解析项目根的 KARDS.py。
+    拿不到就退回 FALLBACK_VERSION（此时只走 latest 下载，不做版本校验）。
+    """
+    roots = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        roots.append(meipass)
+    base = bundled_dir()
+    roots.extend([base, os.path.dirname(base)])
+    for r in roots:
+        try:
+            with open(os.path.join(r, "VERSION.txt"), encoding="utf-8") as f:
+                v = f.read().strip()
+            if v:
+                return v
+        except OSError:
+            continue
+    try:
+        import re
+        with open(os.path.join(os.path.dirname(bundled_dir()), "KARDS.py"),
+                  encoding="utf-8") as f:
+            m = re.search(r"^VERSION\s*=\s*\(([^)]+)\)", f.read(), re.M)
+        if m:
+            return ".".join(x.strip() for x in m.group(1).split(",") if x.strip())
+    except Exception:                     # noqa: BLE001  没有源码就算了
+        pass
+    return FALLBACK_VERSION
+
+
+def download_urls(tag=None):
+    """按版本 tag（None = latest）生成各镜像的下载地址。
+
+    ⚠ 一定要按 tag 固定版本：`releases/latest/download/KARDS.zip` 指向的是
+    「最新一次 Release」的资产，历史上出现过发版只推代码、不传资产的情况，
+    结果安装器一直下到几个月前的旧包（用户实报：装完还是 1.6.1.3）。
+    """
+    tail = (f"releases/download/v{tag}/KARDS.zip" if tag
+            else "releases/latest/download/KARDS.zip")
+    label = f"v{tag}" if tag else "latest"
+    return [(f"{name} {label}", prefix + f"https://github.com/{REPO}/{tail}")
+            for name, prefix in MIRRORS]
+
+
+# 兼容旧名字：不带 tag 的 latest 源列表
+URLS = download_urls(None)
 
 # ---- 超时参数（秒）----
 SPEED_TEST_BYTES = 512 * 1024   # 测速只拉前 512KB
@@ -220,12 +269,13 @@ def _probe(name, url, results):
 _probe.errors = []
 
 
-def pick_fastest():
-    """并发测速所有源，返回 (name, url)；全不可用返回 None"""
+def pick_fastest(urls=None):
+    """并发测速给定下载源，返回按速度排序的 [(name, url)]（含慢源作兜底）"""
+    urls = URLS if urls is None else urls
     print("  正在测速各下载源（并发，最多 %ds）..." % SPEED_TEST_TIMEOUT)
     _emit(None, "正在测速下载源…")
     results, threads = [], []
-    for name, url in URLS:
+    for name, url in urls:
         t = threading.Thread(target=_probe, args=(name, url, results), daemon=True)
         t.start()
         threads.append(t)
@@ -236,34 +286,95 @@ def pick_fastest():
     ok = [r for r in results if r[0] >= SPEED_TEST_MIN_BPS]
     for bps, name, _url, got in results:
         if bps >= SPEED_TEST_MIN_BPS:
-            print(f"    {name:18s} {bps / 1024:8.0f} KB/s  ✓")
+            print(f"    {name:22s} {bps / 1024:8.0f} KB/s  ✓")
         else:
-            print(f"    {name:18s} {'不可用' if bps == 0 else f'{bps/1024:.0f} KB/s':>8s}  ✗")
+            print(f"    {name:22s} {'不可用' if bps == 0 else f'{bps / 1024:.0f} KB/s':>8s}  ✗")
     if not ok:
-        return None
-    bps, name, url, _ = ok[0]
+        return []
+    bps, name, _url, _ = ok[0]
     print(f"  选用最快源: {name}（{bps / 1024:.0f} KB/s）")
-    return name, url
+    return [(n, u) for _b, n, u, _g in results]
 
 
-# ---------------------------------------------------------------- 下载
+# ---------------------------------------------------------------- 版本校验
+
+def ver_tuple(v):
+    """'v1.6.3.1' → (1, 6, 3, 1)；解析不了返回 ()"""
+    out = []
+    for part in str(v).strip().lstrip("vV").split("."):
+        digits = "".join(ch for ch in part if ch.isdigit())
+        if not digits:
+            break
+        out.append(int(digits))
+    return tuple(out)
+
+
+def zip_version(path):
+    """读 zip 里的 KARDS/VERSION.txt；没有返回 None（= 1.6.3.1 之前的老包）"""
+    try:
+        with zipfile.ZipFile(path) as z:
+            for name in z.namelist():
+                if name.rstrip("/").lower().endswith("version.txt"):
+                    return z.read(name).decode("utf-8", "replace").strip() or None
+    except Exception:                     # noqa: BLE001  损坏/非 zip 一律当无版本
+        return None
+    return None
+
+
+def _pool_order(tag):
+    """某个 tag 的下载顺序：测速最快 → 其余兜底"""
+    urls = download_urls(tag)
+    order = pick_fastest(urls)
+    for item in urls:
+        if item not in order:
+            order.append(item)
+    return order
+
 
 def download(dest):
-    """下载 KARDS.zip：先竞速选源，再带双重超时下载。返回 True/False"""
-    picked = pick_fastest()
-    # 竞速失败的源也保留在候选里，按测速顺序逐个兜底
-    order = []
-    if picked:
-        order.append(picked)
-    for name, url in URLS:
-        if not any(name == n for n, _ in order):
-            order.append((name, url))
+    """下载 KARDS.zip，并校验包内版本。返回 True/False
 
-    for name, url in order:
+    两轮：先按本安装器的版本 tag 取（精确版本），全部失败/版本偏旧才退到
+    latest 兜底 —— 且 latest 的包版本必须 >= 本安装器版本，否则宁可报错
+    也不装一个比安装器还旧的版本（这正是「装完还是旧版」的根因）。
+    """
+    ver = app_version()
+    check = ver_tuple(ver)
+    # 版本未知（打包时没写 VERSION.txt 且没有源码可解析）→ 不做版本校验
+    pinned = ver if (check and ver != FALLBACK_VERSION) else None
+
+    pools = []
+    if pinned:
+        pools.append(("按版本", pinned))
+    pools.append(("latest 兜底", None))
+
+    stale = []          # (name, 包内版本) —— 全部比安装器旧
+    for stage, tag in pools:
         _check_cancel()
-        print(f"  从 [{name}] 下载 ...")
-        if _download_one(url, dest, name):
+        print(f"  下载阶段：{stage}" + (f"（v{tag}）" if tag else ""))
+        for name, url in _pool_order(tag):
+            _check_cancel()
+            print(f"  从 [{name}] 下载 ...")
+            if not _download_one(url, dest, name):
+                continue
+            got = zip_version(dest)
+            if pinned and ver_tuple(got or "") < check:
+                print(f"  ✗ 该源提供的是 {('v' + got) if got else '无版本标记的旧包'}，"
+                      f"低于本安装器 v{ver}，换下一个源 ...")
+                stale.append((name, got))
+                continue
+            if got:
+                print(f"  版本校验通过：v{got}")
             return True
+
+    try:
+        if os.path.exists(dest):
+            os.remove(dest)
+    except OSError:
+        pass
+    if stale:
+        print(f"  错误: 所有下载源提供的安装包都低于 v{ver}。")
+        print("  可能是镜像缓存了旧资产；请稍后重试，或手动下载最新 KARDS.zip。")
     return False
 
 

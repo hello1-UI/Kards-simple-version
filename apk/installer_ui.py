@@ -101,7 +101,8 @@ class InstallerWindow(ui.BaseWindow):
     # -------------------------------------------------- 布局
     def _build(self):
         ui.Header(self, "KARDS 简化版",
-                  "WWII CARD GAME  ·  安装程序").pack(fill="x")
+                  "WWII CARD GAME  ·  安装程序",
+                  right=f"v{install.app_version()}").pack(fill="x")
 
         body = tk.Frame(self, bg=C["bg"])
         body.pack(fill="both", expand=True, padx=PAD, pady=(18, 0))

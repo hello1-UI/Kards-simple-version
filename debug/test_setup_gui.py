@@ -386,6 +386,99 @@ def test_gui():
         shutil.rmtree(base, ignore_errors=True)
 
 
+# ================================================================ 6. 下载版本校验
+
+def _make_zip(path, ver=None):
+    """造一个只有 KARDS/VERSION.txt 的假安装包"""
+    import zipfile
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("KARDS/KARDS.exe", b"MZ")
+        if ver:
+            z.writestr("KARDS/VERSION.txt", ver + "\n")
+
+
+def test_download_version():
+    print("\n6. 下载版本校验（旧版资产必须拒装）")
+    import re
+    with open(os.path.join(ROOT, "KARDS.py"), encoding="utf-8") as f:
+        m = re.search(r"^VERSION\s*=\s*\(([^)]+)\)", f.read(), re.M)
+    want = ".".join(x.strip() for x in m.group(1).split(",") if x.strip())
+
+    check("源码运行读到的版本 = KARDS.py 的 VERSION",
+          install.app_version() == want, f"{install.app_version()} vs {want}")
+
+    pinned = install.download_urls(want)
+    latest = install.download_urls(None)
+    check("按版本下载地址带 /download/vX/",
+          all(f"/releases/download/v{want}/KARDS.zip" in u for _n, u in pinned),
+          pinned[:1])
+    check("按版本地址不含 latest",
+          not any("/latest/" in u for _n, u in pinned))
+    check("latest 兜底地址", all("/releases/latest/download/" in u for _n, u in latest))
+
+    check("版本比较：1.6.1.3 < 当前", install.ver_tuple("1.6.1.3") < install.ver_tuple(want))
+    check("版本比较：v 前缀可解析", install.ver_tuple("v" + want) == install.ver_tuple(want))
+    check("版本比较：解析不了返回空元组", install.ver_tuple("???") == ())
+
+    base = tempfile.mkdtemp(prefix="kards_ver_test_")
+    try:
+        old = os.path.join(base, "old.zip")
+        _make_zip(old, "1.6.1.3")
+        check("zip_version 读得出旧版本", install.zip_version(old) == "1.6.1.3")
+
+        nomark = os.path.join(base, "nomark.zip")
+        _make_zip(nomark)
+        check("无版本标记 → None（视为旧包）", install.zip_version(nomark) is None)
+
+        bad = os.path.join(base, "bad.zip")
+        with open(bad, "wb") as f:
+            f.write(b"not a zip")
+        check("损坏文件 → None", install.zip_version(bad) is None)
+
+        # --- 全源都旧：拒装并清掉下载文件
+        dest = os.path.join(base, "dl.zip")
+        calls = []
+        orig = (install._pool_order, install._download_one, install.app_version)
+        try:
+            install._pool_order = lambda tag: (calls.append(tag), [("fake", "u")])[1]
+            install._download_one = (lambda u, d, n:
+                                     (shutil.copyfile(old, d), True)[1])
+            install.app_version = lambda: want
+            ok = install.download(dest)
+        finally:
+            install._pool_order, install._download_one, install.app_version = orig
+        check("所有源都是 1.6.1.3 → 安装失败（不再静默装旧版）", ok is False)
+        check("失败后清掉半成品", not os.path.exists(dest))
+        check("先按版本取，再 latest 兜底", calls == [want, None], calls)
+
+        # --- 第一个源就是正确版本：直接成功，不再走 latest
+        good = os.path.join(base, "good.zip")
+        _make_zip(good, want)
+        calls2 = []
+        try:
+            install._pool_order = lambda tag: (calls2.append(tag), [("fake", "u")])[1]
+            install._download_one = (lambda u, d, n:
+                                     (shutil.copyfile(good, d), True)[1])
+            install.app_version = lambda: want
+            ok2 = install.download(dest)
+        finally:
+            install._pool_order, install._download_one, install.app_version = orig
+        check("正确版本 → 安装成功", ok2 is True)
+        check("命中正确版本后不再请求 latest", calls2 == [want], calls2)
+
+        # --- 版本号未知（安装器没带 VERSION.txt、也没源码）时不拦：只走 latest
+        calls3 = []
+        try:
+            install._pool_order = lambda tag: (calls3.append(tag), [])[1]
+            install.app_version = lambda: install.FALLBACK_VERSION
+            install.download(os.path.join(base, "none.zip"))
+        finally:
+            install._pool_order, install._download_one, install.app_version = orig
+        check("版本未知时不按 tag 取、只走 latest", calls3 == [None], calls3)
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     test_hooks()
     test_launch_spec()
@@ -394,6 +487,7 @@ def main():
     test_detect_target()
     test_uninstall_core()
     test_gui()
+    test_download_version()
 
     print()
     if FAIL:
