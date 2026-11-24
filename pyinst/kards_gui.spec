@@ -13,9 +13,11 @@ ROOT = os.path.dirname(SPECPATH)
 DIST = os.path.join(ROOT, "pyinst", "dist")
 WORK = os.path.join(ROOT, "pyinst", "build")
 
-# 资源清单：**曲库只带 zip，不带散装音乐**。
-# 散装 flac 几百个、几个 GB，全塞进发行包会让安装/更新/校验都变得不可行；
-# 运行时由 kards_musicpack 在首次启动时解压到玩家的音乐目录。
+# 资源清单：**曲库完全不进发行包**。
+# 曲库 4 GB 左右、几百个文件，随包分发会让安装、更新、校验全部不可行
+# （也超过 GitHub 单资产 2 GB 限制）。现在音乐是**可选包**：玩家在
+# 设置 → 其它 →「可选音乐包」里按需下载，或自己把 music*.zip 放到数据目录，
+# 由 kards_musicpack 在启动时解压到音乐目录。
 _ASSET_DIR = os.path.join(ROOT, "assets")
 _ASSET_ITEMS = []
 if os.path.isdir(_ASSET_DIR):
@@ -24,11 +26,10 @@ if os.path.isdir(_ASSET_DIR):
         if os.path.isdir(_p):
             _ASSET_ITEMS.append((_p, os.path.join("assets", _sub)))
     for _fn in sorted(os.listdir(_ASSET_DIR)):
+        # 兜底：极少数自建发行流程会把 zip 放进 assets/，这里照旧带上；
+        # 但官方发版（debug/build_tools.py）不会产生这种文件。
         if _fn.lower().startswith("music") and _fn.lower().endswith(".zip"):
             _ASSET_ITEMS.append((os.path.join(_ASSET_DIR, _fn), "assets"))
-    _mp = os.path.join(_ASSET_DIR, "musicpack")
-    if os.path.isdir(_mp):
-        _ASSET_ITEMS.append((_mp, "assets/musicpack"))
 
 a = Analysis(
     [os.path.join(ROOT, 'KARDS.py')],

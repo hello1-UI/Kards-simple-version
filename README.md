@@ -62,7 +62,11 @@ assets/music/                 # 背景音乐曲库：目录里的 .ogg/.wav/.mp3
 `%USERPROFILE%\AppData\Kards-Simple-Version\music\`（设置窗「打开音乐文件夹」
 一键直达），**两者都会进曲库，自选目录同名曲子优先**。
 
-背景音乐随包附带 9 首曲目；在**设置 → 背景音乐**里给 菜单 / 对战 / 结算
+背景音乐是**可选音乐包**：游戏本体不带曲库（4.3 GB 太重，也拖累更新），
+想要背景音乐时在**设置 → 其它 →「可选音乐包」**里一键下载（分 3 卷、带
+SHA256 校验、可取消续传），或自己到 [发布页](https://github.com/hello1-UI/Kards-simple-version/releases/tag/music-pack)
+把 `music*.zip` 下载后放进数据目录，重启游戏自动解压。
+在**设置 → 背景音乐**里给 菜单 / 对战 / 结算
 三个场景各挑一首（或选「随机」/「不放音乐」），每行都有 ▶ 试听，选完即刻生效；
 选择器里的**「用到全部场景」**可一键把同一首设给三个场景。
 开关在**主菜单 ♪ 按钮 / 设置窗 / 对局暂停菜单**，音量与选曲偏好都存 `settings.json`。
@@ -82,6 +86,7 @@ assets/music/                 # 背景音乐曲库：目录里的 .ogg/.wav/.mp3
 | `kards_theme.py` | **配色与字体清单的唯一真源**，两套渲染器共用 |
 | `kards_i18n.py` | 三语文本与本地偏好（`settings.json`） |
 | `kards_music.py` | 背景音乐：曲库扫描、分场景自选、场景切歌、缺资源静默降级 |
+| `kards_musicpack.py` / `kards_musicdl.py` | 可选音乐包：本地 zip 自动解压 / 从发布页按需下载 |
 | `kards_net.py` / `kards_server.py` | 联机客户端 / 中继服务器 |
 | `kards_account.py` | 本地账号与游客会话 |
 | `kards_update.py` | 自动更新（查询、下载、SHA256 校验、解压覆盖） |

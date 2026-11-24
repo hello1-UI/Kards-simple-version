@@ -40,6 +40,8 @@ import kards_rank as rank
 import kards_host
 import kards_update as net_update
 import kards_music as music
+import kards_musicdl as musicdl
+import kards_musicpack as musicpack
 import kards_shop as shop
 import kards_quests as quests
 # 配色/字体清单的唯一真源（与 kards_board.py 共用，别再抄第二份）
@@ -128,6 +130,26 @@ def ensure_tk_cjk_font(root):
 
 def kw_text(keywords):
     return " ".join(f"[{k}]" for k in keywords)
+
+
+def _break_path(p, width=56):
+    """把长路径手工折成几行显示。
+
+    Tk 的 wraplength 折不断「无空格长 token」—— Windows 路径
+    （C:\\Users\\xxx\\AppData\\Kards-Simple-Version）是一整个词，
+    超过 wraplength 就直接在窗口右缘被剪掉（段位窗文案同款坑）。
+    这里在反斜杠处主动断行，让路径无论如何都能完整展示。
+    """
+    lines, cur = [], ""
+    soft = max(12, int(width * 0.55))
+    for ch in str(p):
+        cur += ch
+        if (ch == "\\" and len(cur) >= soft) or len(cur) >= width:
+            lines.append(cur)
+            cur = ""
+    if cur:
+        lines.append(cur)
+    return "\n".join(lines) or str(p)
 
 
 # ---------------------------------------------------------------- 悬停反馈
@@ -2059,6 +2081,7 @@ class App(tk.Tk):
             row = tk.Frame(body, bg=BG)
             row.pack(pady=(18, 0))
             for text, cmd, color in ((i18n.t("btn_check_update"), check_update, SUCCESS),
+                                     (i18n.t("mpk_btn"), self.open_musicpack_dialog, GOLD),
                                      (i18n.t("btn_help"), show_help, PRIMARY),
                                      (i18n.t("btn_keywords"), show_keywords, INFO),
                                      (i18n.t("btn_quit"), quit_app, BTN)):
@@ -2328,6 +2351,273 @@ class App(tk.Tk):
             win.destroy()
         except tk.TclError:
             pass
+
+    # ---------------- 可选音乐包 ----------------
+
+    def open_musicpack_dialog(self):
+        """可选音乐包：看本地状态、一键下载安装、或手动去发布页拿。
+
+        曲库 4.3 GB，**不随安装包发行**（见 pyinst/kards_gui.spec），
+        所以这里必须同时给出三条路，缺一条就会有人卡住：
+          1. 一键下载（后台线程，可取消，下完自动解压）
+          2. 打开下载页手动下（网络/API 不通时的兜底）
+          3. 说明「把 music*.zip 放进数据目录，重启自动解压」
+        """
+        if getattr(self, "_mp_win", None) is not None:
+            try:
+                self._mp_win.deiconify()
+                self._mp_win.lift()
+                return
+            except tk.TclError:
+                self._mp_win = None
+
+        win = tk.Toplevel(self)
+        self._mp_win = win
+        win.role = "musicpack"
+        win.title(i18n.t("mpk_pack_title"))
+        win.configure(bg=BG)
+        win.geometry("620x460")
+        win.minsize(560, 420)
+        win.transient(self)
+
+        state = {"polling": True, "aid": None, "phase": "", "task": None,
+                 "remote": None}
+        local = musicdl.plan()
+
+        def stop_poll():
+            state["polling"] = False
+            aid = state.get("aid")
+            if aid:
+                try:
+                    self.after_cancel(aid)
+                except (tk.TclError, ValueError):
+                    pass
+            state["aid"] = None
+
+        def close():
+            task = state.get("task")
+            if task is not None and task.state in ("checking", "downloading",
+                                                   "extracting"):
+                if not messagebox.askyesno(i18n.t("mpk_pack_title"),
+                                           i18n.t("mpk_cancel_confirm")):
+                    return
+                task.cancel()
+            stop_poll()
+            self._mp_win = None
+            try:
+                win.destroy()
+            except tk.TclError:
+                pass
+
+        win.protocol("WM_DELETE_WINDOW", close)
+
+        head = tk.Frame(win, bg=BG)
+        head.pack(fill="x", padx=20, pady=(16, 2))
+        tk.Label(head, text=i18n.t("mpk_pack_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(side="left")
+        x_btn = tk.Button(head, text="\u2715", bg=BTN, fg=TEXT, font=FONT_S,
+                          bd=0, padx=10, pady=3, cursor="hand2",
+                          activebackground=BTN_HOVER, activeforeground=TEXT,
+                          command=close)
+        x_btn.pack(side="right")
+        bind_hover(x_btn)
+
+        tk.Label(win, text=i18n.t("mpk_sub"), bg=BG, fg=DIM, font=FONT_S,
+                 wraplength=560, justify="left").pack(anchor="w", padx=20)
+
+        info = tk.Frame(win, bg=PANEL)
+        info.pack(fill="x", padx=20, pady=(12, 6))
+        local_lbl = tk.Label(
+            info,
+            text=(i18n.t("mpk_installed", n=local["audio"]) if local["audio"]
+                  else i18n.t("mpk_empty")),
+            bg=PANEL, fg=GOLD if local["audio"] else DIM, font=FONT_B)
+        local_lbl.pack(anchor="w", padx=14, pady=(10, 2))
+        # ⚠ Tk 折不断「无空格长 token」（见段位窗的教训）：数据目录路径是一个
+        # 整体，直接塞进句子必然在窗口右缘被剪掉。所以路径单独一行 + 手工
+        # 按反斜杠断行，句子和路径互不干扰。
+        hint_lbl = tk.Label(info, text=i18n.t("mpk_hint"), bg=PANEL,
+                            fg=MUTE, font=FONT_S, wraplength=540,
+                            justify="left")
+        hint_lbl.pack(anchor="w", padx=14, pady=(0, 2))
+        tk.Label(info, text=_break_path(local["data_dir"]), bg=PANEL,
+                 fg=MUTE, font=FONT_S, justify="left"
+                 ).pack(anchor="w", padx=14, pady=(0, 10))
+
+        status = tk.Label(win, text=i18n.t("mpk_checking"), bg=BG, fg=TEXT,
+                          font=FONT, wraplength=560, justify="left")
+        status.pack(padx=20, pady=(6, 0), anchor="w")
+        verify_lbl = tk.Label(win, text="", bg=BG, fg=DIM, font=FONT_S,
+                              wraplength=560, justify="left")
+        verify_lbl.pack(padx=20, anchor="w")
+
+        bar = tk.Frame(win, bg=PANEL_ALT, height=10)
+        bar.pack(fill="x", padx=20, pady=(10, 0))
+        bar_fill = tk.Frame(bar, bg=SUCCESS, height=10)
+        bar_fill.place(x=0, y=0, relwidth=0.0, relheight=1.0)
+
+        btns = tk.Frame(win, bg=BG)
+        btns.pack(pady=16)
+
+        def rebuild(buttons):
+            for w in btns.winfo_children():
+                w.destroy()
+            for text, cmd, color in buttons:
+                b = tk.Button(btns, text=text, bg=color, fg=TEXT, font=FONT_S,
+                              bd=0, padx=14, pady=7, cursor="hand2",
+                              activebackground=theme.hover_of(color),
+                              activeforeground=TEXT, command=cmd)
+                b.pack(side="left", padx=5)
+                bind_hover(b)
+
+        def set_status(text, fg=TEXT):
+            if not state["polling"]:
+                return
+            try:
+                status.configure(text=text, fg=fg)
+            except tk.TclError:
+                state["polling"] = False
+
+        def set_verify(text, fg=DIM):
+            if not state["polling"]:
+                return
+            try:
+                verify_lbl.configure(text=text, fg=fg)
+            except tk.TclError:
+                state["polling"] = False
+
+        def set_bar(frac):
+            try:
+                bar_fill.place_configure(relwidth=max(0.0, min(1.0, frac)))
+            except tk.TclError:
+                pass
+
+        def probe():
+            # 只是查清单（十几 KB），放后台是为了不让窗口卡在"未响应"
+            state["remote"] = musicdl.release()
+
+        def start(local_only=False):
+            task = musicdl.InstallTask(local_only=local_only)
+            state["task"] = task
+            state["phase"] = ""
+            task.start()
+
+        def open_page():
+            musicdl.open_page()
+
+        # 先查远端（异步），本地状态立刻就能看到
+        threading.Thread(target=probe, daemon=True).start()
+
+        def render():
+            """按「远端清单 / 任务状态」决定文案与按钮。"""
+            task = state["task"]
+            phase = "idle"
+            buttons = []
+
+            if task is None:
+                remote = state["remote"]
+                if remote is None:
+                    set_status(i18n.t("mpk_checking"), DIM)
+                    buttons = [(i18n.t("mpk_btn_page"), open_page, BTN),
+                               (i18n.t("btn_close"), close, BTN)]
+                elif not remote["ok"]:
+                    set_status(i18n.t("mpk_fail", err=remote["err"]), GOLD)
+                    set_verify(i18n.t("mpk_manual", page=remote["page"]), DIM)
+                    buttons = [(i18n.t("mpk_btn_page"), open_page, PRIMARY),
+                               (i18n.t("btn_close"), close, BTN)]
+                else:
+                    parts = remote["parts"]
+                    mb = int(musicdl.total_bytes(parts) / 1048576)
+                    set_status(i18n.t("mpk_ready", parts=len(parts), mb=mb), TEXT)
+                    set_verify("", DIM)
+                    buttons = [(i18n.t("mpk_btn_download"), lambda: start(False),
+                                SUCCESS),
+                               (i18n.t("mpk_btn_page"), open_page, PRIMARY)]
+                    if musicdl.MP.packs():
+                        # 本地已有 zip（玩家自己放的 / 上次中断的）→ 给个重解入口
+                        buttons.append((i18n.t("mpk_btn_reextract"),
+                                        lambda: start(True), BTN))
+                    buttons.append((i18n.t("btn_close"), close, BTN))
+            else:
+                st = task.state
+                if st in ("idle", "checking"):
+                    phase = "checking"
+                    set_status(i18n.t("mpk_checking"), DIM)
+                    buttons = [(i18n.t("mpk_cancel"), close, BTN)]
+                elif st == "downloading":
+                    phase = "downloading"
+                    set_status(i18n.t("mpk_downloading",
+                                      done=int(task.done_mb),
+                                      total=int(task.total_mb),
+                                      name=(task.message or "")[:24]), TEXT)
+                    set_bar(task.progress)
+                    buttons = [(i18n.t("mpk_cancel"), close, BTN)]
+                elif st == "extracting":
+                    phase = "extracting"
+                    set_status(i18n.t("mpk_extracting",
+                                      pct=int(task.progress * 100)), TEXT)
+                    set_bar(task.progress)
+                    buttons = [(i18n.t("mpk_cancel"), close, BTN)]
+                elif st == "done":
+                    phase = "done"
+                    set_bar(1.0)
+                    set_status(i18n.t("mpk_done", n=task.audio), GREEN)
+                    set_verify(i18n.t("mpk_verified") if task.verified
+                               else i18n.t("mpk_unverified"),
+                               GREEN if task.verified else GOLD)
+                    buttons = [(i18n.t("btn_close"), close, BTN)]
+                elif st == "cancelled":
+                    phase = "cancelled"
+                    set_status(i18n.t("mpk_cancelled"), GOLD)
+                    set_bar(0.0)
+                    buttons = [(i18n.t("mpk_btn_download"), lambda: start(False),
+                                SUCCESS),
+                               (i18n.t("mpk_btn_page"), open_page, BTN),
+                               (i18n.t("btn_close"), close, BTN)]
+                else:                                   # error
+                    phase = "error"
+                    msg = task.message or ""
+                    if msg.startswith("insufficient_space:"):
+                        try:
+                            _, need, free = msg.split(":", 2)
+                            text = i18n.t("mpk_nospace", need=need, free=free)
+                        except ValueError:
+                            text = i18n.t("mpk_fail", err=msg)
+                    elif msg == "no_local_packs":
+                        text = i18n.t("mpk_no_local")
+                    else:
+                        text = i18n.t("mpk_fail", err=msg)
+                    set_status(text, RED)
+                    set_bar(0.0)
+                    buttons = [(i18n.t("mpk_btn_page"), open_page, PRIMARY),
+                               (i18n.t("btn_close"), close, BTN)]
+
+            if phase != state["phase"]:
+                state["phase"] = phase
+                rebuild(buttons)
+
+        def poll():
+            state["aid"] = None
+            if not state["polling"]:
+                return
+            try:
+                if not win.winfo_exists():
+                    stop_poll()
+                    return
+            except tk.TclError:
+                stop_poll()
+                return
+            render()
+            try:
+                state["aid"] = win.after(140, poll)
+            except tk.TclError:
+                stop_poll()
+
+        render()
+        try:
+            state["aid"] = win.after(140, poll)
+        except tk.TclError:
+            stop_poll()
 
     def _restart_after_update(self):
         """重启游戏以应用更新。
@@ -5242,9 +5532,12 @@ def main():
         sys.exit(0 if finished else 1)
     if "--check-music" in sys.argv:
         # 音乐包自检：有哪些 zip、解压到哪、还差多少（打包/客服排查用）
+        import kards_musicdl
         import kards_musicpack
         import json as _json
-        print(_json.dumps(kards_musicpack.status(), ensure_ascii=False, indent=1))
+        print(_json.dumps({**kards_musicpack.status(),
+                           "optional": kards_musicdl.status()},
+                          ensure_ascii=False, indent=1))
         sys.exit(0)
     # 曲库以 music*.zip 分发：首次启动解到音乐目录（已解过就几毫秒跳过）。
     # 放在 App() 之前：界面起来时曲库已经就绪，设置里的曲目列表不会是空的。

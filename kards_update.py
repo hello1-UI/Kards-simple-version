@@ -160,17 +160,33 @@ def check_latest(timeout=TIMEOUT_API):
     老版本 Release 的资产没有 digest，这里留空字符串，交给
     resolve_checksum() 去同版本的校验文件里找。
     """
+    return check_release(None, timeout=timeout)
+
+
+def check_release(tag=None, timeout=TIMEOUT_API):
+    """查询**指定 tag** 的 Release；tag 为空则查最新。
+
+    用途：可选音乐包挂在固定 tag（music-pack）上，不能靠 /releases/latest
+    —— 那个只反映游戏版本。返回结构与 check_latest 一致（同样带 assets），
+    只是多一个 "tag" 字段，方便调用方核对。
+    """
+    if tag:
+        url = f"https://api.github.com/repos/{OWNER}/{REPO}/releases/tags/{tag}"
+    else:
+        url = API_LATEST
     try:
-        with _get(API_LATEST, timeout) as resp:
+        with _get(url, timeout) as resp:
             data = json.loads(resp.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as e:
         if e.code == 404:
+            if tag:
+                return {"ok": False, "err": f"没有 tag 为 {tag} 的 Release"}
             return {"ok": False, "err": "仓库还没有发布任何 Release"}
         return {"ok": False, "err": f"HTTP {e.code}"}
     except Exception as e:                       # noqa: BLE001 — 网络错误种类多
         return {"ok": False, "err": f"{type(e).__name__}: {e}"}
 
-    tag = data.get("tag_name") or data.get("name") or ""
+    tag_name = data.get("tag_name") or data.get("name") or ""
     assets = []
     for a in data.get("assets") or []:
         assets.append({
@@ -179,7 +195,8 @@ def check_latest(timeout=TIMEOUT_API):
             "size": a.get("size") or 0,
             "sha256": digest_to_sha256(a.get("digest")),
         })
-    return {"ok": True, "version": version_str(parse_version(tag)) or tag,
+    return {"ok": True, "tag": tag_name,
+            "version": version_str(parse_version(tag_name)) or tag_name,
             "notes": data.get("body") or "",
             "page": data.get("html_url") or RELEASES_PAGE,
             "assets": assets}
