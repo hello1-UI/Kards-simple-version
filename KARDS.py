@@ -40,6 +40,8 @@ import kards_rank as rank
 import kards_host
 import kards_update as net_update
 import kards_music as music
+import kards_shop as shop
+import kards_quests as quests
 # 配色/字体清单的唯一真源（与 kards_board.py 共用，别再抄第二份）
 import kards_theme as theme
 from kards_theme import (BG, BG_ALT, PANEL, PANEL_ALT, CARD_BG, CARD_DIM,
@@ -456,6 +458,11 @@ class App(tk.Tk):
 
     def destroy(self):
         """退出前关闭联机连接"""
+        # 对局中直接退出程序也算判负（先结算，再拆连接/界面）
+        try:
+            self._forfeit_if_playing()
+        except Exception:                            # noqa: BLE001
+            pass
         # 更新任务在后台线程（下载/解压）。这里只置取消标志，不 join ——
         # 解压到一半就强杀反而会留下半个文件；让它自然结束更安全。
         if getattr(self, "_update_task", None) is not None:
@@ -577,6 +584,12 @@ class App(tk.Tk):
         top.pack(fill="x", padx=18, pady=(12, 0))
         left = tk.Frame(top, bg=BG)
         left.pack(side="left")
+        # 头像（商店买的皮肤）：Canvas 画，程序化图形，不依赖美术资源
+        self.avatar_cvs = tk.Canvas(left, width=34, height=34, bg=BG,
+                                    highlightthickness=0, bd=0,
+                                    cursor="hand2")
+        self.avatar_cvs.pack(side="left", padx=(0, 8))
+        self.avatar_cvs.bind("<Button-1>", lambda e: self.open_shop_dialog())
         self.account_btn = tk.Button(left, text=self._account_btn_text(),
                                      bg=BTN, fg=TEXT, font=FONT_S, bd=0,
                                      padx=14, pady=7, cursor="hand2",
@@ -597,6 +610,16 @@ class App(tk.Tk):
                                    cursor="hand2", activebackground=BTN_HOVER,
                                    activeforeground=TEXT, command=self._toggle_music)
         self.music_btn.pack(side="right")
+        self.quest_btn = tk.Button(right, text=i18n.t("btn_quests"), bg=BTN,
+                                   fg=TEXT, font=FONT_S, bd=0, padx=12, pady=7,
+                                   cursor="hand2", activebackground=BTN_HOVER,
+                                   activeforeground=TEXT,
+                                   command=self.open_quests_dialog)
+        self.quest_btn.pack(side="right", padx=(0, 8))
+        tk.Button(right, text=i18n.t("btn_shop"), bg=BTN, fg=TEXT,
+                  font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
+                  activebackground=BTN_HOVER, activeforeground=TEXT,
+                  command=self.open_shop_dialog).pack(side="right", padx=(0, 8))
         tk.Button(right, text=i18n.t("btn_rank"), bg=BTN, fg=TEXT,
                   font=FONT_S, bd=0, padx=12, pady=7, cursor="hand2",
                   activebackground=BTN_HOVER, activeforeground=TEXT,
@@ -718,6 +741,81 @@ class App(tk.Tk):
                 # 游客时给一行说明，登录后清空
                 hint.configure(text="" if self.account else i18n.t("guest_note"))
             self._refresh_currency_lbl()
+            self._refresh_avatar()
+            self._refresh_quest_btn()
+        except tk.TclError:
+            pass
+
+    # ---------------- 外观（头像）/ 每日任务按钮 ----------------
+
+    def _paint_avatar(self, cvs, size, it):
+        """把头像画进一个 Canvas（程序化：圆环 + 底色 + 徽记多边形）。
+
+        头像全部用几何图形，不依赖图片资源 —— 换机器/换语言都不会变方块。
+        """
+        if cvs is None:
+            return
+        try:
+            cvs.delete("all")
+        except tk.TclError:
+            return
+        pad = 2
+        if it:
+            cvs.create_oval(pad, pad, size - pad, size - pad,
+                            fill=it["fill"], outline=it["ring"], width=2)
+            inner = size * 0.62
+            off = (size - inner) / 2.0
+            for poly in shop.emblem_polygons(it.get("emblem")):
+                pts = []
+                for x, y in poly:
+                    pts.extend((off + x * inner, off + y * inner))
+                cvs.create_polygon(pts, fill=it["ring"], outline="")
+        else:
+            # 默认头像：暗色圆 + 一个简单人形，告诉玩家"这里能买头像"
+            cvs.create_oval(pad, pad, size - pad, size - pad,
+                            fill=PANEL_ALT, outline=BORDER_HI, width=2)
+            c = size / 2.0
+            cvs.create_oval(c - size * 0.13, size * 0.24,
+                            c + size * 0.13, size * 0.24 + size * 0.26,
+                            fill=DIM, outline="")
+            cvs.create_arc(size * 0.22, size * 0.52, size * 0.78,
+                           size * 1.02, start=0, extent=180,
+                           fill=DIM, outline="", style="chord")
+
+    def _refresh_avatar(self):
+        """主菜单头像跟随装备变化（登录/换号/买完装备都要刷）。"""
+        cvs = getattr(self, "avatar_cvs", None)
+        if cvs is None:
+            return
+        try:
+            if not cvs.winfo_exists():
+                return
+            self._paint_avatar(cvs, 34, self._cosmetic("avatar"))
+        except tk.TclError:
+            pass
+
+    def _cosmetic(self, cat):
+        """当前账号装备的某类外观（异常一律当没有，绝不阻断主流程）。"""
+        try:
+            return shop.cosmetics(self.account).get(cat)
+        except Exception:                              # noqa: BLE001
+            return None
+
+    def _refresh_quest_btn(self):
+        """每日任务按钮：有已完成的奖励可领时加一个金色圆点。"""
+        btn = getattr(self, "quest_btn", None)
+        if btn is None:
+            return
+        try:
+            if not btn.winfo_exists():
+                return
+            n = 0
+            try:
+                n = quests.available_gold(self.account)
+            except Exception:                          # noqa: BLE001
+                n = 0
+            btn.configure(text=i18n.t("btn_quests") + ("  ●" if n > 0 else ""),
+                          fg=GOLD if n > 0 else TEXT)
         except tk.TclError:
             pass
 
@@ -881,8 +979,10 @@ class App(tk.Tk):
                                      need=rank.AI_WINS_PER_STAR),
                  bg=PANEL, fg=TEXT if st.get("ai_wins") else DIM,
                  font=FONT_S).pack(anchor="w", pady=(0, 2))
+        # ⚠ Tk 不做 CJK 断行：整句测量约 435px，wraplength 太小会把
+        # 「星（可累计）…」整段挤到下一行 → 直接放宽到 450 一行放下。
         tk.Label(parent, text=i18n.t("rank_ai_note"), bg=PANEL, fg=MUTE,
-                 font=FONT_S, wraplength=380, justify="left").pack(anchor="w")
+                 font=FONT_S, wraplength=450, justify="left").pack(anchor="w")
 
     def _rank_board_panel(self, parent, board):
         """右栏：排行榜（前 20 名，自己不在其中时单独补一行）。"""
@@ -925,6 +1025,344 @@ class App(tk.Tk):
     def _rank_rules(self, win):
         tk.Label(win, text=i18n.t("rank_rules"), bg=BG, fg=MUTE, font=FONT_S,
                  wraplength=820, justify="left").pack(padx=20, pady=(12, 0))
+
+    # ---------------- 商店 ----------------
+    def open_shop_dialog(self, tab=None, parent=None):
+        """商店：头像 / 桌饰 / 总部皮肤 + 随机刷新。
+
+        库存按自然日轮换（同一天同一批），当天首次刷新免费、之后花钱重摇。
+        所有商品都是外观，买完自动装备 —— 主菜单头像 / 对战棋盘立刻能看出来。
+        """
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "shop":
+                w.lift()
+                return w
+        tab = tab or getattr(self, "_shop_tab", "all")
+        if tab not in ("all",) + shop.CATEGORIES:
+            tab = "all"
+        self._shop_tab = tab
+
+        win = tk.Toplevel(parent or self)
+        win.role = "shop"
+        win.title(i18n.t("shop_title"))
+        win.configure(bg=BG)
+        win.geometry("1040x820")
+        win.minsize(960, 740)
+        win.transient(parent or self)
+
+        def reload(new_tab=None):
+            self._shop_tab = new_tab or self._shop_tab
+            try:
+                win.destroy()
+            except tk.TclError:
+                pass
+            self.open_shop_dialog(self._shop_tab, parent=parent)
+
+        head = tk.Frame(win, bg=BG)
+        head.pack(fill="x", padx=22, pady=(16, 2))
+        tk.Label(head, text=i18n.t("shop_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(side="left")
+        cur = account.get_currency(self.account)
+        tk.Label(head, text=f"{i18n.t('currency_gold', n=cur['gold'])}   "
+                            f"{i18n.t('currency_diamonds', n=cur['diamonds'])}",
+                 bg=BG, fg=GOLD, font=FONT_B).pack(side="right")
+        tk.Label(win, text=i18n.t("shop_sub"), bg=BG, fg=DIM, font=FONT_S
+                 ).pack(anchor="w", padx=22)
+        if not self.account:
+            tk.Label(win, text=i18n.t("shop_guest_hint"), bg=BG, fg=WARN,
+                     font=FONT_S).pack(anchor="w", padx=22, pady=(2, 0))
+
+        # 货架行：刷新倒计时 + 刷新按钮
+        srow = tk.Frame(win, bg=BG)
+        srow.pack(fill="x", padx=22, pady=(8, 4))
+        tk.Label(srow, text=i18n.t("shop_stock_line",
+                                   hours=quests.days_left_hint()),
+                 bg=BG, fg=MUTE, font=FONT_S).pack(side="left")
+        free = shop.free_rerolls_left(self.account)
+        rtxt = (i18n.t("shop_reroll_free", n=free) if free
+                else i18n.t("shop_reroll_paid", n=shop.REROLL_COST))
+        rr_btn = tk.Button(srow, text=rtxt, bg=BTN, fg=TEXT, font=FONT_S,
+                           bd=0, padx=12, pady=5, cursor="hand2",
+                           activebackground=BTN_HOVER, activeforeground=TEXT,
+                           command=lambda: self._shop_reroll(win, reload))
+        rr_btn.pack(side="right")
+        bind_hover(rr_btn)
+
+        # 分类页签
+        tabs = tk.Frame(win, bg=BG)
+        tabs.pack(fill="x", padx=22, pady=(4, 0))
+        for key, label in (("all", i18n.t("shop_tab_all")),
+                           ("avatar", i18n.t("shop_tab_avatar")),
+                           ("table", i18n.t("shop_tab_table")),
+                           ("hq", i18n.t("shop_tab_hq"))):
+            active = key == tab
+            b = tk.Button(tabs, text=label, bg=ACCENT if active else BTN,
+                          fg=ACCENT_FG if active else TEXT, font=FONT_S,
+                          bd=0, padx=16, pady=6, cursor="hand2",
+                          activebackground=ACCENT if active else BTN_HOVER,
+                          activeforeground=ACCENT_FG if active else TEXT,
+                          command=lambda k=key: reload(k))
+            b.pack(side="left", padx=(0, 8))
+            bind_hover(b)
+
+        tk.Frame(win, bg=BORDER, height=1).pack(fill="x", padx=22, pady=(10, 0))
+
+        body = tk.Frame(win, bg=BG)
+        body.pack(fill="both", expand=True, padx=22, pady=8)
+
+        items = shop.stock(self.account)
+        cats = shop.CATEGORIES if tab == "all" else (tab,)
+        shown = 0
+        for cat in cats:
+            group = [it for it in items if it["cat"] == cat]
+            if not group:
+                continue
+            if tab == "all":
+                tk.Label(body, text={"avatar": i18n.t("shop_tab_avatar"),
+                                     "table": i18n.t("shop_tab_table"),
+                                     "hq": i18n.t("shop_tab_hq")}.get(cat, cat),
+                         bg=BG, fg=DIM, font=FONT_S).pack(anchor="w", pady=(4, 2))
+            row = tk.Frame(body, bg=BG)
+            row.pack(fill="x", pady=(0, 6))
+            for it in group:
+                self._shop_card(row, it, reload).pack(side="left", padx=(0, 10),
+                                                      fill="x", expand=True)
+                shown += 1
+        if shown == 0:
+            tk.Label(body, text=i18n.t("shop_err_not_in_stock"), bg=BG, fg=DIM,
+                     font=FONT).pack(pady=30)
+
+        foot = tk.Frame(win, bg=BG)
+        foot.pack(fill="x", padx=22, pady=(0, 14))
+        owned_n = sum(len(v) for v in shop.get_state(self.account)["owned"].values())
+        tk.Label(foot, text=i18n.t("shop_owned_line", n=owned_n), bg=BG, fg=MUTE,
+                 font=FONT_S).pack(side="left")
+        close = tk.Button(foot, text=i18n.t("btn_close"), bg=BTN, fg=TEXT,
+                          font=FONT_B, bd=0, padx=22, pady=7, cursor="hand2",
+                          activebackground=BTN_HOVER, activeforeground=TEXT,
+                          command=win.destroy)
+        close.pack(side="right")
+        bind_hover(close)
+        return win
+
+    def _shop_reroll(self, win, reload):
+        ok, err, cost = shop.reroll(self.account)
+        if not ok:
+            messagebox.showinfo(i18n.t("shop_title"), i18n.t(err), parent=win)
+            return
+        self._refresh_currency_lbl()
+        reload()
+
+    def _shop_card(self, parent, it, reload):
+        """一件商品：预览图 + 名字 + 价格 + 购买/装备按钮。"""
+        card = tk.Frame(parent, bg=PANEL, padx=12, pady=10)
+        box = tk.Frame(card, bg=PANEL)
+        box.pack(fill="x")
+        cvs = tk.Canvas(box, width=104, height=104, bg=PANEL,
+                        highlightthickness=0, bd=0)
+        cvs.pack(side="left", padx=(0, 10))
+        self._shop_preview(cvs, it)
+
+        info = tk.Frame(box, bg=PANEL)
+        info.pack(side="left", fill="both", expand=True)
+        tk.Label(info, text=shop.name_of(it), bg=PANEL, fg=TEXT, font=FONT_B,
+                 anchor="w").pack(fill="x")
+        price = shop.price_text(it)
+        ptxt = (i18n.t("shop_price_diamond", n=price) if shop.is_diamond(it)
+                else i18n.t("shop_price_gold", n=price))
+        tk.Label(info, text=ptxt, bg=PANEL,
+                 fg=INFO if shop.is_diamond(it) else GOLD,
+                 font=FONT_S).pack(anchor="w", pady=(2, 6))
+
+        state = shop.get_state(self.account)
+        owned = it["id"] in state["owned"][it["cat"]]
+        equipped = state["equipped"].get(it["cat"]) == it["id"]
+        if equipped:
+            tk.Label(info, text=i18n.t("shop_equipped"), bg=PANEL, fg=SUCCESS,
+                     font=FONT_S).pack(anchor="w")
+        elif owned:
+            b = tk.Button(info, text=i18n.t("shop_equip"), bg=BTN, fg=TEXT,
+                          font=FONT_S, bd=0, padx=14, pady=5, cursor="hand2",
+                          activebackground=BTN_HOVER, activeforeground=TEXT,
+                          command=lambda i=it["id"]: self._shop_equip(i, reload))
+            b.pack(anchor="w")
+            bind_hover(b)
+        else:
+            b = tk.Button(info, text=i18n.t("shop_buy"), bg=PRIMARY,
+                          fg=PRIMARY_FG, font=FONT_S, bd=0, padx=14, pady=5,
+                          cursor="hand2", activebackground=PRIMARY_HOVER,
+                          activeforeground=PRIMARY_FG,
+                          command=lambda i=it["id"], w=parent.winfo_toplevel():
+                          self._shop_buy(i, w, reload))
+            b.pack(anchor="w")
+            bind_hover(b)
+        return card
+
+    def _shop_preview(self, cvs, it):
+        """商品预览：头像直接画人像，桌饰/总部画迷你示意图。"""
+        if it["cat"] == "avatar":
+            self._paint_avatar(cvs, 104, it)
+            return
+        try:
+            cvs.delete("all")
+        except tk.TclError:
+            return
+        if it["cat"] == "table":
+            cvs.create_rectangle(4, 14, 100, 90, fill=it["bg"],
+                                 outline=it["edge"], width=2)
+            for i in range(4):
+                y = 20 + i * 17
+                cvs.create_rectangle(10, y, 94, y + 12, fill=it["row"],
+                                     outline=it["edge"])
+            cvs.create_rectangle(10, 52, 94, 58, fill=it["mid"], outline="")
+        else:                                  # hq
+            cvs.create_rectangle(22, 10, 82, 96, fill=it["fill"],
+                                 outline=it["edge"], width=2)
+            cvs.create_rectangle(26, 15, 78, 19, fill=it["accent"], outline="")
+            cvs.create_text(52, 58, text="HQ", fill=it["accent"],
+                            font=(FONT_FAMILY, 16, "bold"))
+
+    def _shop_buy(self, item_id, win, reload):
+        ok, err = shop.buy(item_id, self.account)
+        if not ok:
+            messagebox.showinfo(i18n.t("shop_title"), i18n.t(err), parent=win)
+            return
+        self._refresh_currency_lbl()
+        self._refresh_avatar()
+        self._refresh_account_btn()
+        reload()
+
+    def _shop_equip(self, item_id, reload):
+        ok, err = shop.equip(item_id, self.account)
+        if not ok:
+            messagebox.showinfo(i18n.t("shop_title"), i18n.t(err))
+            return
+        self._refresh_avatar()
+        self._refresh_account_btn()
+        reload()
+
+    # ---------------- 每日任务 ----------------
+    def open_quests_dialog(self):
+        """每日任务：3 个任务 + 进度 + 领取金币。"""
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "quests":
+                w.lift()
+                return w
+        win = tk.Toplevel(self)
+        win.role = "quests"
+        win.title(i18n.t("quest_title"))
+        win.configure(bg=BG)
+        win.geometry("660x560")
+        win.minsize(600, 480)
+        win.transient(self)
+
+        status = {"lbl": None}
+
+        def refresh():
+            try:
+                for ch in body.winfo_children():
+                    ch.destroy()
+            except tk.TclError:
+                return
+            rows = quests.daily(self.account)
+            for r in rows:
+                self._quest_row(body, r, refresh)
+            if not rows:
+                tk.Label(body, text=i18n.t("quest_none_left"), bg=BG, fg=DIM,
+                         font=FONT).pack(pady=30)
+            try:
+                head_stat.configure(text=i18n.t("quest_claimed_total",
+                                                n=quests.claimed_gold(self.account)))
+            except tk.TclError:
+                pass
+
+        head = tk.Frame(win, bg=BG)
+        head.pack(fill="x", padx=22, pady=(18, 2))
+        tk.Label(head, text=i18n.t("quest_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(side="left")
+        head_stat = tk.Label(head, text="", bg=BG, fg=GOLD, font=FONT_S)
+        head_stat.pack(side="right")
+        tk.Label(win, text=i18n.t("quest_sub",
+                                  hours=quests.days_left_hint()),
+                 bg=BG, fg=DIM, font=FONT_S).pack(anchor="w", padx=22)
+        tk.Frame(win, bg=BORDER, height=1).pack(fill="x", padx=22, pady=(10, 6))
+
+        body = tk.Frame(win, bg=BG)
+        body.pack(fill="both", expand=True, padx=22)
+
+        foot = tk.Frame(win, bg=BG)
+        foot.pack(fill="x", padx=22, pady=(6, 14))
+        tk.Label(foot, text=i18n.t("quest_hint"), bg=BG, fg=MUTE,
+                 font=FONT_S).pack(side="left")
+        close = tk.Button(foot, text=i18n.t("btn_close"), bg=BTN, fg=TEXT,
+                          font=FONT_B, bd=0, padx=22, pady=7, cursor="hand2",
+                          activebackground=BTN_HOVER, activeforeground=TEXT,
+                          command=win.destroy)
+        close.pack(side="right")
+        bind_hover(close)
+        refresh()
+        self._refresh_quest_btn()
+        return win
+
+    def _quest_row(self, parent, r, refresh):
+        row = tk.Frame(parent, bg=PANEL, padx=14, pady=10)
+        row.pack(fill="x", pady=4)
+        top = tk.Frame(row, bg=PANEL)
+        top.pack(fill="x")
+        tk.Label(top, text=r["name"], bg=PANEL,
+                 fg=TEXT if not r["claimed"] else MUTE,
+                 font=FONT_B).pack(side="left")
+        tk.Label(top, text=i18n.t("quest_reward", n=r["gold"]), bg=PANEL,
+                 fg=GOLD, font=FONT_S).pack(side="right")
+
+        bar_row = tk.Frame(row, bg=PANEL)
+        bar_row.pack(fill="x", pady=(6, 0))
+        cvs = tk.Canvas(bar_row, height=8, bg=BORDER, highlightthickness=0, bd=0)
+        cvs.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        frac = 0.0 if not r["target"] else min(1.0, r["progress"] / float(r["target"]))
+        done = r["done"]
+
+        def paint(event=None, c=cvs, p=frac, d=done):
+            try:
+                c.delete("all")
+                w = max(1, c.winfo_width())
+                c.create_rectangle(0, 0, int(w * p), 8,
+                                   fill=SUCCESS if d else ACCENT, outline="")
+            except tk.TclError:
+                pass
+
+        cvs.bind("<Configure>", paint)
+        tk.Label(bar_row, text=i18n.t("quest_progress", a=r["progress"],
+                                      b=r["target"]),
+                 bg=PANEL, fg=SUCCESS if done else DIM,
+                 font=FONT_S).pack(side="right")
+
+        if r["claimed"]:
+            tk.Label(row, text=i18n.t("quest_claimed"), bg=PANEL, fg=MUTE,
+                     font=FONT_S).pack(anchor="e", pady=(6, 0))
+        else:
+            b = tk.Button(row, text=i18n.t("quest_claim"),
+                          bg=SUCCESS if done else BTN,
+                          fg=TEXT, font=FONT_S, bd=0, padx=16, pady=5,
+                          cursor="hand2",
+                          activebackground=SUCCESS_HOVER if done else BTN_HOVER,
+                          activeforeground=TEXT,
+                          state="normal" if done else "disabled",
+                          command=lambda q=r["id"]: self._quest_claim(q, refresh))
+            b.pack(anchor="e", pady=(6, 0))
+            if done:
+                bind_hover(b)
+
+    def _quest_claim(self, qid, refresh):
+        gold, err = quests.claim(self.account, qid)
+        if err:
+            messagebox.showinfo(i18n.t("quest_title"), i18n.t(err))
+            return
+        self._refresh_currency_lbl()
+        self._refresh_quest_btn()
+        refresh()
+        messagebox.showinfo(i18n.t("quest_title"),
+                            i18n.t("quest_claimed_toast", n=gold))
 
     def _apply_account(self, name):
         """登录/注册成功后应用账号（卡组目录 + 按钮）"""
@@ -4113,12 +4551,65 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _forfeit_if_playing(self):
+        """中途退出 / 返回大厅 = 判负（用户指定）。
+
+        只在「确实还有一局没结束」时记账：
+          · `_mp_game_over` 已置位（走的是正常结算）→ 跳过
+          · 引擎已 over / 已记投降方 → 跳过
+        这样从结算页点「返回大厅」不会被补记一局负。
+        """
+        g = self.game
+        if g is None or getattr(self, "_mp_game_over", False):
+            return False
+        if getattr(g, "over", False) or getattr(g, "conceded", None) is not None:
+            return False
+        me = g.players[0]
+        try:
+            g.conceded = me          # 结算文案/胜负判定都靠它
+        except Exception:                            # noqa: BLE001
+            pass
+        try:
+            self.add_log(i18n.t("log_forfeit"))
+        except Exception:                            # noqa: BLE001
+            pass
+        online = bool(getattr(self, "_game_online", False))
+        if online and self.mp_link is not None:
+            try:
+                self.mp_link.send({"m": "concede"})
+            except Exception:                        # noqa: BLE001
+                pass
+        if self.account:
+            try:
+                account.stats_add(self.account, "lose")
+                quests.record_game("lose", online=online, nation=me.nation,
+                                   my_hq=me.hq, name=self.account)
+            except Exception:                        # noqa: BLE001
+                pass
+            if online:
+                self._rank_settle("lose")
+            else:
+                self._rank_settle_ai("lose")
+            try:
+                account.currency_reward("lose", name=self.account)
+            except Exception:                        # noqa: BLE001
+                pass
+            self._refresh_account_btn()
+            self._refresh_quest_btn()
+        self._mp_game_over = True
+        return True
+
     def back_to_menu(self):
         """安全回到主菜单（放弃当前对局）。
 
         ⚠ 注意：这里是**回主菜单**，不是断服务器 —— 服务器连接要保留，
         否则用户每打一局都得重连 + 重新登录。
         """
+        # 中途退出 = 判负：先结算再拆界面（棋盘还活着，日志/段位行才写得进去）
+        try:
+            self._forfeit_if_playing()
+        except Exception:                            # noqa: BLE001
+            pass
         self._finishing = False
         if self._pyboard is not None:
             self._pyboard.quit()   # 让 pygame 主循环退出；视图方法由 _run_pyboard 还原
@@ -4318,6 +4809,14 @@ class App(tk.Tk):
         rank_line = ""
         if self.account:
             account.stats_add(self.account, result)
+            # 每日任务进度：一局一记（含中途退出判负，口径与战绩一致）
+            try:
+                quests.record_game(result,
+                                   online=getattr(self, "_game_online", False),
+                                   nation=me.nation, my_hq=me.hq,
+                                   name=self.account)
+            except Exception:                      # noqa: BLE001
+                pass
             # 联机 → 完整排位结算；人机 → 每 2 胜折算 1 星（负场不动段位）。
             # 平局按规则不存在；真出了也不动段位（不让异常结算打花数据）。
             if result in ("win", "lose"):
@@ -4326,6 +4825,7 @@ class App(tk.Tk):
                 else:
                     rank_line = self._rank_settle_ai(result)
             self._refresh_account_btn()
+            self._refresh_quest_btn()
         rw = account.currency_reward(result, name=self.account)
         self.add_log(i18n.t("currency_reward", gold=rw["gold"],
                             diamonds=rw["diamonds"]))

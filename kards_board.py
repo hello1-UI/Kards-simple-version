@@ -39,6 +39,7 @@ import pygame
 import kards_engine as core
 import kards_i18n as i18n
 import kards_music as music
+import kards_shop as shop
 # 配色/字体清单与 KARDS.py 共用一份真源。以前这里是「拷贝一份避免循环
 # import，改动需两边同步」—— 事实上已经悄悄不同步了（稀有度宝石恒灰）。
 import kards_theme as theme
@@ -403,6 +404,10 @@ class PygameBoard:
         self._end_clicked = False
         self._hq_fall_tip = None  # dict(text, until) —— 结算爆炸阶段的提示条
         self.intro = None         # 开场动画 dict(t0, my, foe, clashed)
+        # 商店外观（桌饰 / 总部皮肤）。读一次存档即可：对局中不会去商店，
+        # 每帧读文件纯属浪费；测试可调 apply_cosmetics() 现场换。
+        self.cosm = {"avatar": None, "table": None, "hq": None}
+        self.apply_cosmetics()
 
         # 绘制
         self.screen = None
@@ -1188,6 +1193,20 @@ class PygameBoard:
 
     # ---- 暂停菜单 ----
 
+    def apply_cosmetics(self, cosm=None):
+        """载入（或现场替换）桌饰 / 总部皮肤。
+
+        不传就从当前账号的商店存档读。渲染层每帧只读 self.cosm，
+        所以换装是「下一帧就生效」，不需要重开对局。
+        """
+        if cosm is None:
+            try:
+                cosm = shop.cosmetics(getattr(self.app, "account", None))
+            except Exception:                      # noqa: BLE001
+                cosm = None
+        self.cosm = cosm or {"avatar": None, "table": None, "hq": None}
+        return self.cosm
+
     def _pause_items(self):
         # 音乐项就地显示当前状态，点一下切换（对局中想安静不必翻设置）
         music_lbl = t("music_on") if music.is_enabled() else t("music_off")
@@ -1331,20 +1350,29 @@ class PygameBoard:
             y += 18
 
     def _draw_rows(self, surf, L, g, me, foe):
+        # 桌饰：先铺一块桌面底色（四行 + 中线的外框），再画各自的阵线框。
+        tb = (self.cosm or {}).get("table")
+        row_bg, row_edge, mid_bg = ROW_BG, ROW_EDGE, MID_BG
+        if tb:
+            area = L["row_foe_rear"].union(L["row_my_rear"]).inflate(10, 10)
+            rr(surf, area, C(tb["bg"]), radius=12,
+               border_color=C(tb["edge"]))
+            row_bg, row_edge = tb["row"], tb["edge"]
+            mid_bg = tb["mid"]
         # 行框 + 标题
         caps = (("cap_foe_rear", "row_foe_rear", t("row_foe_rear")),
                 ("cap_foe_front", "row_foe_front", t("row_foe_front")),
                 ("cap_my_front", "row_my_front", t("row_my_front")),
                 ("cap_my_rear", "row_my_rear", t("row_my_rear")))
         for capk, rowk, label in caps:
-            rr(surf, L[rowk], C(ROW_BG), radius=8, border_color=C(ROW_EDGE))
+            rr(surf, L[rowk], C(row_bg), radius=8, border_color=C(row_edge))
             y0 = L[capk].y + 8
             for ln in wrap_text(label, font(13), L[capk].w):
                 surf.blit(font(13).render(ln, True, C(DIM)), (L[capk].x, y0))
                 y0 += 17
 
         # 前线占领条
-        rr(surf, L["mid"], C(MID_BG), radius=6)
+        rr(surf, L["mid"], C(mid_bg), radius=6)
         owner = g.frontline_owner()
         own_front = sum(1 for u in me.board if u.position == "前线")
         if owner is None:
@@ -1403,7 +1431,15 @@ class PygameBoard:
             return
         r = ref.rect
         mine = ref is self.my_hq_ref
-        if mine:
+        skin = (self.cosm or {}).get("hq") if mine else None
+        if skin:
+            # 总部皮肤只改我方（对手那边各看各的，联机时也不会互相串色）
+            rr(surf, r, C(skin["fill"]), radius=8,
+               border_color=C(skin["edge"]))
+            pygame.draw.rect(surf, C(skin["accent"]),
+                             pygame.Rect(r.x + 3, r.y + 3, r.w - 6, 3),
+                             border_radius=2)
+        elif mine:
             rr(surf, r, C("#24303a"), radius=8, border_color=C("#3a6a8a"))
         else:
             rr(surf, r, C("#3a2430"), radius=8, border_color=C("#8a3a3a"))
@@ -1415,7 +1451,8 @@ class PygameBoard:
             hq_txt = t("my_hq") if mine else t("foe_hq")
             surf.blit(f.render(hq_txt, True, C(TEXT)),
                       (r.centerx - f.size(hq_txt)[0] // 2, r.y + 14))
-            tint = "#88aacc" if mine else "#cc8888"
+            tint = (skin["accent"] if skin
+                    else ("#88aacc" if mine else "#cc8888"))
             surf.blit(font(26).render(foe.nation, True, C(tint)),
                       (r.centerx - font(26).size(foe.nation)[0] // 2, r.y + 40))
         hp = font(22, True)

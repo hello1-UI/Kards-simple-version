@@ -717,6 +717,14 @@ def _currency_key(name=None):
     return f"{backend()}:{name}"
 
 
+def wallet_key(name=None):
+    """本地玩家数据的归属键（货币 / 商店外观 / 每日任务共用）。
+
+    游客统一 "guest"；正式账号按 "后端:名字"，避免本地与服务器重名混账。
+    """
+    return _currency_key(name)
+
+
 def _load_currency():
     try:
         with open(_CURRENCY_FILE, encoding="utf-8") as f:
