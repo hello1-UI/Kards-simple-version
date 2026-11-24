@@ -40,3 +40,7 @@ shop.json
 # 曲库：散装音乐与音乐包 zip 都不入库（见 kards_musicpack / debug/pack_music.py）
 assets/music/
 assets/musicpack/*.zip
+
+# Github Push 相关文件
+*.gp_push
+.gp_push
