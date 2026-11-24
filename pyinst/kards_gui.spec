@@ -31,6 +31,13 @@ if os.path.isdir(_ASSET_DIR):
         if _fn.lower().startswith("music") and _fn.lower().endswith(".zip"):
             _ASSET_ITEMS.append((os.path.join(_ASSET_DIR, _fn), "assets"))
 
+# 内置 UI 模板（编好的配色，只读）：装到 `_internal/models/*.json`。
+# 安装器可以选择把这个目录删掉（apk/install.py --no-models），
+# 所以它必须是一个**独立目录**，不能混进 assets/ 里。
+_MODEL_DIR = os.path.join(ROOT, "models")
+if os.path.isdir(_MODEL_DIR):
+    _ASSET_ITEMS.append((_MODEL_DIR, "models"))
+
 a = Analysis(
     [os.path.join(ROOT, 'KARDS.py')],
     pathex=[ROOT],

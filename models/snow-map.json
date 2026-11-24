@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "雪地地图",
+  "name_en": "Snow Map",
+  "name_ja": "雪原の地図",
+  "base": "paper",
+  "light": true,
+  "colors": {
+    "accent": "#3f6f9f",
+    "bg": "#eef3f7",
+    "bg_alt": "#e2eaf1",
+    "panel": "#ffffff",
+    "panel_alt": "#f5f9fc",
+    "card": "#ffffff",
+    "card_dim": "#e6edf3",
+    "text": "#1f2a35",
+    "dim": "#52616f",
+    "mute": "#7f8d9a",
+    "border": "#cdd9e3",
+    "border_hi": "#adbecd",
+    "red": "#b3403f",
+    "green": "#2f7450",
+    "gold": "#9a6f1c",
+    "btn": "#dde7ef",
+    "row_bg": "#f4f8fb",
+    "row_edge": "#cdd9e3",
+    "mid_bg": "#eaf1f7",
+    "log_bg": "#fbfdff",
+    "hand_area": "#ffffff"
+  }
+}

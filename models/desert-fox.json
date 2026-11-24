@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "沙漠之狐",
+  "name_en": "Desert Fox",
+  "name_ja": "砂漠の狐",
+  "base": "desert",
+  "light": false,
+  "colors": {
+    "accent": "#d8a14e",
+    "bg": "#1f1a13",
+    "bg_alt": "#17130e",
+    "panel": "#2a241a",
+    "panel_alt": "#372e21",
+    "card": "#413626",
+    "card_dim": "#322a1e",
+    "text": "#f2e9d8",
+    "dim": "#c0ad90",
+    "mute": "#8d7c62",
+    "border": "#4a3d2a",
+    "border_hi": "#655239",
+    "red": "#d76a4c",
+    "green": "#94ad72",
+    "gold": "#e3bd63",
+    "btn": "#55462f",
+    "row_bg": "#241e16",
+    "row_edge": "#3b3223",
+    "mid_bg": "#221c14",
+    "log_bg": "#15110c",
+    "hand_area": "#2a241a"
+  }
+}

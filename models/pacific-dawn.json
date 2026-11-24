@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "太平洋黎明",
+  "name_en": "Pacific Dawn",
+  "name_ja": "太平洋の夜明け",
+  "base": "steel",
+  "light": false,
+  "colors": {
+    "accent": "#e08a5a",
+    "bg": "#0e1b1d",
+    "bg_alt": "#091415",
+    "panel": "#152629",
+    "panel_alt": "#1d3336",
+    "card": "#254044",
+    "card_dim": "#1b3134",
+    "text": "#e2eef0",
+    "dim": "#9ab2b4",
+    "mute": "#6b8587",
+    "border": "#284345",
+    "border_hi": "#3a5f61",
+    "red": "#dd6b62",
+    "green": "#5fb39a",
+    "gold": "#e0b96a",
+    "btn": "#2d4a4c",
+    "row_bg": "#112021",
+    "row_edge": "#234042",
+    "mid_bg": "#101d1e",
+    "log_bg": "#081112",
+    "hand_area": "#152629"
+  }
+}

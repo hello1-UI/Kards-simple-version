@@ -38,6 +38,7 @@
 import json
 import os
 import re
+import sys
 
 import kards_engine as core
 
@@ -417,10 +418,11 @@ def _slug(name):
 
 
 def _unique_name(name, exclude_key=None):
-    """显示名去重（"模板" 已存在 → "模板 2"）。"""
+    """显示名去重（"模板" 已存在 → "模板 2"）。随包内置模板的名字也算占用。"""
     name = str(name or "").strip()[:40] or "模板"
     existing = {info["name"].lower() for k, info in custom_presets().items()
                 if k != exclude_key}
+    existing |= {info["name"].lower() for info in model_presets().values()}
     if name.lower() not in existing:
         return name
     for i in range(2, 100):
@@ -514,9 +516,135 @@ def custom_presets():
     return dict(_scan_custom())
 
 
+# ---------------------------------------------------------------- 内置模板（models/）
+# 随安装包分发的「编好的模板」：`models/*.json`，与用户模板是同一种 JSON，
+# 但**只读** —— 想改就在编辑器里点「复制」，另存一份到自己的 themes/。
+#
+# 为什么单独一个目录而不是塞进 themes/：
+#   * 安装目录常在 Program Files（只读），而且升级时会被整包覆盖；
+#     用户模板在数据目录里，两边混在一起会出现"我改的模板升级后没了"；
+#   * 安装器可以选择**删掉** models/（见 apk/install.py），
+#     用户模板不能跟着一起被删；
+#   * 键前缀 `model:` / `custom:` 分开，同名 slug 也不会互相覆盖。
+MODEL_PREFIX = "model:"
+_MODEL_DIR_OVERRIDE = None
+_model_cache = {"sig": None, "items": {}}
+
+
+def model_dirs():
+    """候选模板目录（存在的才算，按优先级排列）。
+
+    顺序与 assets 的解析保持一致：exe 同级 → 源码根 → `_MEIPASS`（onedir 的
+    `_internal`）。最后那条 `_internal/models` 是给「安装目录被手动翻过」的
+    情况兜底的 —— PyInstaller 6 把 datas 放在 `_internal` 下，
+    `sys._MEIPASS` 本来就能指到，但显式列一次更抗版本差异。
+    """
+    if _MODEL_DIR_OVERRIDE:
+        return [_MODEL_DIR_OVERRIDE] if os.path.isdir(_MODEL_DIR_OVERRIDE) else []
+    cands = []
+    env = os.environ.get("KARDS_MODELS_DIR")
+    if env:
+        cands.append(env)
+    exe_dir = None
+    if getattr(sys, "frozen", False):
+        try:
+            exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+            cands.append(os.path.join(exe_dir, "models"))
+        except Exception:                                  # noqa: BLE001
+            exe_dir = None
+    here = os.path.dirname(os.path.abspath(__file__))
+    cands.append(os.path.join(here, "models"))
+    mei = getattr(sys, "_MEIPASS", None)
+    if mei:
+        cands.append(os.path.join(mei, "models"))
+    if exe_dir:
+        cands.append(os.path.join(exe_dir, "_internal", "models"))
+
+    out = []
+    for d in cands:
+        try:
+            d = os.path.abspath(d)
+        except Exception:                                  # noqa: BLE001
+            continue
+        if d not in out and os.path.isdir(d):
+            out.append(d)
+    return out
+
+
+def set_model_dir(path):
+    """把内置模板目录指到别处（只给测试用；None 恢复自动探测）。"""
+    global _MODEL_DIR_OVERRIDE
+    _MODEL_DIR_OVERRIDE = path
+    _model_cache["sig"] = None
+    _model_cache["items"] = {}
+
+
+def _model_sig():
+    """所有模板目录的指纹（目录 + 文件名 + mtime + size）。"""
+    rows = []
+    for d in model_dirs():
+        try:
+            for entry in os.scandir(d):
+                if not entry.is_file() or not entry.name.lower().endswith(".json"):
+                    continue
+                try:
+                    st = entry.stat()
+                except OSError:
+                    continue
+                rows.append((d, entry.name, int(st.st_mtime_ns), int(st.st_size)))
+        except OSError:
+            continue
+    rows.sort()
+    return tuple(rows)
+
+
+def _scan_models():
+    """读盘解析内置模板；坏文件跳过，同名 slug 先到先得。"""
+    sig = _model_sig()
+    if sig == _model_cache["sig"]:
+        return _model_cache["items"]
+    items = {}
+    for d, filename, _mtime, _size in sig:
+        slug = os.path.splitext(filename)[0]
+        key = MODEL_PREFIX + slug
+        if key in items:                 # 前一个目录优先（exe 同级可覆盖随包版本）
+            continue
+        path = os.path.join(d, filename)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        data = normalize_preset(raw)
+        base_name = str(raw.get("name") or slug).strip()[:40] or slug
+        names = {"zh": base_name}
+        for code in ("en", "ja"):
+            val = raw.get("name_" + code)
+            if isinstance(val, str) and val.strip():
+                names[code] = val.strip()[:40]
+        items[key] = {"name": base_name, "names": names, "data": data,
+                      "path": path, "slug": slug}
+    _model_cache["sig"] = sig
+    _model_cache["items"] = items
+    return items
+
+
+def model_presets():
+    """{key: {...}} —— 随包分发的只读模板。"""
+    return dict(_scan_models())
+
+
+def is_model(key):
+    return isinstance(key, str) and key in model_presets()
+
+
 def all_presets():
-    """内置 + 自定义的全部模板骨架（键 → dict）。"""
+    """内置 + 随包 + 自定义的全部模板骨架（键 → dict）。"""
     out = {k: dict(v) for k, v in PRESETS.items()}
+    for key, info in model_presets().items():
+        out[key] = dict(info["data"])
     for key, info in custom_presets().items():
         out[key] = dict(info["data"])
     return out
@@ -527,13 +655,15 @@ def _valid_key(key):
         return DEFAULT_PRESET
     if key in PRESETS:
         return key
-    return key if key in custom_presets() else DEFAULT_PRESET
+    if key in custom_presets() or key in model_presets():
+        return key
+    return DEFAULT_PRESET
 
 
 def _base_for(key):
     if key in PRESETS:
         return PRESETS[key]
-    info = custom_presets().get(key)
+    info = custom_presets().get(key) or model_presets().get(key)
     if info:
         return info["data"]
     return PRESETS[DEFAULT_PRESET]
@@ -541,6 +671,15 @@ def _base_for(key):
 
 def is_custom(key):
     return isinstance(key, str) and key in custom_presets()
+
+
+def is_editable(key):
+    """能不能直接在编辑器里改名/删除：只有用户自己的模板可以。
+
+    内置模板（models/）是随安装包分发的只读文件，编辑器里点「编辑」会
+    预填内容并**复制**成一份用户模板（见 KARDS.App.open_theme_editor）。
+    """
+    return is_custom(key)
 
 
 def base_of(key):
@@ -552,7 +691,16 @@ def base_of(key):
 
 
 def preset_label(key):
-    """界面显示名：内置走 i18n，自定义用用户起的名字。"""
+    """界面显示名：内置走 i18n，随包模板按当前语言取 name[_en/_ja]，自定义用名字。"""
+    info = model_presets().get(key) if isinstance(key, str) else None
+    if info:
+        names = info.get("names") or {}
+        try:
+            import kards_i18n as i18n
+            lang = i18n.get_lang()
+        except Exception:                                    # noqa: BLE001
+            lang = "zh"
+        return names.get(lang) or names.get("zh") or info["name"]
     if is_custom(key):
         return custom_presets()[key]["name"]
     try:
@@ -615,14 +763,21 @@ def delete_custom(key):
 
 
 def export_custom(key, path):
-    """把模板导出成可分享的 JSON（只含显示名与颜色，不含本机路径）。"""
-    info = custom_presets().get(key)
+    """把模板导出成可分享的 JSON（只含显示名与颜色，不含本机路径）。
+
+    自定义模板与随包内置模板都能导出 —— 内置的导出去就是给朋友「导入」用的。
+    """
+    info = custom_presets().get(key) or model_presets().get(key)
     if not info:
         raise ValueError("unknown template: %r" % (key,))
     data = info["data"]
     payload = {"version": 1, "name": info["name"], "base": data["base"],
                "light": data["light"],
                "colors": {k: data[k] for k in BASE_KEYS}}
+    for code in ("en", "ja"):
+        val = (info.get("names") or {}).get(code)
+        if val:
+            payload["name_" + code] = val
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
     return path

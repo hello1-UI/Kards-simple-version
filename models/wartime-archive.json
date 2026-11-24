@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "战时档案",
+  "name_en": "Wartime Archive",
+  "name_ja": "戦時档案",
+  "base": "paper",
+  "light": true,
+  "colors": {
+    "accent": "#8a6a3a",
+    "bg": "#ede6d6",
+    "bg_alt": "#e2d9c6",
+    "panel": "#faf6ec",
+    "panel_alt": "#f2ecdf",
+    "card": "#fffdf7",
+    "card_dim": "#e8e0cf",
+    "text": "#2b2416",
+    "dim": "#5d5342",
+    "mute": "#8a7f6b",
+    "border": "#d2c8b2",
+    "border_hi": "#b3a68c",
+    "red": "#a83b2e",
+    "green": "#3f6f3a",
+    "gold": "#8a6a1e",
+    "btn": "#ddd3bf",
+    "row_bg": "#f4eee0",
+    "row_edge": "#d2c8b2",
+    "mid_bg": "#ece5d5",
+    "log_bg": "#fbf8f0",
+    "hand_area": "#faf6ec"
+  }
+}

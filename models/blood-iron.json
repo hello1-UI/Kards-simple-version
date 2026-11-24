@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "血与铁",
+  "name_en": "Blood & Iron",
+  "name_ja": "血と鉄",
+  "base": "frontline",
+  "light": false,
+  "colors": {
+    "accent": "#c2453f",
+    "bg": "#14100f",
+    "bg_alt": "#0d0a09",
+    "panel": "#1e1817",
+    "panel_alt": "#2a2220",
+    "card": "#332a27",
+    "card_dim": "#251e1c",
+    "text": "#ece1db",
+    "dim": "#b3a09a",
+    "mute": "#806c66",
+    "border": "#3a2d2a",
+    "border_hi": "#523f3a",
+    "red": "#e05555",
+    "green": "#6fae78",
+    "gold": "#d6a75a",
+    "btn": "#43332e",
+    "row_bg": "#1a1413",
+    "row_edge": "#2c2220",
+    "mid_bg": "#181210",
+    "log_bg": "#0c0908",
+    "hand_area": "#1e1817"
+  }
+}

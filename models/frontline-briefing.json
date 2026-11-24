@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "前线简报",
+  "name_en": "Frontline Briefing",
+  "name_ja": "前線ブリーフィング",
+  "base": "paper",
+  "light": true,
+  "colors": {
+    "accent": "#5f7a4a",
+    "bg": "#e9e7de",
+    "bg_alt": "#dedbd0",
+    "panel": "#f8f7f1",
+    "panel_alt": "#efeee5",
+    "card": "#fffefa",
+    "card_dim": "#e6e3d7",
+    "text": "#26271f",
+    "dim": "#55584a",
+    "mute": "#828575",
+    "border": "#cbc8b8",
+    "border_hi": "#a9a795",
+    "red": "#a63f35",
+    "green": "#3c6b39",
+    "gold": "#8c6a22",
+    "btn": "#d9d6c6",
+    "row_bg": "#f1efe6",
+    "row_edge": "#cbc8b8",
+    "mid_bg": "#e7e4d9",
+    "log_bg": "#faf9f3",
+    "hand_area": "#f8f7f1"
+  }
+}

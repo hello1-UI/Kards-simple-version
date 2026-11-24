@@ -34,6 +34,14 @@ README = """KARDS 简化版 —— 安装说明
 
   ⚠ 两个 exe 必须放在同一目录，否则卸载器不会被安装进去。
 
+【可选组件】内置 UI 模板（models/）
+  安装器解压完会问一次「保留内置模板? [Y/n]」：
+    · 保留（默认）：设置 → 外观 里会多出 12 套编好的配色，带「内置」标记
+    · 删除：不占空间；自己保存的模板在用户数据目录 themes/ 里，不受影响
+  脚本化安装可以带参数（不弹询问）：
+    KARDS安装器.exe "D:\\Games\\KARDS" --no-models    # 删掉内置模板
+    KARDS安装器.exe "D:\\Games\\KARDS" --models       # 强制保留
+
 【方式二】免安装（绿色版）
   直接下载 KARDS.zip，解压到任意目录，双击 KARDS.exe 即可运行。
   用户数据同样保存在 %USERPROFILE%\\AppData\\Kards-Simple-Version

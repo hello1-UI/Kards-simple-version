@@ -4,13 +4,16 @@
 功能:
   1. 从 GitHub Release 下载 KARDS.zip（多镜像竞速测速，自动选最快）
   2. 解压安装到指定目录（默认 C:\\Program Files\\Kards-Simple-Version，可改）
-  3. 创建用户数据目录 %USERPROFILE%\\AppData\\Kards-Simple-Version（设置/日志/卡组）
-  4. 创建桌面 + 开始菜单快捷方式
-  5. 注册到系统"应用和功能"，支持一键卸载（附带 uninstall.py）
+  3. 内置 UI 模板（models/）可选保留或删除 —— 安装时问一次；
+     `--no-models` 静默删除、`--models` 静默保留（脚本化安装用）
+  4. 创建用户数据目录 %USERPROFILE%\\AppData\\Kards-Simple-Version（设置/日志/卡组）
+  5. 创建桌面 + 开始菜单快捷方式
+  6. 注册到系统"应用和功能"，支持一键卸载（附带 uninstall.py）
 
 用法:
-  python install.py                 # 交互式（提示输入安装路径，回车用默认）
-  python install.py "D:\\Games\\KARDS"   # 指定安装路径
+  python install.py                              # 交互式（回车用默认路径）
+  python install.py "D:\\Games\\KARDS"             # 指定安装路径
+  python install.py "D:\\Games\\KARDS" --no-models # 不装内置 UI 模板
 
 依赖: 仅 Python 3.8+ 标准库，无需 pip 安装任何东西
 
@@ -334,6 +337,108 @@ def extract(zip_path, install_dir):
     print("  解压完成")
 
 
+# ---------------------------------------------------------------- 可选组件（内置 UI 模板）
+
+MODELS_DIRNAME = "models"
+
+
+def models_paths(install_dir):
+    """内置模板目录的候选位置。
+
+    PyInstaller 6 的 onedir 会把 datas 放进 `_internal/`，所以安装后
+    实际是 `<安装目录>/_internal/models`；绿色版/源码版可能在外层。
+    清理时两处都要看，否则「选了删除」却没删掉。
+    """
+    return [os.path.join(install_dir, MODELS_DIRNAME),
+            os.path.join(install_dir, "_internal", MODELS_DIRNAME)]
+
+
+def models_info(install_dir):
+    """(模板套数, 总字节数) —— 只数 *.json，别的文件不计。"""
+    count = size = 0
+    for d in models_paths(install_dir):
+        if not os.path.isdir(d):
+            continue
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for name in names:
+            if not name.lower().endswith(".json"):
+                continue
+            try:
+                size += os.path.getsize(os.path.join(d, name))
+            except OSError:
+                continue
+            count += 1
+    return count, size
+
+
+def remove_models(install_dir):
+    """删掉内置 UI 模板，返回删掉的模板套数（目录不存在也能安全调用）。
+
+    只删 models/ 目录，绝不碰用户数据目录里的 themes/ —— 玩家自己调的模板
+    不该被「不装内置模板」这个选择连坐。
+    """
+    count, _size = models_info(install_dir)
+    for d in models_paths(install_dir):
+        if os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
+    return count
+
+
+def ask_keep_models(install_dir, keep=None):
+    """是否保留内置 UI 模板。keep=True/False 直接决定；None → 交互询问。
+
+    读不到输入（双击 exe 没有 stdin / EOF）时**默认保留**：模板只有几十 KB，
+    默认删掉反而让人以为「外观里少了东西」。想静默删除用 `--no-models`。
+    """
+    count, size = models_info(install_dir)
+    if count <= 0:
+        return True
+    if keep is not None:
+        return bool(keep)
+
+    print()
+    print("-" * 56)
+    print("  [可选] 内置 UI 模板")
+    print(f"    {count} 套配色（{human(size)}），装完在 设置 → 外观 里一键换肤。")
+    print("    不想要可以现在删掉；以后也能用「导入」加回任意 JSON 模板。")
+    print("-" * 56)
+    for _ in range(3):
+        ok, raw = _try_read_line("保留内置模板? [Y/n] > ")
+        if not ok:
+            return True
+        ans = raw.strip().lower()
+        if ans in ("", "y", "yes", "是", "1"):
+            return True
+        if ans in ("n", "no", "否", "0"):
+            return False
+        print("  请输入 y 或 n（直接回车 = 保留）")
+    print("  输入无效，按默认处理：保留内置模板。")
+    return True
+
+
+def parse_flags(argv):
+    """拆出可选组件开关，返回 (keep_models, 剩余 argv)。
+
+    `--no-models` 静默删除内置模板 / `--models` 强制保留（覆盖交互）；
+    其余不以 `--` 开头的参数仍然当作安装路径（ask_install_dir 只认 argv[1]）。
+    """
+    keep = None
+    rest = [argv[0]] if argv else ["install.py"]
+    for arg in argv[1:]:
+        if arg == "--no-models":
+            keep = False
+        elif arg == "--models":
+            keep = True
+        elif arg.startswith("--"):
+            continue                      # 未知开关忽略，别把它当路径
+        else:
+            rest.append(arg)
+    return keep, rest
+
+
 # ---------------------------------------------------------------- 快捷方式 / 注册
 
 def bundled_dir():
@@ -650,6 +755,9 @@ def main():
     print("  KARDS 简化版 安装器")
     print("=" * 56)
 
+    keep_models, argv = parse_flags(sys.argv)
+    sys.argv = argv            # ask_install_dir 只认 argv[1]，不能是 --no-models
+
     install_dir, how = ask_install_dir()
     print(f"  安装到: {install_dir}   [{how}]")
     # 管理权限：目标不可写且当前非管理员 → 请求提权
@@ -661,7 +769,7 @@ def main():
     socket.setdefaulttimeout(CONNECT_TIMEOUT)
 
     # 1. 下载
-    print("\n[1/4] 下载 KARDS.zip ...")
+    print("\n[1/5] 下载 KARDS.zip ...")
     tmp_zip = os.path.join(tempfile.gettempdir(), "KARDS-install.zip")
     for p in (tmp_zip, tmp_zip + ".part"):
         if os.path.exists(p):
@@ -679,7 +787,7 @@ def main():
     print(f"  下载耗时 {time.time() - t_dl:.0f}s")
 
     # 2. 解压
-    print("\n[2/4] 解压安装 ...")
+    print("\n[2/5] 解压安装 ...")
     if os.path.isdir(install_dir):
         cleanup_old(install_dir)
     try:
@@ -693,8 +801,20 @@ def main():
     except OSError:
         pass
 
-    # 3. 用户数据目录 + 卸载器
-    print("\n[3/4] 初始化用户数据目录 ...")
+    # 3. 可选组件：内置 UI 模板（models/）
+    print("\n[3/5] 内置 UI 模板（可选） ...")
+    if ask_keep_models(install_dir, keep_models):
+        n_models, size_models = models_info(install_dir)
+        if n_models:
+            print(f"  保留 {n_models} 套配色（{human(size_models)}）✓")
+        else:
+            print("  本次安装包未包含内置模板（跳过）")
+    else:
+        removed = remove_models(install_dir)
+        print(f"  已按选择删除内置模板 {removed} 套（用户自己的模板不受影响）")
+
+    # 4. 用户数据目录 + 卸载器
+    print("\n[4/5] 初始化用户数据目录 ...")
     for sub in ("", "logs", "decks"):
         os.makedirs(os.path.join(DATA_DIR, sub), exist_ok=True)
     print(f"  用户数据: {DATA_DIR}（设置/日志/自组卡组）")
@@ -713,7 +833,7 @@ def main():
         print("  卸载器未随安装器分发（跳过，不影响游戏）")
 
     # 4. 快捷方式 + 系统注册
-    print("\n[4/4] 创建快捷方式并注册到系统 ...")
+    print("\n[5/5] 创建快捷方式并注册到系统 ...")
     exe = os.path.join(install_dir, "KARDS.exe")
     if not os.path.isfile(exe):
         print(f"  ⚠ 未找到 KARDS.exe（{exe}），请确认安装包完整")

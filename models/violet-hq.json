@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "紫罗兰司令部",
+  "name_en": "Violet HQ",
+  "name_ja": "紫の司令部",
+  "base": "midnight",
+  "light": false,
+  "colors": {
+    "accent": "#a98ada",
+    "bg": "#17131f",
+    "bg_alt": "#100d17",
+    "panel": "#201a2b",
+    "panel_alt": "#2a2238",
+    "card": "#352b45",
+    "card_dim": "#292136",
+    "text": "#ece5f5",
+    "dim": "#b6a8c9",
+    "mute": "#857596",
+    "border": "#362b47",
+    "border_hi": "#4d3d63",
+    "red": "#d96a7e",
+    "green": "#74b891",
+    "gold": "#dcb768",
+    "btn": "#423455",
+    "row_bg": "#191420",
+    "row_edge": "#2c2340",
+    "mid_bg": "#171220",
+    "log_bg": "#0c0913",
+    "hand_area": "#201a2b"
+  }
+}

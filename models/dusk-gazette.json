@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "黄昏报摊",
+  "name_en": "Dusk Gazette",
+  "name_ja": "夕暮れの新聞台",
+  "base": "paper",
+  "light": true,
+  "colors": {
+    "accent": "#a85a3a",
+    "bg": "#f2e6dc",
+    "bg_alt": "#e8d8cb",
+    "panel": "#fdf6ef",
+    "panel_alt": "#f6ebe0",
+    "card": "#fffaf5",
+    "card_dim": "#eddfd2",
+    "text": "#2f231c",
+    "dim": "#5f4e43",
+    "mute": "#8e7b6d",
+    "border": "#dbc7b6",
+    "border_hi": "#c0a894",
+    "red": "#a83a32",
+    "green": "#3f6f43",
+    "gold": "#95681f",
+    "btn": "#e6d3c2",
+    "row_bg": "#f7ece1",
+    "row_edge": "#dbc7b6",
+    "mid_bg": "#f0e3d7",
+    "log_bg": "#fdf8f2",
+    "hand_area": "#fdf6ef"
+  }
+}

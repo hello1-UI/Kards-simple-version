@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "无线电静默",
+  "name_en": "Radio Silence",
+  "name_ja": "無線封止",
+  "base": "olive",
+  "light": false,
+  "colors": {
+    "accent": "#7fc48a",
+    "bg": "#0f1410",
+    "bg_alt": "#090d09",
+    "panel": "#172017",
+    "panel_alt": "#1f2b1f",
+    "card": "#283628",
+    "card_dim": "#1e2a1e",
+    "text": "#dfe9d8",
+    "dim": "#a3b49a",
+    "mute": "#72856b",
+    "border": "#2b3a29",
+    "border_hi": "#405441",
+    "red": "#cf6055",
+    "green": "#86c46a",
+    "gold": "#d2b45c",
+    "btn": "#3a4a36",
+    "row_bg": "#121a12",
+    "row_edge": "#263424",
+    "mid_bg": "#111711",
+    "log_bg": "#080c08",
+    "hand_area": "#172017"
+  }
+}

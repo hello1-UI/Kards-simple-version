@@ -2242,13 +2242,23 @@ class App(tk.Tk):
         tk.Label(parent, text=i18n.t("tpl_hint"), bg=BG, fg=DIM, font=FONT_S,
                  wraplength=860, justify="left").pack(anchor="w")
 
+        models = theme.model_presets()
         customs = theme.custom_presets()
+        if models:
+            tk.Label(parent, text=i18n.t("tpl_model_hint"), bg=BG, fg=MUTE,
+                     font=FONT_S, wraplength=860,
+                     justify="left").pack(anchor="w", pady=(2, 0))
+
+        # 内置（models/，随安装包）排前面，用户自己的排后面；
+        # 两者键前缀不同（model: / custom:），同名也互不覆盖。
+        entries = ([(k, info, True) for k, info in models.items()]
+                   + [(k, info, False) for k, info in customs.items()])
         row = tk.Frame(parent, bg=BG)
         row.pack(anchor="w", pady=(8, 2))
-        if not customs:
+        if not entries:
             tk.Label(row, text=i18n.t("tpl_empty"), bg=BG, fg=MUTE,
                      font=FONT_S).pack(anchor="w", pady=(2, 6))
-        for i, (key, info) in enumerate(customs.items()):
+        for i, (key, info, builtin) in enumerate(entries):
             pv = theme.preview(key)
             chosen = (key == cur)
             chip = tk.Frame(row, bg=pv["panel"], width=212, height=46,
@@ -2258,13 +2268,25 @@ class App(tk.Tk):
             chip.pack_propagate(False)
             dot = tk.Frame(chip, bg=pv["accent"], width=6, height=46)
             dot.pack(side="left", fill="y")
-            nm = tk.Label(chip, text=info["name"], bg=pv["panel"], fg=pv["text"],
+            # 名字 + 「内置」标记叠在一个小容器里：胶囊只有 46 高，
+            # 两行（11pt + 8pt）刚好放得下，也不会把名字挤到省略号。
+            namebox = tk.Frame(chip, bg=pv["panel"])
+            namebox.pack(side="left", fill="both", expand=True, padx=(8, 4))
+            nm = tk.Label(namebox, text=theme.preset_label(key),
+                          bg=pv["panel"], fg=pv["text"],
                           font=(FONT_FAMILY, 11, "bold"), anchor="w")
-            nm.pack(side="left", fill="both", expand=True, padx=(8, 4))
-            edit = tk.Label(chip, text=i18n.t("tpl_edit"), bg=pv["panel"],
-                            fg=pv["dim"], font=(FONT_FAMILY, 9), cursor="hand2")
+            nm.pack(anchor="w")
+            if builtin:
+                tk.Label(namebox, text=i18n.t("tpl_builtin"), bg=pv["panel"],
+                         fg=pv["accent"], font=(FONT_FAMILY, 8),
+                         anchor="w").pack(anchor="w")
+            edit = tk.Label(chip,
+                            text=i18n.t("tpl_copy") if builtin
+                            else i18n.t("tpl_edit"),
+                            bg=pv["panel"], fg=pv["dim"],
+                            font=(FONT_FAMILY, 9), cursor="hand2")
             edit.pack(side="right", padx=(0, 8))
-            for w in (chip, nm, dot):
+            for w in (chip, nm, dot, namebox):
                 w.bind("<Button-1>", lambda e, k=key: pick(k, None))
             edit.bind("<Button-1>", lambda e, k=key: self.open_theme_editor(
                 edit_key=k, on_done=on_change))
@@ -2340,6 +2362,14 @@ class App(tk.Tk):
             info = theme.custom_presets()[edit_key]
             data = dict(info["data"])
             shown_name = info["name"]
+        elif edit_key and theme.is_model(edit_key):
+            # 内置模板（models/）只读：编辑器预填它的配色，保存时**另存一份**
+            # 到用户模板里。所以这里不设 editing（改名/删除按钮都不该出现），
+            # 也不把 model: 键交给 save_custom（那会写进 models/ 目录）。
+            data = theme.normalize_preset(theme.base_of(edit_key))
+            data["light"] = bool(data.get("light"))
+            shown_name = i18n.t("tpl_copy_suffix",
+                                name=theme.preset_label(edit_key))
         else:
             data = theme.normalize_preset(theme.base_of(base_key or
                                                         theme.preset_name()))

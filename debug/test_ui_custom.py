@@ -242,6 +242,9 @@ def gui_tests():
     # GUI 段换一个干净的模板目录：headless 段存了一堆模板，
     # 否则「空列表提示」永远不成立（用例之间互相污染）。
     theme.set_custom_dir(os.path.join(TMP, "gui_themes"))
+    # 内置模板（models/）另有专门测试；这里指到不存在的目录，
+    # 否则「空列表有提示」这条断言永远不成立（随包 12 套一直在）。
+    theme.set_model_dir(os.path.join(TMP, "no_models_here"))
     theme.apply(theme.DEFAULT_PRESET, None)
     theme.save(theme.DEFAULT_PRESET, "")
     gui.theme.sync(vars(gui))
@@ -409,6 +412,7 @@ def gui_tests():
             pass
         theme.reset()
         theme.save(theme.DEFAULT_PRESET, "")
+        theme.set_model_dir(None)
         app.destroy()
 
 

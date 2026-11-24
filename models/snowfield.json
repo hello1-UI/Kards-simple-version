@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "雪原白狼",
+  "name_en": "Snowfield",
+  "name_ja": "雪原の白狼",
+  "base": "arctic",
+  "light": false,
+  "colors": {
+    "accent": "#9fb8d6",
+    "bg": "#171b21",
+    "bg_alt": "#10141a",
+    "panel": "#1f252c",
+    "panel_alt": "#283039",
+    "card": "#323b47",
+    "card_dim": "#262e38",
+    "text": "#eaf0f6",
+    "dim": "#a9b6c4",
+    "mute": "#798695",
+    "border": "#313b47",
+    "border_hi": "#47535f",
+    "red": "#d57373",
+    "green": "#7cbc9a",
+    "gold": "#dcc17c",
+    "btn": "#3b4550",
+    "row_bg": "#1a1f26",
+    "row_edge": "#2c3541",
+    "mid_bg": "#181d24",
+    "log_bg": "#0e1218",
+    "hand_area": "#1f252c"
+  }
+}

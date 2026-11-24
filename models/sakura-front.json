@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "樱花前线",
+  "name_en": "Sakura Front",
+  "name_ja": "桜前線",
+  "base": "frontline",
+  "light": false,
+  "colors": {
+    "accent": "#e08aa8",
+    "bg": "#1b1418",
+    "bg_alt": "#140f12",
+    "panel": "#251b20",
+    "panel_alt": "#31232a",
+    "card": "#3d2c34",
+    "card_dim": "#2f2328",
+    "text": "#f2e4e9",
+    "dim": "#c5aab4",
+    "mute": "#94777f",
+    "border": "#3f2c34",
+    "border_hi": "#5a4049",
+    "red": "#dd6577",
+    "green": "#7cb992",
+    "gold": "#ddb868",
+    "btn": "#4a3840",
+    "row_bg": "#1e161a",
+    "row_edge": "#34262c",
+    "mid_bg": "#1c1518",
+    "log_bg": "#100c0e",
+    "hand_area": "#251b20"
+  }
+}

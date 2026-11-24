@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "北境夜航",
+  "name_en": "Nordic Night",
+  "name_ja": "北極夜航",
+  "base": "frontline",
+  "light": false,
+  "colors": {
+    "accent": "#6fb3d2",
+    "bg": "#101820",
+    "bg_alt": "#0b1218",
+    "panel": "#16222c",
+    "panel_alt": "#1d2c38",
+    "card": "#22333f",
+    "card_dim": "#1a2833",
+    "text": "#e4eef4",
+    "dim": "#9db0bd",
+    "mute": "#6d818f",
+    "border": "#2a3c49",
+    "border_hi": "#3d5464",
+    "red": "#d96a6a",
+    "green": "#6fbf9a",
+    "gold": "#dcb463",
+    "btn": "#33454f",
+    "row_bg": "#131e26",
+    "row_edge": "#22323d",
+    "mid_bg": "#121c24",
+    "log_bg": "#0a1116",
+    "hand_area": "#16222c"
+  }
+}
