@@ -13,6 +13,23 @@ ROOT = os.path.dirname(SPECPATH)
 DIST = os.path.join(ROOT, "pyinst", "dist")
 WORK = os.path.join(ROOT, "pyinst", "build")
 
+# 资源清单：**曲库只带 zip，不带散装音乐**。
+# 散装 flac 几百个、几个 GB，全塞进发行包会让安装/更新/校验都变得不可行；
+# 运行时由 kards_musicpack 在首次启动时解压到玩家的音乐目录。
+_ASSET_DIR = os.path.join(ROOT, "assets")
+_ASSET_ITEMS = []
+if os.path.isdir(_ASSET_DIR):
+    for _sub in ("cards", "hq", "sfx", "fonts"):
+        _p = os.path.join(_ASSET_DIR, _sub)
+        if os.path.isdir(_p):
+            _ASSET_ITEMS.append((_p, os.path.join("assets", _sub)))
+    for _fn in sorted(os.listdir(_ASSET_DIR)):
+        if _fn.lower().startswith("music") and _fn.lower().endswith(".zip"):
+            _ASSET_ITEMS.append((os.path.join(_ASSET_DIR, _fn), "assets"))
+    _mp = os.path.join(_ASSET_DIR, "musicpack")
+    if os.path.isdir(_mp):
+        _ASSET_ITEMS.append((_mp, "assets/musicpack"))
+
 a = Analysis(
     [os.path.join(ROOT, 'KARDS.py')],
     pathex=[ROOT],
@@ -23,12 +40,7 @@ a = Analysis(
         # PyInstaller 的依赖分析看不见它 —— 必须当数据文件带进包，
         # 否则联机模式在大厅里根本起不来服务器。
         (os.path.join(ROOT, 'kards_server.py'), '.'),
-    ] + ([
-        # 卡面 / 总部 / 音效资产（可选）：assets/cards/<卡名>.png、
-        # assets/hq/<国家>.png、assets/sfx/<名>.wav|ogg。
-        # 缺失时 kards_board 会过程式绘制兜底，所以目录不存在也不报错。
-        (os.path.join(ROOT, 'assets'), 'assets'),
-    ] if os.path.isdir(os.path.join(ROOT, 'assets')) else []),
+    ] + _ASSET_ITEMS,
     hiddenimports=[
         # 这几个是同目录的兄弟模块，正常 import 能被分析到；显式列出是为了
         # 防止将来有人把 import 挪进函数体（延迟导入）导致漏打。

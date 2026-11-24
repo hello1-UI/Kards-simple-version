@@ -5240,6 +5240,20 @@ def main():
         print(f"[smoke] {nat1} vs {nat2} → "
               f"胜者={winner.name if winner else '平局'} 回合={played}")
         sys.exit(0 if finished else 1)
+    if "--check-music" in sys.argv:
+        # 音乐包自检：有哪些 zip、解压到哪、还差多少（打包/客服排查用）
+        import kards_musicpack
+        import json as _json
+        print(_json.dumps(kards_musicpack.status(), ensure_ascii=False, indent=1))
+        sys.exit(0)
+    # 曲库以 music*.zip 分发：首次启动解到音乐目录（已解过就几毫秒跳过）。
+    # 放在 App() 之前：界面起来时曲库已经就绪，设置里的曲目列表不会是空的。
+    if "--no-music-unpack" not in sys.argv:
+        try:
+            import kards_musicpack
+            kards_musicpack.ensure_extracted_gui()
+        except Exception:                       # noqa: BLE001
+            pass                                # 解压失败绝不能拦住进游戏
     app = App()
     app.mainloop()
 

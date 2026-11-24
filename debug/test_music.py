@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import wave
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")   # 无声卡也能初始化混音器
@@ -39,6 +40,34 @@ PASS, FAIL = [], []
 def check(name, cond, extra=""):
     (PASS if cond else FAIL).append(name)
     print(("  PASS " if cond else "  FAIL ") + name + (f"  [{extra}]" if extra and not cond else ""))
+
+
+def write_silence(path, seconds=0.4, rate=8000):
+    """造一个真能被 SDL_mixer 解码的静音 wav（测试曲库夹具）。
+
+    不能用假字节冒充音频：本文件后半段会真的 play/preview，
+    假文件只会进「坏文件」分支，测不到播放链路。
+    """
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * int(rate * seconds))
+
+
+def fixture_library(base):
+    """自建「随包曲库」，不再依赖 assets/music 里恰好有哪些歌。
+
+    玩家的实际曲库随时会换（换歌、删歌、加无损），测试要是跟着它变就毫无
+    意义了 —— 这里造 9 首静音 wav，曲名沿用 DEFAULT_PICK 与用例里引用的名字。
+    """
+    bundle = os.path.join(base, "assets", "music")
+    os.makedirs(bundle, exist_ok=True)
+    names = ["GP Demo", "DnKt Demo", "MHrp Demo", "TSax Demo", "Captive",
+             "JzOr Demo", "EPno Demo", "Alpha Track", "Bravo Track"]
+    for n in names:
+        write_silence(os.path.join(bundle, n + ".wav"))
+    return bundle
 
 
 def wait(ms):
@@ -64,6 +93,9 @@ def main():
     real_user_dir = music.user_music_dir()
     user_dir = os.path.join(tmpdir, "music")
     os.makedirs(user_dir, exist_ok=True)
+    bundle = fixture_library(tmpdir)
+    # 曲库 = 夹具随包曲库 + 玩家目录；完全不碰仓库里真实的 assets/music
+    music._asset_roots = lambda: [os.path.join(tmpdir, "assets")]
     music.user_music_dir = lambda create=False: user_dir
     music.refresh()
 
