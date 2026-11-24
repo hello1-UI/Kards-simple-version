@@ -62,7 +62,8 @@ def main():
         try:
             r = subprocess.run(
                 [os.path.join(unpack, "KARDS安装器.exe"), "--cli", target],
-                input="\n", capture_output=True, text=True, timeout=420,
+                input="\n", capture_output=True, text=True, errors="replace",
+                timeout=900,
                 cwd=unpack)
             out = (r.stdout or "") + (r.stderr or "")
         except subprocess.TimeoutExpired:
@@ -95,10 +96,14 @@ def main():
         print("\n--- 4. 运行游戏自检 ---")
         try:
             g = subprocess.run([exe, "--smoke"], capture_output=True, text=True,
+                               errors="replace",
                                timeout=180, cwd=target)
             gout = (g.stdout or "") + (g.stderr or "")
-            check("游戏可运行（SMOKE OK）", "SMOKE OK" in gout,
-                  gout.strip()[-150:])
+            # --smoke 的标记是 "[smoke] ..."（不打印 SMOKE OK），
+            # 且退出码 0 = 整局跑完并分出了胜负
+            check("游戏可运行（SMOKE OK）",
+                  g.returncode == 0 and "[smoke]" in gout,
+                  f"rc={g.returncode} " + gout.strip()[-150:])
             print(f"  {gout.strip().splitlines()[-1] if gout.strip() else '(无输出)'}")
         except subprocess.TimeoutExpired:
             check("游戏可运行（SMOKE OK）", False, "超时")
@@ -107,7 +112,7 @@ def main():
         print("\n--- 5. 运行卸载器 ---")
         try:
             u = subprocess.run([uni, "--cli"], input="\n", capture_output=True,
-                               text=True, timeout=120,
+                               text=True, errors="replace", timeout=180,
                                cwd=os.path.dirname(target))
             uout = (u.stdout or "") + (u.stderr or "")
         except subprocess.TimeoutExpired:

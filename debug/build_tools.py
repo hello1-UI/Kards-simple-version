@@ -54,10 +54,52 @@ def build(py, spec_name):
         raise SystemExit(f"打包失败: {spec_name}")
 
 
+def _game_version():
+    import re
+    with open(os.path.join(ROOT, "KARDS.py"), encoding="utf-8") as f:
+        m = re.search(r"^VERSION\s*=\s*\(([^)]+)\)", f.read(), re.M)
+    return ".".join(x.strip() for x in m.group(1).split(",") if x.strip()) if m else ""
+
+
+def check_game_zip():
+    """检查 KARDS.zip 是否与当前版本匹配。
+
+    ⚠ 安装器的下载地址按版本 tag 固定，但 Release 资产是**手动**上传的。
+    历史上就出过「代码发版了、资产没更新」→ 用户装完还是旧版的事故。
+    这里在打包时提前吭声，避免带着旧 zip 去发版。
+    """
+    import zipfile
+    zpath = os.path.join(ROOT, "KARDS.zip")
+    want = _game_version()
+    if not os.path.isfile(zpath):
+        print(f"⚠ 没有 KARDS.zip —— 发版前先跑: python debug/pack_game.py")
+        return
+    try:
+        with zipfile.ZipFile(zpath) as z:
+            names = z.namelist()
+            ver = (z.read("KARDS/VERSION.txt").decode("utf-8", "replace").strip()
+                   if "KARDS/VERSION.txt" in names else None)
+            n_models = len([n for n in names
+                            if n.startswith("KARDS/_internal/models/")
+                            and n.endswith(".json")])
+    except Exception as e:                 # noqa: BLE001
+        print(f"⚠ KARDS.zip 读取失败: {e}")
+        return
+    size = os.path.getsize(zpath) / 1048576
+    if not ver:
+        print("⚠ KARDS.zip 里没有 KARDS/VERSION.txt —— 安装器会把它当旧包拒装；"
+              "请用 python debug/pack_game.py 重打")
+    elif want and ver != want:
+        print(f"⚠ KARDS.zip 是 v{ver}，工程是 v{want} —— 请重跑 debug/pack_game.py")
+    else:
+        print(f"KARDS.zip 版本 v{ver} ✓  内置模板 {n_models} 套  {size:.1f} MB")
+
+
 def main():
     py = pick_python()
     print(f"使用解释器: {py}")
     print(f"产物目录:   {PYINST}")
+    check_game_zip()
 
     build(py, "installer.spec")
     build(py, "uninstaller.spec")

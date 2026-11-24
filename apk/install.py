@@ -1153,16 +1153,16 @@ def _cli_main():
         sys.exit(1)
     except InstallError as e:
         print("\n错误: " + str(e))
-        input("\n按回车键退出 ...")
+        _try_read_line("\n按回车键退出 ...")
         sys.exit(1)
     except Exception as e:
         import traceback
         print(f"\n安装失败: {type(e).__name__}: {e}")
         traceback.print_exc()
-        input("\n按回车键退出 ...")
+        _try_read_line("\n按回车键退出 ...")
         sys.exit(1)
 
-    input("按回车键退出安装器 ...")
+    _try_read_line("按回车键退出安装器 ...")
 
 
 def _gui_args():
