@@ -564,7 +564,7 @@ class App(tk.Tk):
         # 休闲模式：AI / 真人都能打，但**不结算段位**（战绩、金币、任务照算）。
         # 从休闲入口进大厅/选国家时置 True，回主菜单或进排位大厅时复位。
         self.casual = False
-        # 主菜单字母快捷键：Q/W/E/R/T/Y/A/S/F/G/H（见 HOTKEYS）。
+        # 主菜单字母快捷键：Q/W/E/R/T/Y/A/S/F/G/H/L/V（见 HOTKEYS）。
         # 绑定在 Tk 层（bind_all）而不是窗口上：主菜单重建后不用重新绑。
         self._menu_cards = ()
         self._hotkey_at = 0.0
@@ -589,7 +589,7 @@ class App(tk.Tk):
             core.set_decks_dir(account.guest_decks_dir())
         self.bind_all("<Escape>", self.on_esc)
         self.bind_all("<F1>", self.on_f1)
-        self.bind_all("<Key>", self.on_hotkey)   # 主菜单 Q/W/E/R/T/Y/A/S/F/G/H
+        self.bind_all("<Key>", self.on_hotkey)   # 主菜单 Q~H/L/V 字母快捷键
         self._build_start()
         self._music_play("menu", fade_ms=1200)   # 进来先淡入主菜单曲
         if not self.account and self.anim_enabled:
@@ -775,6 +775,7 @@ class App(tk.Tk):
         "g": "_practice_entry",         # 练习
         "h": "_build_casual_select",    # 休闲
         "l": "on_hall",                 # 休战大厅（走动场景）
+        "v": "open_update_dialog",      # 版本 / 检查更新
     }
 
     def _practice_entry(self):
@@ -834,7 +835,7 @@ class App(tk.Tk):
         return False
 
     def on_hotkey(self, event=None):
-        """主菜单字母快捷键（Q/W/E/R/T/Y/A/S/F/G/H）+ 各子界面的 P（返回）。"""
+        """主菜单字母快捷键（Q~H/L/V）+ 各子界面的 P（返回）。"""
         if event is None:
             return None
         key = (event.keysym or "").lower()
@@ -968,6 +969,9 @@ class App(tk.Tk):
         self.settings_box, _ = self._chip(
             right, i18n.t("btn_settings"), self.open_start_settings, "Q")
         self.settings_box.pack(side="right", padx=(0, 8))
+        self.update_box, _ = self._chip(
+            right, i18n.t("btn_check_update"), self.open_update_dialog, "V")
+        self.update_box.pack(side="right", padx=(0, 8))
 
         # ---- 标题区 ----
         hero = tk.Frame(self.start_frame, bg=BG)

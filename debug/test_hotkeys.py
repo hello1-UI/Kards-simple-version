@@ -2,7 +2,7 @@
 """主菜单字母快捷键回归测试（Q W E R T Y A S F G H）。
 
 覆盖三层：
-    1. 键位表：12 个键齐全、指向真实存在的方法、字母大小写都能触发；
+    1. 键位表：13 个键齐全、指向真实存在的方法、字母大小写都能触发；
     2. 守门条件：对局中 / 不在主菜单 / 有对话框 / 焦点在输入框 —— 一律不响应；
     3. 界面提示：三张入口卡有 F/G/H 角标、工具条六个按钮有 Q/W/E/R/T/Y 字母。
 
@@ -50,6 +50,7 @@ EXPECT = {
     "g": "_practice_entry",
     "h": "_build_casual_select",
     "l": "on_hall",
+    "v": "open_update_dialog",
 }
 
 
@@ -73,10 +74,10 @@ def _one_screen(app):
 
 
 def headless():
-    print("1. 键位表（主菜单快捷键 12 个）")
+    print("1. 键位表（主菜单快捷键 13 个）")
     import KARDS as gui
     table = gui.App.HOTKEYS
-    check("12 个键齐全", len(table) == 12, len(table))
+    check("13 个键齐全", len(table) == 13, len(table))
     missing = {k: v for k, v in EXPECT.items() if table.get(k) != v}
     check("每个键指向的处理函数与需求一致", not missing, missing)
     bad = {k: v for k, v in table.items() if not callable(getattr(gui.App, v, None))}
