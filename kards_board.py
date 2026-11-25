@@ -103,7 +103,7 @@ def kw_text(keywords):
 # （⚔ 🏠 🏳 🏆 💀 ☰ 🐇 🐢 ♥ …）在雅黑里没有字形，会画成空心方块，
 # 界面上到处是"□"。这里统一在渲染前剥掉 —— tkinter 版有系统级回退
 # 没这个问题，pygame 版必须在源头处理。
-_BAD_GLYPHS = "♥⚔☰🏳🏠🚪🏆💀▼▲🐇🐢⏩⚙⚡✖◼◆►◄"
+_BAD_GLYPHS = "♥⚔☰🏳🏠🚪🏆💀▼▲🐇🐢⏩⚙⚡✖◼◆►◄💬"
 _GLYPH_MAP = {ord(ch): None for ch in _BAD_GLYPHS}
 
 

@@ -405,6 +405,91 @@ def main():
         check("异常输入后服务器仍可用", r and r.get("m") == "auth_ok", str(r))
         c.close()
 
+        # ---------------- 走动大厅 ----------------
+        ha = Cli()
+        hb = Cli()
+        hc = Cli()
+        r = ha.login("大厅客一", "pass1234", kind="register")
+        check("大厅: 客一注册", r and r.get("m") == "auth_ok", str(r))
+        r = hb.login("大厅客二", "abcd1234", kind="register")
+        check("大厅: 客二注册", r and r.get("m") == "auth_ok", str(r))
+        r = hc.login("大厅客三", "efgh5678", kind="register")
+        check("大厅: 客三注册", r and r.get("m") == "auth_ok", str(r))
+
+        ha.send({"m": "hall_join", "x": 100, "y": 200})
+        r = ha.wait("hall_state", 4)
+        check("大厅: 进场收到快照", r is not None, str(r))
+        check("大厅: 快照含自己",
+              r is not None and any(p.get("name") == "大厅客一" for p in r.get("players", [])),
+              str(r))
+
+        hb.send({"m": "hall_join", "x": 300, "y": 200})
+        r = ha.wait("hall_state", 4)
+        names = [p.get("name") for p in (r or {}).get("players", [])]
+        check("大厅: 新人进场广播给在场者", "大厅客二" in names, str(names))
+        hb.wait("hall_state", 4)          # 消费 hb 自己进场的那份广播
+
+        ha.send({"m": "hall_move", "x": 140, "y": 210})
+        r = hb.wait("hall_state", 4)
+        p1 = next((p for p in (r or {}).get("players", [])
+                   if p.get("name") == "大厅客一"), None)
+        check("大厅: 位置广播", p1 is not None and abs(p1["x"] - 140) < 1
+              and abs(p1["y"] - 210) < 1, str(p1))
+
+        ha.send({"m": "hall_chat", "text": "来一把？"})
+        r = hb.wait("hall_state", 4)
+        p1 = next((p for p in (r or {}).get("players", [])
+                   if p.get("name") == "大厅客一"), None)
+        check("大厅: 聊天气泡广播", p1 is not None and p1.get("chat") == "来一把？", str(p1))
+
+        ha.send({"m": "hall_chat", "text": "x" * 300})
+        r = hb.wait("hall_state", 4)
+        p1 = next((p for p in (r or {}).get("players", [])
+                   if p.get("name") == "大厅客一"), None)
+        check("大厅: 超长聊天被截断", p1 is not None and len(p1.get("chat") or "") <= 120,
+              str(p1))
+
+        # 邀请流程
+        hb.send({"m": "hall_invite", "to": "大厅客三"})
+        r = hb.wait("hall_gone", 4)
+        check("大厅: 邀请不在场玩家被拒", r is not None, str(r))
+
+        hb.send({"m": "hall_invite", "to": "大厅客一"})
+        r = ha.wait("hall_invite", 4)
+        check("大厅: 邀请送达", r is not None and r.get("from") == "大厅客二", str(r))
+        ha.send({"m": "hall_decline", "to": "大厅客二"})
+        r = hb.wait("hall_decline", 4)
+        check("大厅: 婉拒通知邀请方", r is not None and r.get("from") == "大厅客一", str(r))
+
+        hb.send({"m": "hall_invite", "to": "大厅客一"})
+        r = ha.wait("hall_invite", 4)
+        check("大厅: 再次邀请送达", r is not None, str(r))
+        ha.send({"m": "hall_accept", "to": "大厅客二"})
+        rm = ha.wait("matched", 6)
+        check("大厅: 接受后双方 matched", rm is not None and rm.get("casual") is True, str(rm))
+        rm2 = hb.wait("matched", 6)
+        check("大厅: 邀请方也 matched", rm2 is not None and rm2.get("casual") is True, str(rm2))
+
+        # 进对局后自动离开走动大厅：hdb 的下一次快照不再有两人
+        hc.send({"m": "hall_join", "x": 0, "y": 0})
+        r = hc.wait("hall_state", 4)
+        names = [p.get("name") for p in (r or {}).get("players", [])]
+        check("大厅: 开局双方从快照消失",
+              "大厅客一" not in names and "大厅客二" not in names, str(names))
+
+        ha.send({"m": "hall_join", "x": 1, "y": 1})
+        r = ha.wait("err", 4)
+        check("大厅: 对局中进场被拒", r is not None and r.get("m") == "err", str(r))
+
+        ha.send({"m": "concede"})
+        ha.wait("act", 4)
+        hb.send({"m": "leave_room"})
+        ha.send({"m": "hall_leave"})
+        hb.send({"m": "hall_leave"})
+        hc.send({"m": "hall_leave"})
+        for x in (ha, hb, hc):
+            x.close()
+
         for x in (a2, d, e):
             try:
                 x.close()

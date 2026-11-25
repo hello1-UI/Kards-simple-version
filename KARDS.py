@@ -774,6 +774,7 @@ class App(tk.Tk):
         "f": "on_battle",               # 战斗（排位/联机大厅）
         "g": "_practice_entry",         # 练习
         "h": "_build_casual_select",    # 休闲
+        "l": "on_hall",                 # 休战大厅（走动场景）
     }
 
     def _practice_entry(self):
@@ -1003,12 +1004,19 @@ class App(tk.Tk):
                             on_click=self._build_casual_select,
                             hint=i18n.t("home_card_casual_hint"), hotkey="H")
         casual.pack(side="left", padx=12, ipady=10)
-        # 主菜单判据（见 _on_main_menu）：这三张卡随主菜单一起生灭
-        self._menu_cards = (battle, practice, casual)
+        hall = CardWidget(row, title=i18n.t("hall_title"),
+                          sub=i18n.t("hall_card_sub"), cost=None,
+                          color=SUCCESS, big=True,
+                          on_click=self.on_hall,
+                          hint=i18n.t("hall_card_hint"), hotkey="L")
+        hall.pack(side="left", padx=12, ipady=10)
+        # 主菜单判据（见 _on_main_menu）：这些入口卡随主菜单一起生灭
+        self._menu_cards = (battle, practice, casual, hall)
         self._back_action = None      # 主菜单没有上一层（P 不响应）
         bind_hover_tree(battle)
         bind_hover_tree(practice)
         bind_hover_tree(casual)
+        bind_hover_tree(hall)
 
         tk.Label(hero, text=i18n.t("home_hint"), bg=BG, fg=MUTE,
                  font=FONT_S).pack(pady=(26, 0))
@@ -3504,6 +3512,61 @@ class App(tk.Tk):
     def on_battle(self):
         self._build_lobby()
 
+    # ---------------- 休战大厅（走动场景） ----------------
+
+    def on_hall(self):
+        """休战大厅入口（主菜单第 4 卡 / L 键 / 联机大厅按钮）。
+
+        必须已连上服务器（ServerLink）**并登录**：游客/未连接都引导去
+        「战斗」页完成连接登录后再来。
+        """
+        link = getattr(self, "mp_link", None)
+        connected = isinstance(link, net.ServerLink) and getattr(link, "alive", False)
+        logged = connected and bool(getattr(self, "mp_user", None))
+        if not (connected and logged):
+            self._build_lobby()
+            try:
+                self._lobby_log("ℹ " + i18n.t("hall_need_conn"))
+            except Exception:                      # noqa: BLE001
+                pass
+            return
+        self._enter_hall()
+
+    def _enter_hall(self):
+        """进入 pygame 走动大厅（阻塞跑，结束后按结果分流）。"""
+        try:
+            import kards_hall
+        except Exception as exc:                   # noqa: BLE001
+            self.add_log(f"[大厅] 走动大厅不可用：{exc}")
+            return
+        h = kards_hall.HallView(self)
+        try:
+            h.run(pump=self.update)
+        finally:
+            pass
+        if h.result == "matched" and h.matched:
+            # 大厅邀请开局：与 matched 事件同一套准备流程（选国家 → 开局）
+            m = h.matched
+            self.mp_role = m["role"]
+            self.mp_opp_name = m["opp"]
+            self.mp_room_id = m["room"]
+            self.casual = m["casual"]
+            self._build_nation_select(mp=True, casual=m["casual"])
+            return
+        if h.result == "quit":
+            self.destroy()
+            return
+        if h.kicked:
+            # 被踢（账号别处登录）：主菜单还在，刷新账号状态即可
+            self._kicked = True
+            self.mp_user = None
+            try:
+                self._refresh_account_btn()
+            except Exception:                      # noqa: BLE001
+                pass
+        # 正常返回：主菜单一直都在底下，无需重建
+
+
     # ---------------- 休闲模式：选对手类型 ----------------
 
     def _build_casual_select(self):
@@ -3724,6 +3787,12 @@ class App(tk.Tk):
                                  font=FONT_S, anchor="w", justify="left",
                                  wraplength=290)
         self.room_lbl.pack(anchor="w", padx=14)
+        # 走动大厅入口：连上服务器并登录后可用（进入 pygame 场景）
+        self.hall_btn = tk.Button(box, text=i18n.t("hall_title"), bg=ACCENT,
+                                  fg=TEXT, font=FONT_S, bd=0, padx=14, pady=6,
+                                  cursor="hand2", command=self.on_hall,
+                                  state="disabled")
+        self.hall_btn.pack(anchor="w", padx=14, pady=(8, 2))
         sep = tk.Frame(box, bg=BORDER, height=1)
         sep.pack(fill="x", padx=14, pady=8)
         row = tk.Frame(box, bg=PANEL)
@@ -3788,6 +3857,7 @@ class App(tk.Tk):
         set_btn(self.match_btn, "normal" if can_play else "disabled")
         set_btn(self.room_btn, "normal" if (can_play or self.mp_room_code) else "disabled")
         set_btn(self.join_code_btn, "normal" if can_play else "disabled")
+        set_btn(getattr(self, "hall_btn", None), "normal" if can_play else "disabled")
         if self.match_btn is not None and self.match_btn.winfo_exists():
             if self.mp_matching:
                 key = "btn_cancel_casual_match" if self.casual else "btn_cancel_match"
@@ -6058,6 +6128,13 @@ class App(tk.Tk):
         # 保底，胜利才给钻石，让"再来一局"始终有个看得见的进账。
         result = "draw" if won is None else ("win" if won else "lose")
         rank_line = ""
+        # 走动大厅「好友（经常对战）」绿圈：联机对局给对手熟悉度 +1
+        if getattr(self, "_game_online", False) and getattr(self, "mp_opp_name", None):
+            try:
+                import kards_hall
+                kards_hall.familiar_add_battle(self.mp_opp_name)
+            except Exception:                      # noqa: BLE001
+                pass
         if self.account:
             account.stats_add(self.account, result)
             # 每日任务进度：一局一记（含中途退出判负，口径与战绩一致）

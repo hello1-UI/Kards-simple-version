@@ -456,6 +456,53 @@ def broadcast_lobby():
             continue
 
 
+HALL_CHAT_TTL = 8.0              # 聊天气泡展示秒数，过期随快照自然消失
+HALL_CHAT_MAX = 120              # 单条聊天长度上限（防御性截断）
+
+
+def hall_snapshot():
+    """走动大厅在线快照：所有 in_hall 玩家的名字 / 坐标 / 气泡。
+
+    与 lobby_snapshot 相同的坑：必须在 LOBBY_LOCK 内拷贝列表再遍历。
+    """
+    now_t = time.time()
+    with LOBBY_LOCK:
+        clients = [c for c in list(CLIENTS.values())
+                   if getattr(c, "in_hall", False) and c.alive and c.name]
+    snap = []
+    for c in clients:
+        chat = c.hchat if (c.hchat and now_t - c.hchat_t <= HALL_CHAT_TTL) else None
+        snap.append({"name": c.name, "x": round(c.hx, 1), "y": round(c.hy, 1),
+                     "chat": chat})
+    return snap
+
+
+def broadcast_hall():
+    """把走动大厅快照推给所有在场的玩家（位置/气泡变化时调用）"""
+    snap = hall_snapshot()
+    with LOBBY_LOCK:
+        targets = [c for c in list(CLIENTS.values())
+                   if getattr(c, "in_hall", False) and c.alive]
+    for c in targets:
+        try:
+            c.send({"m": "hall_state", "players": snap})
+        except Exception:            # noqa: BLE001
+            continue
+
+
+def hall_leave(c):
+    """把一个连接从走动大厅摘除（进场失败 / 进对局 / 断线时调用）。
+
+    只在确实在场时才广播，避免无关的状态抖动；返回是否真的离开了。
+    """
+    if not getattr(c, "in_hall", False):
+        return False
+    c.in_hall = False
+    c.hchat = None
+    broadcast_hall()
+    return True
+
+
 # ----------------------------------------------------------------- 连接处理
 
 class ClientHandler(socketserver.BaseRequestHandler):
@@ -480,6 +527,14 @@ class ClientHandler(socketserver.BaseRequestHandler):
         self.role = None
         self.code = None       # 自己创建的房间邀请码（等待对手加入）
         self.match_casual = False  # 匹配/房间是否为休闲模式（None/False = 排位）
+        # ---- 走动大厅（hall）状态：位置 + 最近一句话 ----
+        # 与旧「大厅列表」(lobby_snapshot) 不同：hall 是可走动房间场景，
+        # 玩家以坐标出现，别人能看到自己站在哪、头顶聊了什么。
+        self.in_hall = False
+        self.hx = 0.0
+        self.hy = 0.0
+        self.hchat = None       # 最近一条聊天文本（带时间戳，过期不再下发）
+        self.hchat_t = 0.0
         self.last_rx = time.time()
         self._buf = b""
 
@@ -734,6 +789,20 @@ class ClientHandler(socketserver.BaseRequestHandler):
             self.do_delete_account()
         elif t == "leave_room":
             self.do_leave_room()
+        elif t == "hall_join":
+            self.do_hall_join(msg)
+        elif t == "hall_move":
+            self.do_hall_move(msg)
+        elif t == "hall_leave":
+            hall_leave(self)
+        elif t == "hall_chat":
+            self.do_hall_chat(msg)
+        elif t == "hall_invite":
+            self.do_hall_invite(msg.get("to"))
+        elif t == "hall_accept":
+            self.do_hall_accept(msg.get("to"))
+        elif t == "hall_decline":
+            self.do_hall_decline(msg.get("to"))
         else:
             self.send({"m": "err", "err": f"未知消息类型 {t}"})
 
@@ -773,6 +842,8 @@ class ClientHandler(socketserver.BaseRequestHandler):
                 return
             room = Room(foe, self)
             ROOMS.append(room)
+            hall_leave(foe)
+            hall_leave(self)
         log(f"匹配成功: {foe.name} vs {self.name} (房间 #{room.id}"
             f"{'，休闲' if casual else ''})")
         foe.send({"m": "matched", "room": room.id, "role": "host",
@@ -826,6 +897,8 @@ class ClientHandler(socketserver.BaseRequestHandler):
             ROOMS_BY_CODE.pop(code, None)
             host.code = None
             casual = bool(getattr(host, "match_casual", False))
+            hall_leave(host)
+            hall_leave(self)
         log(f"房间 {code} 开局: {host.name} vs {self.name}"
             f"{'（休闲）' if casual else ''}")
         host.send({"m": "matched", "room": room.id, "role": "host",
@@ -851,6 +924,98 @@ class ClientHandler(socketserver.BaseRequestHandler):
 
     def do_leave_room(self):
         self.teardown_room(notify=True)
+
+    # ---------- 走动大厅 ----------
+
+    def do_hall_join(self, msg):
+        """进入走动大厅：登记坐标并回一张全量快照，随后广播给在场者。"""
+        if self.room is not None:
+            self.send({"m": "err", "err": "你已在对局中"})
+            return
+        try:
+            x = float(msg.get("x", 0))
+            y = float(msg.get("y", 0))
+        except (TypeError, ValueError):
+            x, y = 0.0, 0.0
+        self.hx, self.hy = x, y
+        self.in_hall = True
+        self.hchat = None
+        # 只广播一次（含本人）：进场者也从这条广播拿到全量快照。
+        # 不能再单独 self.send 一份 —— 否则本人手里会有两份 hall_state
+        # （自己的旧快照 + 全量），客户端按序消费会永远慢一拍（实测）。
+        broadcast_hall()
+
+    def do_hall_move(self, msg):
+        """位置更新。客户端已按 ~100ms 节流，服务器直接广播。"""
+        if not self.in_hall:
+            return
+        try:
+            self.hx = float(msg.get("x", self.hx))
+            self.hy = float(msg.get("y", self.hy))
+        except (TypeError, ValueError):
+            return
+        broadcast_hall()
+
+    def do_hall_chat(self, msg):
+        """大厅聊天：记在头上（气泡）并广播。"""
+        if not self.in_hall:
+            return
+        text = str(msg.get("text") or "").strip()[:HALL_CHAT_MAX]
+        if not text:
+            return
+        self.hchat = text
+        self.hchat_t = time.time()
+        broadcast_hall()
+
+    def do_hall_invite(self, to):
+        """向在场玩家发出对战邀请（服务器只中转，不创建房间）。"""
+        if self.room is not None or not self.in_hall:
+            self.send({"m": "err", "err": "你已不在大厅"})
+            return
+        with LOBBY_LOCK:
+            tgt = CLIENTS.get(to)
+            ok = (tgt is not None and tgt.alive and tgt.in_hall
+                  and tgt.room is None and tgt is not self)
+        if not ok:
+            self.send({"m": "hall_gone", "to": to})
+            return
+        tgt.send({"m": "hall_invite", "from": self.name})
+
+    def do_hall_accept(self, to):
+        """接受邀请 → 直接开一局（复用邀请码房间的建房路径）。
+
+        走动大厅的邀请局按休闲处理：不打段位，战绩/金币照常记 ——
+        玩家在大厅里喊人打一场，不该被突然掉星。
+        """
+        if self.room is not None:
+            self.send({"m": "err", "err": "你已在对局中"})
+            return
+        with LOBBY_LOCK:
+            inviter = CLIENTS.get(to)
+            if (inviter is None or not inviter.alive or inviter.room is not None
+                    or not inviter.in_hall or inviter is self):
+                self.send({"m": "hall_gone", "to": to})
+                return
+            if self in MATCH_QUEUE:
+                MATCH_QUEUE.remove(self)
+            inviter.match_casual = True
+            self.match_casual = True
+            room = Room(inviter, self)
+            ROOMS.append(room)
+            hall_leave(inviter)
+            hall_leave(self)
+        log(f"大厅邀请开局: {inviter.name} vs {self.name} (房间 #{room.id}，休闲)")
+        inviter.send({"m": "matched", "room": room.id, "role": "host",
+                      "opp": self.name, "casual": True})
+        self.send({"m": "matched", "room": room.id, "role": "guest",
+                   "opp": inviter.name, "casual": True})
+
+    def do_hall_decline(self, to):
+        """婉拒邀请：只通知邀请方，不动大厅状态。"""
+        with LOBBY_LOCK:
+            inviter = CLIENTS.get(to)
+        if inviter is not None and inviter.alive:
+            inviter.send({"m": "hall_decline", "from": self.name})
 
     def do_delete_account(self):
         """删除当前账号（连接已认证，不必再输密码）。
@@ -919,6 +1084,7 @@ class ClientHandler(socketserver.BaseRequestHandler):
                 ROOMS_BY_CODE.pop(self.code, None)
         if self.name:
             log(f"断开: {self.name}")
+        hall_leave(self)          # 从走动大厅摘除并广播（不在场时是空操作）
         try:
             self.sock.close()
         except OSError:

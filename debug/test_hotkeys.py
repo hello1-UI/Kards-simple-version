@@ -2,7 +2,7 @@
 """主菜单字母快捷键回归测试（Q W E R T Y A S F G H）。
 
 覆盖三层：
-    1. 键位表：11 个键齐全、指向真实存在的方法、字母大小写都能触发；
+    1. 键位表：12 个键齐全、指向真实存在的方法、字母大小写都能触发；
     2. 守门条件：对局中 / 不在主菜单 / 有对话框 / 焦点在输入框 —— 一律不响应；
     3. 界面提示：三张入口卡有 F/G/H 角标、工具条六个按钮有 Q/W/E/R/T/Y 字母。
 
@@ -49,6 +49,7 @@ EXPECT = {
     "f": "on_battle",
     "g": "_practice_entry",
     "h": "_build_casual_select",
+    "l": "on_hall",
 }
 
 
@@ -72,10 +73,10 @@ def _one_screen(app):
 
 
 def headless():
-    print("1. 键位表（用户指定的 11 个键）")
+    print("1. 键位表（主菜单快捷键 12 个）")
     import KARDS as gui
     table = gui.App.HOTKEYS
-    check("11 个键齐全", len(table) == 11, len(table))
+    check("12 个键齐全", len(table) == 12, len(table))
     missing = {k: v for k, v in EXPECT.items() if table.get(k) != v}
     check("每个键指向的处理函数与需求一致", not missing, missing)
     bad = {k: v for k, v in table.items() if not callable(getattr(gui.App, v, None))}
@@ -136,13 +137,13 @@ def gui_tests():
 
         # ---- 角标：三张入口卡各挂一个字母 ----
         cards = getattr(app, "_menu_cards", ())
-        check("主菜单记下了三张入口卡", len(cards) == 3, cards)
+        check("主菜单记下了四张入口卡", len(cards) == 4, cards)
         got = []
         for c in cards:
             txt = [w.cget("text") for w in kids(c) if isinstance(w, tk.Label)]
-            hit = [t for t in txt if t in ("F", "G", "H")]
+            hit = [t for t in txt if t in ("F", "G", "H", "L")]
             got.extend(hit)
-        check("入口卡带 F/G/H 角标", sorted(got) == ["F", "G", "H"], got)
+        check("入口卡带 F/G/H/L 角标", sorted(got) == ["F", "G", "H", "L"], got)
         check("工具条带 Q/W/E/R/T/Y 字母",
               {"Q", "W", "E", "R", "T", "Y"} <= set(labels),
               [x for x in labels if len(x) == 1])

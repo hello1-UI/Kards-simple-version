@@ -47,3 +47,4 @@ assets/musicpack/*.zip
 
 # 自定义 UI 模板（用户数据，见 kards_theme.py）
 themes/
+hall_familiar.json
