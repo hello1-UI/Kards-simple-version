@@ -482,8 +482,27 @@ def extract_zip(zip_path, target_dir, strip_root=None, progress=None):
 
 
 def has_meipass():
-    """是否是一体式（onefile）打包 —— 资源被解到临时目录 _MEIxxxx。"""
-    return bool(getattr(sys, "_MEIPASS", None))
+    """是否是一体式（onefile）打包 —— 资源被解到临时目录 _MEIxxxx。
+
+    ⚠ **不能**拿「有没有 sys._MEIPASS」当判据：
+      PyInstaller 6 起对 **onedir 也会设置 _MEIPASS**（指向 exe 旁的
+      `_internal/`），照旧判断会把安装版误报成单文件版，
+      `can_self_update()` 返回 None → 「无法更新」bug（v1.6.3.8 实测）。
+    正确判据：_MEIPASS 是否落在 exe 所在目录**之内**。
+      · onedir（新旧布局都算）：exe_dir 或 exe_dir/_internal → 目录内 → False
+      · onefile：%TEMP%/_MEIxxxx 临时目录 → 目录外 → True
+    """
+    if not getattr(sys, "frozen", False):
+        return False
+    mei = getattr(sys, "_MEIPASS", None)
+    if not mei:
+        return False
+    try:
+        rel = os.path.relpath(os.path.abspath(mei),
+                              os.path.dirname(os.path.abspath(sys.executable)))
+    except ValueError:            # Windows 跨盘符（TEMP 与 exe 不同盘）→ 临时目录
+        return True
+    return rel.startswith("..")
 
 
 def can_self_update():

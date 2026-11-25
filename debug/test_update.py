@@ -268,6 +268,97 @@ def main():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+    print("9b. 打包形态判定（onefile vs onedir —— PyInstaller 6 的 _MEIPASS 陷阱）")
+    # PyInstaller 6 起 onedir 也设置 sys._MEIPASS（指向 _internal/），
+    # 旧判据 `bool(_MEIPASS)` 会把安装版 exe 误报成单文件版 → 无法更新。
+    # 这里用假目录 + 临时改 sys 属性模拟三种形态。
+    tmpf = tempfile.mkdtemp(prefix="kards_shape_")
+    exe_dir = os.path.join(tmpf, "KARDS")
+    os.makedirs(os.path.join(exe_dir, "_internal"), exist_ok=True)
+    fake_exe = os.path.join(exe_dir, "KARDS.exe")
+    mei_onefile = os.path.join(tempfile.gettempdir(), "_MEI123456")
+
+    def _with_shape(frozen, mei, exe, fn):
+        """临时伪装 sys 属性跑 fn，返回其结果"""
+        saved = (getattr(sys, "frozen", None), getattr(sys, "_MEIPASS", None),
+                 sys.executable)
+        try:
+            if frozen is None:
+                if hasattr(sys, "frozen"):
+                    del sys.frozen
+            else:
+                sys.frozen = frozen
+            if mei is None:
+                if hasattr(sys, "_MEIPASS"):
+                    del sys._MEIPASS
+            else:
+                sys._MEIPASS = mei
+            sys.executable = exe
+            return fn()
+        finally:
+            if saved[0] is None:
+                if hasattr(sys, "frozen"):
+                    del sys.frozen
+            else:
+                sys.frozen = saved[0]
+            if saved[1] is None:
+                if hasattr(sys, "_MEIPASS"):
+                    del sys._MEIPASS
+            else:
+                sys._MEIPASS = saved[1]
+            sys.executable = saved[2]
+
+    try:
+        # ① 源码运行
+        r = _with_shape(None, None, __file__,
+                        lambda: (up.has_meipass(), up.can_self_update()))
+        check("源码运行：非 onefile", r[0] is False)
+        check("源码运行：能就地更新", r[1] is not None)
+        # ② onedir PyInstaller 6：_MEIPASS 指向 exe 旁的 _internal/
+        r = _with_shape(True, os.path.join(exe_dir, "_internal"), fake_exe,
+                        lambda: (up.has_meipass(), up.can_self_update(),
+                                 up.restart_dir()))
+        check("onedir(PyInstaller6)：**不是** onefile（v1.6.3.8 回归）",
+              r[0] is False, str(r))
+        check("onedir(PyInstaller6)：更新目标 = _internal/",
+              r[1] and os.path.samefile(r[1], os.path.join(exe_dir, "_internal")),
+              r[1])
+        check("onedir(PyInstaller6)：重启目录 = exe 层",
+              r[2] and os.path.samefile(r[2], exe_dir), r[2])
+        # ③ onedir PyInstaller ≤5 旧布局：_MEIPASS 就是 exe 目录
+        r = _with_shape(True, exe_dir, fake_exe, up.has_meipass)
+        check("onedir(旧布局)：不是 onefile", r is False)
+        # ④ onefile：_MEIPASS 在 %TEMP%
+        r = _with_shape(True, mei_onefile, fake_exe,
+                        lambda: (up.has_meipass(), up.can_self_update(),
+                                 up.restart_dir()))
+        check("onefile：判定为 onefile", r[0] is True)
+        check("onefile：拒绝就地更新（target_dir=None）", r[1] is None)
+        check("onefile：重启目录 = exe 层",
+              r[2] and os.path.samefile(r[2], exe_dir), r[2])
+        # ⑤ onefile 的 UpdateTask 会给出明确报错而不是默默解压到临时目录
+        #   （构造器会把 None 兜底成 can_self_update()，须事后置 None 模拟 onefile）
+        t = up.UpdateTask("1.2.0.3")
+        t.target_dir = None
+        ok = t.start()
+        check("onefile：start() 拒绝启动", ok is False)
+        check("onefile：报错文案提单文件版", "单文件" in t.message, t.message)
+        # ⑥ TEMP 与 exe 跨盘符（relpath ValueError → 应算 onefile）
+        r = _with_shape(True, mei_onefile, fake_exe, up.has_meipass)
+        check("onefile：判据不依赖同盘符", r is True)
+        # ⑦ frozen 但没有 _MEIPASS（非常规打包）→ 不当 onefile，可更新
+        r = _with_shape(True, None, fake_exe,
+                        lambda: (up.has_meipass(), up.can_self_update()))
+        check("frozen 无 _MEIPASS：不是 onefile", r[0] is False)
+        check("frozen 无 _MEIPASS：更新目标仍能给出（_internal 存在 → _internal）",
+              r[1] and os.path.samefile(r[1], os.path.join(exe_dir, "_internal")),
+              r[1])
+    finally:
+        shutil.rmtree(tmpf, ignore_errors=True)
+    # 收尾：确保模拟属性已还原，后续段落不受污染（本测试从源码跑，应无 frozen/_MEIPASS）
+    check("形态模拟后 sys 属性已还原",
+          not hasattr(sys, "frozen") and not hasattr(sys, "_MEIPASS"))
+
     print("10. 后台任务状态机（用一个假 info 走一遍 found 分支）")
     t = up.UpdateTask("1.2.0.3", auto_install=False)
     check("初始状态 idle", t.state == "idle")
