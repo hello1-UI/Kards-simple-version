@@ -56,8 +56,14 @@ def main():
     mob.defense = 10
     mob.max_defense = 10
     g.damage_unit(mob, 2, combat=True)
-    check("实伤1 动员移除", mob.mob == 0 and mob.attack == 1 and mob.defense == 8 and mob in p1.board,
-          f"a={mob.attack} d={mob.defense} mob={mob.mob}")
+    check("实伤后失去动员、加成保留",
+          mob.mob == 0 and "动员" not in mob.keywords
+          and mob.attack == 2 and mob.defense == 9 and mob in p1.board,
+          f"a={mob.attack} d={mob.defense} mob={mob.mob} kw={mob.keywords}")
+    # 关键词已消失 → 之后回合开始不再成长
+    g.start_turn()
+    check("失去动员后不再成长", mob.attack == 2 and mob.defense == 9,
+          f"a={mob.attack} d={mob.defense}")
 
     print("== 1b. 装甲3：战斗伤害减 3，效果伤害不减 ==")
     g1b, u1, v1 = make_game()

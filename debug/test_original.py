@@ -88,7 +88,7 @@ def main():
     g.do_attack(fury, t2)
     check("两次后不可攻击", not g.unit_ready(fury))
 
-    print("== 4. 动员：回合开始+1/+1，受伤移除 ==")
+    print("== 4. 动员：回合开始+1/+1，受伤只失去关键词、加成保留 ==")
     g, p1, p2 = make_game("苏联", "德国", filler1="殖民步兵")
     db = K.card_database()
     col = deploy(g, p1, db["殖民步兵"])         # 1/1 闪击 动员
@@ -96,10 +96,13 @@ def main():
     g.start_turn()
     check("回合开始+1/+1", col.attack == 2 and col.defense == 2 and col.mob == 1,
           f"{col.attack}/{col.defense} mob={col.mob}")
-    g.damage_unit(col, 1)                       # 还原+1点伤害 → 1/0 阵亡
-    check("受伤后加成移除并按基础生命承伤", col.mob == 0 and col.attack == 1
-          and (col.defense <= 0),
-          f"{col.attack}/{col.defense} mob={col.mob}")
+    g.damage_unit(col, 1)                       # 2/2 → 2/1，仍存活
+    check("受伤后失去动员、加成保留", col.mob == 0 and "动员" not in col.keywords
+          and col.attack == 2 and col.defense == 1 and col in p1.board,
+          f"{col.attack}/{col.defense} mob={col.mob} kw={col.keywords}")
+    g.start_turn()                              # 关键词已失去 → 不再 +1/+1
+    check("失去动员后回合开始不再成长", col.attack == 2 and col.defense == 1,
+          f"{col.attack}/{col.defense}")
 
     print("== 5. 亡计 + 大和号 ==")
     g, p1, p2 = make_game()
