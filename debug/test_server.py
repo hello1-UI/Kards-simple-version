@@ -442,6 +442,7 @@ def main():
                    if p.get("name") == "大厅客一"), None)
         check("大厅: 聊天气泡广播", p1 is not None and p1.get("chat") == "来一把？", str(p1))
 
+        time.sleep(1.1)          # 服务器端聊天 1s 节流：等上一条过了窗口
         ha.send({"m": "hall_chat", "text": "x" * 300})
         r = hb.wait("hall_state", 4)
         p1 = next((p for p in (r or {}).get("players", [])
@@ -495,6 +496,53 @@ def main():
                 x.close()
             except Exception:
                 pass
+
+        # ================= 安全加固 =================
+        print("9. 安全加固")
+        # 9.1 超长行（不带换行的垃圾洪泛）→ 服务器应断开而不是内存暴涨
+        try:
+            raw = socket.create_connection(("127.0.0.1", PORT), timeout=5)
+            raw.sendall(b'{"m":"login","user":"x","pw":"x"}\n')
+            raw.settimeout(5)
+            # 先把 auth_err 回包读干净
+            buf = b""
+            while b"\n" not in buf:
+                buf += raw.recv(4096)
+            time.sleep(0.2)
+            # 300KB 超过 MAX_LINE(256KB)：一口气回完了发
+            raw.sendall(b"A" * (300 * 1024))
+            got = raw.recv(4096)
+            check("安全: 超长行被断开", got == b"", repr(got[:60]))
+            raw.close()
+        except OSError as ex:
+            # 连接被服务器主动关闭也计入通过（recv 抛 OSError = 已断开）
+            check("安全: 超长行被断开", True, f"(连接层 {ex!r})")
+
+        # 9.2 deck_save 超大内容 → err，不写库
+        d2 = Cli()
+        r = d2.login("安全员甲", "pass1234", kind="register")
+        check("安全: 注册测试账号", r is not None and r.get("m") == "auth_ok", str(r))
+        d2.send({"m": "deck_save", "nation": "德国", "title": "大卡组",
+                 "content": "x" * (200 * 1024)})
+        r = d2.wait_any(("err", "deck_saved"), 4)
+        check("安全: 超大卡组被拒", r is not None and r.get("m") == "err", str(r))
+        d2.send({"m": "deck_save", "nation": "德国", "title": "正常卡组",
+                 "content": json.dumps({"cards": [1] * 40})})
+        r = d2.wait("deck_saved", 4)
+        check("安全: 正常卡组仍可存", r is not None, str(r))
+
+        # 9.3 hall_move 服务器端 50ms 节流：连续两次移动只广播一次
+        hsec = Cli()
+        r = hsec.login("安全员乙", "pass1234", kind="register")
+        hsec.send({"m": "hall_join", "x": 0, "y": 0})
+        hsec.wait("hall_state", 4)
+        hsec.send({"m": "hall_move", "x": 10, "y": 10})
+        r = hsec.wait("hall_state", 4)          # 自己进场/第一次移动的快照
+        hsec.send({"m": "hall_move", "x": 999, "y": 999})   # 50ms 内的第二次
+        r2 = hsec.wait("hall_state", 1)         # 1s 内不应有新快照
+        check("安全: hall_move 硬节流", r2 is None, str(r2))
+        hsec.close()
+        d2.close()
 
     finally:
         proc.terminate()

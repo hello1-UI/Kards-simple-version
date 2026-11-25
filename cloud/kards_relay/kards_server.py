@@ -43,6 +43,8 @@ DEFAULT_PORT = 6000
 SESSION_TTL = 30 * 24 * 3600      # 会话 token 有效期 30 天
 HEARTBEAT_TIMEOUT = 60            # 超过该秒数没收到任何消息则判定掉线
 PRINT_LOCK = threading.Lock()
+MAX_LINE = 256 * 1024             # 单条消息上限（字节）——防御内存 DoS：
+                                  # 恶意客户端发超大行不换行，缓冲会无限涨
 
 
 def user_data_db():
@@ -557,6 +559,9 @@ class ClientHandler(socketserver.BaseRequestHandler):
     def recv_obj(self):
         """取一条完整消息（连接关闭返回 None，超时抛 socket.timeout）"""
         while b"\n" not in self._buf:
+            if len(self._buf) > MAX_LINE:
+                # 超大行 = 协议攻击，断开（外层 finally 会 cleanup）
+                raise OSError(f"消息超长({len(self._buf)}B)")
             chunk = self.sock.recv(4096)
             if not chunk:
                 return None
@@ -651,6 +656,9 @@ class ClientHandler(socketserver.BaseRequestHandler):
             with DB_LOCK:
                 tok, err = DB.login(name, msg.get("pw") or "")
             if err:
+                # 拖慢在线爆破：PBKDF2 6 万轮已经不便宜，再垫 0.3s，
+                # 自动化脚本逐个试密码的成本显著上升（正常玩家无感）
+                time.sleep(0.3)
                 self.send({"m": "auth_err", "err": err})
                 return "retry"
         elif t == "adopt":
@@ -774,9 +782,16 @@ class ClientHandler(socketserver.BaseRequestHandler):
             self.send({"m": "rank_board", "rows": top, "total": len(full),
                        "me": me, "season": rank.season_id()})
         elif t == "deck_save":
-            DB.deck_save(self.name, msg.get("nation", ""), msg.get("title", ""),
-                         msg.get("content", ""))
-            self.send({"m": "deck_saved", "title": msg.get("title")})
+            # 尺寸校验：卡组内容其实只有几十 KB，超限直接拒绝，
+            # 防止恶意账号往 SQLite 里灌垃圾把磁盘撑爆
+            nation = str(msg.get("nation", ""))[:24]
+            title = str(msg.get("title", ""))[:60]
+            content = msg.get("content", "")
+            if not isinstance(content, str) or len(content.encode("utf-8")) > 128 * 1024:
+                self.send({"m": "err", "err": "卡组内容过大（上限 128KB）"})
+            else:
+                DB.deck_save(self.name, nation, title, content)
+                self.send({"m": "deck_saved", "title": msg.get("title")})
         elif t == "deck_list":
             self.send({"m": "deck_list", "decks": DB.deck_list(self.name)})
         elif t == "deck_get":
@@ -946,9 +961,14 @@ class ClientHandler(socketserver.BaseRequestHandler):
         broadcast_hall()
 
     def do_hall_move(self, msg):
-        """位置更新。客户端已按 ~100ms 节流，服务器直接广播。"""
+        """位置更新。客户端已按 ~100ms 节流，服务器端再加 50ms 硬节流：
+        恶意客户端全速发 hall_move 会触发全员广播风暴。"""
         if not self.in_hall:
             return
+        now = time.time()
+        if now - getattr(self, "_hall_move_t", 0.0) < 0.05:
+            return
+        self._hall_move_t = now
         try:
             self.hx = float(msg.get("x", self.hx))
             self.hy = float(msg.get("y", self.hy))
@@ -957,14 +977,18 @@ class ClientHandler(socketserver.BaseRequestHandler):
         broadcast_hall()
 
     def do_hall_chat(self, msg):
-        """大厅聊天：记在头上（气泡）并广播。"""
+        """大厅聊天：记在头上（气泡）并广播。1 秒一条的硬节流防刷屏。"""
         if not self.in_hall:
+            return
+        now = time.time()
+        if now - getattr(self, "_hall_chat_t", 0.0) < 1.0:
             return
         text = str(msg.get("text") or "").strip()[:HALL_CHAT_MAX]
         if not text:
             return
+        self._hall_chat_t = now
         self.hchat = text
-        self.hchat_t = time.time()
+        self.hchat_t = now
         broadcast_hall()
 
     def do_hall_invite(self, to):

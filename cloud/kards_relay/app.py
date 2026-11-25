@@ -86,6 +86,8 @@ class Session:
         self.cond = threading.Condition()
         self.last_http = time.time()
         self.alive = True
+        self.polling = False            # 同一会话只允许一个长轮询挂起
+                                        # —— 防并发 /p 把请求线程堆爆
         threading.Thread(target=self._reader, daemon=True).start()
 
     def _reader(self):
@@ -248,7 +250,15 @@ class Handler(BaseHTTPRequestHandler):
                 w = min(max(float((q.get("w") or ["20"])[0]), 0.0), 25.0)
             except ValueError:
                 w = 20.0
-            r = s.poll(w)
+            # 已有轮询挂起 → 立即回空包，不再占住一个请求线程
+            if s.polling:
+                self._json(200, {"m": []})
+                return
+            s.polling = True
+            try:
+                r = s.poll(w)
+            finally:
+                s.polling = False
             if r == "gone":
                 self._json(200, {"gone": True})
             elif r is None:
