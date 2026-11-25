@@ -26,6 +26,9 @@ import queue
 import socket
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 
 class NetLink:
@@ -192,7 +195,46 @@ def get_local_ips():
 
 # ================================================================ 服务器中转
 
-DEFAULT_SERVER = "127.0.0.1:6000"
+# 云端默认服务器：地址栏输 vitural:6000（virtual/vt 同义）即走 HTTPS 桥接，
+# 无需任何人开服。VT_URL 由打包时注入 / 发版时更新。
+VT_HOST = "vitural"
+VT_HOSTS = {"vitural", "virtual", "vt", "cloud"}
+# 云端默认服务器（WorkBuddy 云上常驻，HTTP 桥接内嵌 kards_server）。
+# sharecode 是平台分享链接的固定门牌，缺了会被网关 403。
+VT_URL = "https://kards-cloud-server.app.workbuddy.host/?sharecode=NUCBKJ7U64"
+
+DEFAULT_SERVER = "vitural:6000"
+
+
+# 命令 → 「哪个应答属于我」的判定（服务器部分接口不回显 id）
+def _m_is(*names):
+    def pred(obj, sub):
+        return sub in names and obj.get("id") is None
+    return pred
+
+
+_REPLY_MAP = {
+    "login":        _m_is("auth_ok", "auth_err"),
+    "register":     _m_is("auth_ok", "auth_err"),
+    "resume":       _m_is("auth_ok", "auth_err"),
+    "adopt":        _m_is("auth_ok", "auth_err"),
+    "match":        _m_is("matched", "matching", "err"),
+    "create_room":  _m_is("room_created", "err"),
+    "join_room":    _m_is("matched", "join_err", "err"),
+    "cancel_match": _m_is("match_cancelled", "err"),
+    # 战绩类（stats_add / stats_seed 的应答也是 "stats"）
+    "stats":        _m_is("stats", "err"),
+    "stats_add":    _m_is("stats", "err"),
+    "stats_seed":   _m_is("stats", "err"),
+    # 段位 / 排行榜（rank_add / rank_add_ai / rank_seed 的应答也是 "rank"）
+    "rank":         _m_is("rank", "err"),
+    "rank_add":     _m_is("rank", "err"),
+    "rank_add_ai":  _m_is("rank", "err"),
+    "rank_seed":    _m_is("rank", "err"),
+    "rank_board":   _m_is("rank_board", "err"),
+    # 删除账号（应答 account_deleted 带 ok 字段；服务端拒绝时 err）
+    "delete_account": _m_is("account_deleted", "err"),
+}
 
 
 class ServerLink:
@@ -345,45 +387,158 @@ class ServerLink:
             pass
 
 
-# 命令 → 「哪个应答属于我」的判定（服务器部分接口不回显 id）
-def _m_is(*names):
-    def pred(obj, sub):
-        return sub in names and obj.get("id") is None
-    return pred
+class HttpServerLink(ServerLink):
+    """与云端桥接服务器的 HTTPS 长轮询连接。
 
+    与 ServerLink 的接口完全一致（send/request/inbox/on_event/close）。
+    实现：内部建一条 socketpair，把 ServerLink 的收发循环原样跑在
+    socketpair 的一端，另外两个泵线程负责 HTTP 侧：
 
-_REPLY_MAP = {
-    "login":        _m_is("auth_ok", "auth_err"),
-    "register":     _m_is("auth_ok", "auth_err"),
-    "resume":       _m_is("auth_ok", "auth_err"),
-    "adopt":        _m_is("auth_ok", "auth_err"),
-    "match":        _m_is("matched", "matching", "err"),
-    "create_room":  _m_is("room_created", "err"),
-    "join_room":    _m_is("matched", "join_err", "err"),
-    "cancel_match": _m_is("match_cancelled", "err"),
-    # 战绩类（stats_add / stats_seed 的应答也是 "stats"）
-    "stats":        _m_is("stats", "err"),
-    "stats_add":    _m_is("stats", "err"),
-    "stats_seed":   _m_is("stats", "err"),
-    # 段位 / 排行榜（rank_add / rank_add_ai / rank_seed 的应答也是 "rank"）
-    "rank":         _m_is("rank", "err"),
-    "rank_add":     _m_is("rank", "err"),
-    "rank_add_ai":  _m_is("rank", "err"),
-    "rank_seed":    _m_is("rank", "err"),
-    "rank_board":   _m_is("rank_board", "err"),
-    # 删除账号（应答 account_deleted 带 ok 字段；服务端拒绝时 err）
-    "delete_account": _m_is("account_deleted", "err"),
-}
+      · 下行泵：GET /p 长轮询 → 把服务器事件写进 socketpair
+        （ServerLink._recv_loop 从另一端读到，逻辑零改动）
+      · 上行泵：从 socketpair 读出客户端消息 → POST /s
+        （顺带 25s 心跳，抵消服务器 60s 掉线判定）
+
+    会话先 POST /c 创建（服务器侧为每个会话保持一条真 TCP 连接）。
+    """
+
+    POLL_WAIT = 20          # 长轮询挂起秒数
+    HEARTBEAT_S = 25        # 上行静默多久补一次 ping
+    MAX_POLL_ERR = 3        # 连续失败多少次判掉线
+
+    def __init__(self, base_url, addr=None):
+        self.addr = addr
+        self.inbox = queue.Queue()
+        self.alive = True
+        self._buf = b""
+        self._lock = threading.RLock()
+        self._pending = {}
+        self._cbs = []
+        self._seq = 0
+        self.on_event = None
+        self._base = (base_url or "").rstrip("/")
+        # 平台分享链接带 sharecode（缺了会被网关 403「链接不完整」）——
+        # 把基址拆成 origin + 固定查询串，每个请求都带上。
+        _sp = urllib.parse.urlsplit(self._base)
+        self._origin = urllib.parse.urlunsplit(
+            (_sp.scheme, _sp.netloc, _sp.path.rstrip("/"), "", ""))
+        self._share = _sp.query
+        a, b = socket.socketpair()
+        self.sock = a                 # ServerLink 收发循环用这一端
+        self._sockb = b               # 泵线程用另一端
+        self._sid = self._req("/c", {}, timeout=12.0).get("sid")
+        if not self._sid:
+            raise OSError("云端服务器创建会话失败")
+        self._last_up = time.time()
+        self._poll_err = 0
+        threading.Thread(target=self._recv_loop, daemon=True).start()
+        threading.Thread(target=self._up, daemon=True).start()
+        threading.Thread(target=self._down, daemon=True).start()
+
+    # -------------------------------------------------- HTTP 底座
+    def _req(self, path, payload=None, timeout=30.0):
+        url = self._origin + path
+        if self._share:
+            url += ("&" if "?" in url else "?") + self._share
+        data = None
+        headers = {}
+        if payload is not None:
+            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+    # -------------------------------------------------- 泵
+    def _up(self):
+        """socketpair → POST /s（客户端消息上行）。"""
+        try:
+            self._sockb.settimeout(0.5)
+            while self.alive:
+                chunk = None
+                try:
+                    chunk = self._sockb.recv(8192)
+                except socket.timeout:
+                    pass
+                if chunk:
+                    self._req("/s", {"sid": self._sid,
+                                     "d": chunk.decode("utf-8", "replace")})
+                    self._last_up = time.time()
+                elif self.alive and time.time() - self._last_up > self.HEARTBEAT_S:
+                    self._req("/s", {"sid": self._sid, "d": '{"m":"ping"}\n'})
+                    self._last_up = time.time()
+        except Exception:
+            pass
+        finally:
+            self.close()
+
+    def _down(self):
+        """GET /p 长轮询 → socketpair（服务器事件下行）。"""
+        while self.alive:
+            try:
+                r = self._req(f"/p?sid={self._sid}&w={self.POLL_WAIT}",
+                              timeout=self.POLL_WAIT + 15)
+                self._poll_err = 0
+            except Exception:
+                if not self.alive:
+                    return
+                self._poll_err += 1
+                if self._poll_err >= self.MAX_POLL_ERR:
+                    break
+                time.sleep(1.5)
+                continue
+            if not self.alive:
+                return
+            if r.get("gone"):
+                break
+            msgs = r.get("m") or []
+            if msgs:
+                payload = "".join(
+                    json.dumps(m, ensure_ascii=False) + "\n" for m in msgs)
+                try:
+                    self._sockb.sendall(payload.encode("utf-8"))
+                except OSError:
+                    break
+        self.close()
+
+    def close(self):
+        if not self.alive:
+            return
+        self.alive = False
+        with self._lock:
+            for q in self._pending.values():
+                q.put(None)
+            self._pending.clear()
+            for _, q in self._cbs:
+                q.put(None)
+            self._cbs.clear()
+        for s in (self.sock, self._sockb):
+            try:
+                s.close()
+            except OSError:
+                pass
+        try:
+            self._req("/x", {"sid": self._sid}, timeout=3.0)
+        except Exception:
+            pass
 
 
 def parse_addr(text, default_port=6000):
-    """把 "1.2.3.4:6000" / "1.2.3.4" 解析成 (host, port)，非法返回 None。"""
+    """把 "1.2.3.4:6000" / "1.2.3.4" 解析成 (host, port)，非法返回 None。
+
+    云端默认服务器的别名（vitural / virtual / vt / cloud）统一归一成
+    "vitural" —— 这样 same_server("vitural:6000", "virtual:6000") 判同一台，
+    免密令牌不会因拼写不同而作废。
+    """
     text = (text or "").strip()
     if not text:
         return None
     host, _, port_s = text.rpartition(":")
     if not host:                     # 没写冒号 → 整个是 host
         host, port_s = text, str(default_port)
+    host = host.strip()
+    if host.lower() in VT_HOSTS:
+        host = VT_HOST
     try:
         port = int(port_s)
     except ValueError:
@@ -469,6 +624,18 @@ def connect_server_async(addr, holder, timeout=6.0):
         holder["result"] = ("err", "地址格式应为 主机:端口，例如 127.0.0.1:6000")
         return
     host, port = parsed
+    # 云端默认服务器（vitural:6000）：走 HTTPS 长轮询桥接，不走 TCP。
+    if host == VT_HOST:
+        def run_cloud():
+            if not VT_URL:
+                holder["result"] = ("err", "云端服务器地址未配置")
+                return
+            try:
+                holder["result"] = (HttpServerLink(VT_URL, (host, port)),)
+            except Exception as e:               # noqa: BLE001  网络层异常统一变连接失败
+                holder["result"] = ("err", f"云端服务器连接失败: {e}")
+        threading.Thread(target=run_cloud, daemon=True).start()
+        return
     # 公网地址指向本机 → 走回环。家用路由器普遍不支持 hairpin NAT
     # （内网访问自己的公网 IP 会超时），直连 127.0.0.1 才稳。
     if host in _PUBLIC_IPS:
