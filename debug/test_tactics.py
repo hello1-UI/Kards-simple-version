@@ -199,22 +199,22 @@ check("拦截: 轰炸机吃战斗机反击", bmb.defense == bmb_def - esc.attack
       f"{bmb_def}->{bmb.defense}")
 check("拦截: 原目标无伤", victim.defense == victim.max_defense)
 
-# ---- 8. 反击规则 ----
+# ---- 8. 反击规则（打单位一定吃反击，除非进攻方带[冲击]）----
 g = new_game()
 me, foe = g.players
-# 炮兵不吃反击
+# 炮兵攻击也吃反击
 art = place(g, "Pak36反坦克炮", me, "前线", slot=1)
 art.attack = 1
 t = place(g, INF_2_2, foe, "前线", slot=1)        # 3防, 受1伤不死
 g.do_attack(art, t)
-check("炮兵攻击不吃反击", art.defense == art.max_defense,
+check("炮兵攻击吃反击", art.defense == art.max_defense - t.attack,
       f"{art.defense}/{art.max_defense}")
-# 轰炸机打非战斗机不吃反击
+# 轰炸机打非战斗机也吃反击
 bmb = place(g, "斯图卡 B2", me, "前线", slot=1)
 bmb.attack = 1
 t2 = place(g, INF_2_2, foe, "前线", slot=1)
 g.do_attack(bmb, t2)
-check("轰炸机攻击不吃反击", bmb.defense == bmb.max_defense,
+check("轰炸机攻击吃反击", bmb.defense == bmb.max_defense - t2.attack,
       f"{bmb.defense}/{bmb.max_defense}")
 # 轰炸机打战斗机吃反击
 bmb2 = place(g, "斯图卡 B2", me, "前线", slot=1)
@@ -225,13 +225,28 @@ b_def = bmb2.defense
 g.do_attack(bmb2, fi)
 check("轰炸机打战斗机吃反击", bmb2.defense == b_def - fi.attack,
       f"{b_def}->{bmb2.defense}")
-# 打轰炸机不吃反击
+# 打轰炸机也吃反击
 inf = place(g, "殖民步兵", me, "前线", slot=1)
 inf.attack = 1
 bmb3 = place(g, "斯图卡 B2", foe, "前线", slot=1)  # 2防, 受1伤不死
 g.do_attack(inf, bmb3)
-check("打轰炸机不吃反击", inf.defense == inf.max_defense,
+check("打轰炸机吃反击", inf.defense == inf.max_defense - bmb3.attack,
       f"{inf.defense}/{inf.max_defense}")
+# [冲击]是唯一免反击手段：带冲击攻击不受反击，且攻击后消耗
+g = new_game()
+me, foe = g.players
+ch = place(g, "波波沙冲锋队", me, "前线", slot=1)  # 自带[冲击]
+t3 = place(g, INF_2_2, foe, "前线", slot=1)
+g.do_attack(ch, t3)
+check("冲击攻击不受反击", ch.defense == ch.max_defense,
+      f"{ch.defense}/{ch.max_defense}")
+check("冲击攻击后消耗", not ch.has("冲击"))
+# 无冲击的攻击照常吃反击（换无关键字单位）
+ch2 = place(g, "殖民步兵", me, "前线", slot=2)
+t4 = place(g, INF_2_2, foe, "前线", slot=2)
+g.do_attack(ch2, t4)
+check("无冲击吃反击", ch2.defense == ch2.max_defense - t4.attack,
+      f"{ch2.defense}/{ch2.max_defense}")
 # 轰炸机打总部会被拦截
 g = new_game()
 me, foe = g.players

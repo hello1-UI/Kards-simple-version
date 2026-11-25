@@ -335,7 +335,7 @@ LANGS = {
             "· 步兵/坦克攻击相邻阵线：前线可打敌方支援阵线与总部；敌方占据前线时，支援线可直接打敌方前线单位\n"
             "· 空军（战斗机/轰炸机）与炮兵可攻击任意阵线的敌人，不必上前线\n"
             "· 炮兵/轰炸机无视[警卫]；轰炸机必须优先打战斗机且会被战斗机拦截\n"
-            "· 炮兵/轰炸机攻击不吃反击；轰炸机不反击（打它不吃反击）\n"
+            "· 打单位一定吃反击，除非进攻方带[冲击]（攻击后消耗）\n"
             "· 卡牌上不认识的关键词 → 设置里的「🔑 关键词说明」\n"
             "· 联机：⚔ 战斗 → 服务器模式（填服务器地址）或局域网直连"),
         "quit_title": "退出游戏",
@@ -911,7 +911,7 @@ LANGS = {
             "· Infantry/tanks attack adjacent lines only: from the frontline hit enemy support line & HQ; when the enemy holds the frontline, your support line can strike their frontline units\n"
             "· Air (fighters/bombers) & artillery can attack targets in any line — no need to reach the frontline\n"
             "· Artillery & bombers ignore Guard; bombers must target fighters and can be intercepted\n"
-            "· Artillery & bombers take no counterattack; bombers never counterattack\n"
+            "· Attacking a unit always draws counterattack fire, unless the attacker has [Charge]\n"
             "· Don't know a keyword on a card? Settings -> '🔑 Keywords'\n"
             "· Online: Battle -> server mode (enter server address) or direct LAN"),
         "quit_title": "Quit",
@@ -1483,7 +1483,7 @@ LANGS = {
             "· 歩兵・戦車は隣接する戦線のみ攻撃可：前線からは敵支援ラインと本部を、敵が前線を占拠中なら支援ラインから敵前線ユニットを攻撃できる\n"
             "· 空軍（戦闘機・爆撃機）と砲兵は任意の戦線を攻撃できる（前線に出る必要なし）\n"
             "· 砲兵・爆撃機は護衛を無視；爆撃機は戦闘機を優先攻撃し、迎撃される\n"
-            "· 砲兵・爆撃機の攻撃は反撃を受けない；爆撃機は反撃しない\n"
+            "・ユニットへの攻撃は必ず反撃を受ける（[突撃]を持つ攻撃側のみ免除）\n"
             "· カードの用語が分からない → 設定の「🔑 キーワード説明」\n"
             "· オンライン：バトル → サーバーモード（アドレス入力）または LAN 直結"),
         "quit_title": "終了",

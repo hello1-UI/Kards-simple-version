@@ -40,7 +40,6 @@ def main():
     line("RANGED_TYPES", core.RANGED_TYPES)
     line("战斗机 in RANGED_TYPES", "战斗机" in core.RANGED_TYPES)
     line("轰炸机 in RANGED_TYPES", "轰炸机" in core.RANGED_TYPES)
-    line("NO_COUNTER_DEAL", core.NO_COUNTER_DEAL)
 
     g = new_game()
     me, foe = g.players
@@ -64,7 +63,7 @@ def main():
     line("_interceptor(守方)", getattr(g._interceptor(foe), "name", None))
     line("轰炸机攻非战斗机 → 被战斗机拦截", True)
     line("战斗机攻非战斗机 → 被拦截", False)
-    line("打轰炸机不吃反击", "轰炸机" in core.NO_COUNTER_DEAL)
+    line("打轰炸机也吃反击（新规则）", True)
 
     print("\n=== 4. dmg2 含'空军'（88 高炮）是否覆盖战斗机 ===")
     aa = core.Unit(core.UnitCard("测试AA", "德国", 5, 2, 4, [], "炮兵"), me)

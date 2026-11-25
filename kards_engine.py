@@ -47,7 +47,6 @@ BOARD_SIZE = 9         # 一方场上总上限（前线5 + 支援线4；总部�
 REAR_SLOTS = 4         # 支援阵线（后方）最多 4 个单位
 FRONTLINE_SLOTS = 5    # 前线最多 5 个单位（占领方）
 RANGED_TYPES = ("炮兵", "战斗机", "轰炸机")   # 无需上前线即可攻击的兵种
-NO_COUNTER_DEAL = ("轰炸机",)                 # 不进行反击的兵种（打它不吃反击）
 HAND_LIMIT = 10
 START_HP = 3        # 起始手牌数
 COUNTER_SLOTS = 3    # 反制区上限
@@ -145,9 +144,9 @@ TERM_GUIDE = [
     ("支援阵线", "自己后方的一排。新部署的单位默认进入这里。"),
     ("步兵", "每回合「移动」与「攻击」二选一；打相邻阵线——上前线打敌方支援阵线与总部，敌方占线时在支援线打敌方前线单位。"),
     ("坦克", "同一回合内可以既移动又攻击；攻击范围与步兵相同（相邻阵线）。"),
-    ("炮兵", "可攻击任意阵线的敌人（不必上前线）；攻击不吃反击；无视[警卫]。"),
+    ("炮兵", "可攻击任意阵线的敌人（不必上前线）；无视[警卫]。"),
     ("战斗机", "可攻击任意阵线的敌人（不必上前线）；能拦截敌方轰炸机。"),
-    ("轰炸机", "可攻击任意阵线的敌人（不必上前线）；攻击总部 +2 伤害；无视[警卫]；自身不进行反击。"),
+    ("轰炸机", "可攻击任意阵线的敌人（不必上前线）；攻击总部 +2 伤害；无视[警卫]。"),
     ("研发", "总部卡自带的被动，每个主国各不相同。"),
     ("指挥点", "打牌用的资源。开局指挥点槽为 0，我方每回合开始 +1 槽（涨到 12），"
                "随后指挥点回满为槽数；槽的绝对上限 24。"),
@@ -288,8 +287,8 @@ KEYWORD_DESC_I18N = {
              "ja": "任意の戦線を攻撃できる（前線に出る必要なし）。護衛を無視。"},
     "战斗机": {"en": "Attacks targets in any line (no need to reach the frontline). Can intercept bombers.",
                "ja": "任意の戦線を攻撃できる（前線に出る必要なし）。爆撃機を迎撃できる。"},
-    "轰炸机": {"en": "Attacks targets in any line (no need to reach the frontline); +2 damage vs HQ; ignores Guard; never counterattacks.",
-               "ja": "任意の戦線を攻撃できる（前線に出る必要なし）。本部に +2。護衛を無視。反撃しない。"},
+    "轰炸机": {"en": "Attacks targets in any line (no need to reach the frontline); +2 damage vs HQ; ignores Guard.",
+               "ja": "任意の戦線を攻撃できる（前線に出る必要なし）。本部に +2。護衛を無視。"},
     "研发": {"en": "A passive built into the HQ card, different for each main nation.",
              "ja": "本部カード固有のパッシブ。主要国ごとに異なる。"},
     "指挥点": {"en": "Resource used to play cards. Your command-point slots start at 0 and "
@@ -406,7 +405,7 @@ RULES_TEXT = [
     "步兵/坦克攻击相邻阵线: 在前线打敌方支援阵线+总部; 敌方占据前线时, 支援线可直接打敌方前线单位",
     "空军(战斗机/轰炸机)与炮兵可攻击任意阵线的敌人(不必上前线)",
     "炮兵/轰炸机无视[警卫]; 轰炸机必须优先攻击敌方战斗机, 且会被战斗机拦截",
-    "炮兵/轰炸机攻击不吃反击; 轰炸机不反击(打它不吃反击); 轰炸机打总部+2",
+    "打单位必吃反击（唯一免法：进攻方[冲击]）; 轰炸机打总部+2",
     "[伏击]被攻击时先出手；[奋战]每回合攻击两次；[装甲]战斗伤害-1（[装甲2]-2、[装甲3]-3）",
     "[动员]回合开始+1/+1直至受伤；[亡计]被消灭时对敌方总部造成伤害",
     "[收缴]消灭敌方单位时，一张 1/1 副本（费用至多3）加入手牌",
@@ -2600,20 +2599,12 @@ class Game:
         if shocked:
             attacker.keywords.remove("冲击")
             self.log(f"  {attacker.name} 的[冲击]已消耗。")
-        # 反击规则：目标未死亡才会反击；冲击免反击；[伏击]目标已先出手不再反击；
-        # 轰炸机不反击（打它不吃反击）；炮兵攻击永远不吃反击；
-        # 轰炸机只在攻击战斗机时吃反击（高空投弹躲开地面火力）
+        # 反击规则（用户指定）：打单位**一定吃反击**，唯一例外是进攻方带
+        # [冲击]（免反击，攻击后消耗）；目标已阵亡自然无从反击。
+        # 打总部不在此列（总部不是单位，见 do_hq_attack）。
         if target in target.owner.board and target.defense > 0:
             if shocked:
                 self.log(f"  [冲击]生效：{attacker.name} 不受反击！")
-            elif target.has("伏击"):
-                pass
-            elif target.unit_type in NO_COUNTER_DEAL:
-                self.log(f"  {target.name}（轰炸机）不进行反击。")
-            elif attacker.unit_type == "炮兵":
-                self.log(f"  {attacker.name}（炮兵）远处开火，不受反击！")
-            elif attacker.unit_type == "轰炸机" and target.unit_type != "战斗机":
-                self.log(f"  {attacker.name}（轰炸机）高空投弹，不受反击！")
             else:
                 self.log(f"  {target.name} 反击！{attacker.name} 受到 {target.attack} 点伤害。")
                 self.damage_unit(attacker, target.attack, source=target, combat=True)
