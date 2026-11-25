@@ -520,9 +520,9 @@ LANGS = {
         "hand_empty": "（手牌已空）",
         "turn_tag": "   【敌方回合】",
         "foe_info": ("敌方  {name}（{nation}）   HQ {hq} HP   "
-                     "手牌 {hand}   Kredits {kr}   反制 ❓×{cnt}{tag}"),
+                     "手牌 {hand}   指挥点 {kr}/{slots}   反制 ❓×{cnt}{tag}"),
         "counter_zone": "   反制区: ",
-        "my_info": ("我方  {name}（{nation}）   HQ {hq} HP   Kredits {kr}   "
+        "my_info": ("我方  {name}（{nation}）   HQ {hq} HP   指挥点 {kr}/{slots}   "
                     "牌库 {deck}   {perk}{counters}"),
         # ---- 对局中设置 ----
         "btn_surrender": "🏳 投降",
@@ -1075,9 +1075,9 @@ LANGS = {
         "hand_empty": "(No cards in hand)",
         "turn_tag": "   [Enemy Turn]",
         "foe_info": ("Enemy  {name} ({nation})   HQ {hq} HP   "
-                     "Hand {hand}   Kredits {kr}   Counters ❓×{cnt}{tag}"),
+                     "Hand {hand}   Kredits {kr}/{slots}   Counters ❓×{cnt}{tag}"),
         "counter_zone": "   Counters: ",
-        "my_info": ("Mine  {name} ({nation})   HQ {hq} HP   Kredits {kr}   "
+        "my_info": ("Mine  {name} ({nation})   HQ {hq} HP   Kredits {kr}/{slots}   "
                     "Deck {deck}   {perk}{counters}"),
         "btn_surrender": "🏳 Surrender",
         "btn_to_menu": "🏠 Main Menu",
@@ -1626,9 +1626,9 @@ LANGS = {
         "hand_empty": "（手札が空です）",
         "turn_tag": "   【相手ターン】",
         "foe_info": ("敵  {name}（{nation}）   HQ {hq} HP   "
-                     "手札 {hand}   Kredits {kr}   対策 ❓×{cnt}{tag}"),
+                     "手札 {hand}   Kredits {kr}/{slots}   対策 ❓×{cnt}{tag}"),
         "counter_zone": "   対策: ",
-        "my_info": ("味方  {name}（{nation}）   HQ {hq} HP   Kredits {kr}   "
+        "my_info": ("味方  {name}（{nation}）   HQ {hq} HP   Kredits {kr}/{slots}   "
                     "デッキ {deck}   {perk}{counters}"),
         "btn_surrender": "🏳 降伏",
         "btn_to_menu": "🏠 メインメニュー",

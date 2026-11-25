@@ -48,7 +48,7 @@ check("Kredits 1 不足行动费 2 → 不可攻击", not g.unit_ready(u))
 
 me.kredits = 10
 foe = g.players[1]
-t = core.Unit(db["步兵班"], foe)
+t = core.Unit(db["溃军"], foe)
 t.can_attack = False
 foe.board.append(t)
 g.do_attack(u, t)
@@ -58,7 +58,7 @@ check("攻击后扣除行动费(10-2=8)", me.kredits == 8, f"kr={me.kredits}")
 g = new_game()
 me, foe = g.players[0], g.players[1]
 for i in range(3):
-    e = core.Unit(db["步兵班"], foe)
+    e = core.Unit(db["溃军"], foe)
     foe.board.append(e)
 c13 = db["第13步兵团"]
 check("第13步兵团 行动费=1", c13.operate == 1)
@@ -72,8 +72,8 @@ check("3个敌方单位 → 2+3/4+3 = 5/7",
 # ---- 洛塔组织: 全体 +1 防御 ----
 g = new_game()
 me = g.players[0]
-a = core.Unit(db["步兵班"], me)
-b = core.Unit(db["步兵班"], me)
+a = core.Unit(db["溃军"], me)
+b = core.Unit(db["溃军"], me)
 me.board += [a, b]
 d0 = a.defense
 db["洛塔组织"].effect(g, me)

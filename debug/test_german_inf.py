@@ -183,8 +183,7 @@ me, foe = g.players
 place(g, "第95山地工兵营", me, "后方", slot=1)         # turn_kredits
 g.end_turn(); g.start_turn()            # 对手回合
 g.end_turn(); g.start_turn()            # 我方回合开始
-base = g.turn_num // 2 + 1              # 正常回合收入
-eq("第95: 我方回合开始 +1 Kredits", me.kredits, base + 1)
+eq("第95: 我方回合开始 +1 指挥点", me.kredits, me.cp_slots + 1)
 
 # ---- 9. 钳击 ----
 print("== 9. 钳击 ==")

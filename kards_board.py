@@ -1340,20 +1340,58 @@ class PygameBoard:
         if self.banner is not None:
             self._draw_banner(surf)
 
+    def _draw_cp_slots(self, surf, rect, me):
+        """指挥点槽：信息条右侧一排菱形。
+
+        实心 = 当前可用指挥点，空心 = 槽位已解锁但本回合用完。
+        一排最多画 12 个（成长上限），更多的用 "+N" 标注 —— 槽的绝对上限
+        是 24，将来加了「+槽」卡牌也不会把这一行撑爆。
+        """
+        slots = int(getattr(me, "cp_slots", 0) or 0)
+        if slots <= 0:
+            return
+        cur = max(0, int(getattr(me, "kredits", 0)))
+        shown = min(slots, 12)
+        step, size = 13, 9
+        block_w = shown * step - (step - size)          # 最后一个不留缝
+        extra = slots - shown
+        x0 = rect.right - block_w - 6
+        cy = rect.y + 12
+        if extra > 0:
+            ef = font(11, True)
+            etxt = ef.render("+%d" % extra, True, C(GOLD))
+            x0 -= etxt.get_width() + 6
+            surf.blit(etxt, (x0, cy - etxt.get_height() // 2))
+
+        gold, edge = C(GOLD), C(BORDER)
+        for i in range(shown):
+            cx = x0 + i * step + size // 2
+            pts = [(cx, cy - size // 2), (cx + size // 2, cy),
+                   (cx, cy + size // 2), (cx - size // 2, cy)]
+            if i < cur:
+                pygame.draw.polygon(surf, gold, pts)
+            else:
+                pygame.draw.polygon(surf, edge, pts, 1)
+
     def _draw_info(self, surf, L, g, me, foe, human_turn):
         turn_tag = "" if human_turn else t("turn_tag")
         txt = t("foe_info", name=foe.name, nation=foe.nation, hq=foe.hq,
                 hand=len(foe.hand), kr=foe.kredits,
+                slots=getattr(foe, "cp_slots", 0),
                 cnt=len(foe.counters), tag=turn_tag)
         surf.blit(font(16, True).render(txt, True, C(RED)), (L["info_foe"].x, L["info_foe"].y))
         counter_txt = (t("counter_zone") + " | ".join(c.name for c in me.counters)) if me.counters else ""
         txt2 = t("my_info", name=me.name, nation=me.nation, hq=me.hq,
-                 kr=me.kredits, deck=len(me.deck),
+                 kr=me.kredits, slots=getattr(me, "cp_slots", 0),
+                 deck=len(me.deck),
                  perk=me.hq_card.perk_desc, counters=counter_txt)
         y = L["info_my"].y
-        for ln in wrap_text(txt2, font(14), L["info_my"].w)[:3]:
+        # 右侧 150px 留给指挥点槽菱形，文字在这之前折行
+        wrap_w = max(240, L["info_my"].w - 150)
+        for ln in wrap_text(txt2, font(14), wrap_w)[:3]:
             surf.blit(font(14).render(ln, True, C(TEXT)), (L["info_my"].x, y))
             y += 18
+        self._draw_cp_slots(surf, L["info_my"], me)
 
     def _draw_rows(self, surf, L, g, me, foe):
         # 桌饰：先铺一块桌面底色（四行 + 中线的外框），再画各自的阵线框。

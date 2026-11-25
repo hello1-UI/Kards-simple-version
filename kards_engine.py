@@ -4,7 +4,8 @@ KARDS 简化版 —— 二战卡牌对战游戏
 
 规则说明:
 - 双方各有总部(HQ)，将敌方总部血量降到 0 即获胜。
-- 每回合获得 Kredits（资源）= 当前回合数（上限 12），用于打出卡牌。
+- 指挥点（原 Kredits）用来打出卡牌：开局指挥点槽为 0，我方每回合开始
+  +1 槽（涨到 12 为止，绝对上限 24），随后指挥点回满 = 槽数。
 - 场上每方最多 5 个单位，每个单位占据一个编号位置(0-4)。
 - 卡组：40 张 = 1 张总部卡 + 39 张单位/指令/反制，单卡上限按稀有度取
   （普通 4 / 稀有 3 / 史诗 2 / 传说 1），盟国卡上限 20 张。
@@ -38,7 +39,9 @@ import re
 import sys
 import time
 
-MAX_KREDITS = 12
+MAX_KREDITS = 12       # 兼容旧名：指挥点槽「每回合成长」的上限
+CP_SLOT_GROWTH_CAP = 12   # 我方回合开始 +1 槽，涨到这个数就不再涨
+CP_SLOT_MAX = 24          # 指挥点槽的绝对上限（卡牌/效果可以超过成长上限）
 HQ_HP = 20             # 总部血量：各国统一 20（实际取值见下方 HQ_CARDS）
 BOARD_SIZE = 9         # 一方场上总上限（前线5 + 支援线4；总部不算单位）
 REAR_SLOTS = 4         # 支援阵线（后方）最多 4 个单位
@@ -146,7 +149,9 @@ TERM_GUIDE = [
     ("战斗机", "可攻击任意阵线的敌人（不必上前线）；能拦截敌方轰炸机。"),
     ("轰炸机", "可攻击任意阵线的敌人（不必上前线）；攻击总部 +2 伤害；无视[警卫]；自身不进行反击。"),
     ("研发", "总部卡自带的被动，每个主国各不相同。"),
-    ("Kredits", "每回合的资源，等于当前回合数（上限 12），用来支付卡牌费用。"),
+    ("指挥点", "打牌用的资源。开局指挥点槽为 0，我方每回合开始 +1 槽（涨到 12），"
+               "随后指挥点回满为槽数；槽的绝对上限 24。"),
+    ("士气伤害", "由[协力]等效果直接造成的总部伤害，不经过单位结算。"),
     ("疲劳", "牌库抽空后每回合受到的递增伤害。"),
 ]
 
@@ -202,7 +207,8 @@ KEYWORD_I18N = {
     "战斗机": {"en": "Fighter", "ja": "戦闘機"},
     "轰炸机": {"en": "Bomber", "ja": "爆撃機"},
     "研发": {"en": "Research", "ja": "研究"},
-    "Kredits": {"en": "Kredits", "ja": "Kredits"},
+    "指挥点": {"en": "Kredits", "ja": "Kredits"},
+    "士气伤害": {"en": "Morale damage", "ja": "士気ダメージ"},
     "疲劳": {"en": "Fatigue", "ja": "疲労"},
     # ---- 尚未实装（原版规则参考）----
     "部署": {"en": "Deploy", "ja": "配置"},
@@ -286,8 +292,13 @@ KEYWORD_DESC_I18N = {
                "ja": "任意の戦線を攻撃できる（前線に出る必要なし）。本部に +2。護衛を無視。反撃しない。"},
     "研发": {"en": "A passive built into the HQ card, different for each main nation.",
              "ja": "本部カード固有のパッシブ。主要国ごとに異なる。"},
-    "Kredits": {"en": "Per-turn resource equal to the turn number (max 12), used to pay card costs.",
-                "ja": "ターン数と同じ毎ターンの資源（最大12）。カード費用の支払いに使う。"},
+    "指挥点": {"en": "Resource used to play cards. Your command-point slots start at 0 and "
+                     "grow by 1 at the start of each of your turns (up to 12); your command "
+                     "points then refill to the number of slots. Hard cap: 24 slots.",
+               "ja": "カードを出すための資源。指揮点スロットは開始時 0、自ターン開始ごとに "
+                     "+1（12 まで）。その後、指揮点はスロット数まで回復する。上限は 24。"},
+    "士气伤害": {"en": "Damage dealt directly to an HQ by effects such as [Alliance]; units do not soak it.",
+                "ja": "［協力］などの効果で本部に直接与えるダメージ。ユニットでは受け止められない。"},
     "疲劳": {"en": "Escalating damage each turn after your deck runs out.",
              "ja": "山札が尽きた後、毎ターン受ける増加ダメージ。"},
     # ---- 尚未实装（原版规则参考）----
@@ -448,7 +459,7 @@ class UnitCard:
         self.unit_type = unit_type
         self.traits = traits or {}      # 原版效果标记（部署/亡计/双倍伤害等）
         self.rarity = rarity or auto_rarity(cost, keywords)
-        self.operate = int(operate)     # 行动费：每次攻击额外消耗的 Kredits（原版机制）
+        self.operate = int(operate)     # 行动费：每次攻击额外消耗的指挥点（原版机制）
 
 
 class OrderCard:
@@ -891,11 +902,11 @@ def mk_destroy_cost_le(cost):
 
 
 # ---------------- 中立衍生牌（不入卡组，由效果生成/加入手牌） ----------------
-# 《卡牌效果》文档：指挥点 = Kredits。
+# 《卡牌效果》文档：指挥点（原版英文名 Kredits）。
 
 def effect_production(game, caster):
     caster.kredits += 1
-    game.log(f"  [生产] {caster.name} 获得 1 Kredits（共 {caster.kredits}）。")
+    game.log(f"  [生产] {caster.name} 获得 1 指挥点（共 {caster.kredits}）。")
 
 
 def effect_demolition(game, caster):
@@ -916,7 +927,7 @@ def effect_plan(game, caster):
 
 
 NEUTRAL_ROUT = UnitCard("溃军", "中立", 1, 1, 1, [], "步兵", rarity="普通")
-NEUTRAL_PRODUCTION = OrderCard("生产", "中立", 0, effect_production, "获得 1 Kredits。")
+NEUTRAL_PRODUCTION = OrderCard("生产", "中立", 0, effect_production, "获得 1 指挥点。")
 NEUTRAL_DEMOLITION = OrderCard("爆破", "中立", 0, effect_demolition,
                                "对一个（防御最低的）敌方单位造成 1 点伤害。")
 NEUTRAL_PLAN = OrderCard("计划", "中立", 2, effect_plan, "抽一张牌。")
@@ -1039,7 +1050,7 @@ EXTRA_CARDS = [
                      traits={"deploy_kredits4": True}, rarity="史诗"),
             UnitCard("蓝色军团", "德国", 3, 3, 3, [], "步兵", operate=1,
                      traits={"blue_legion": True}, rarity="史诗"),
-            # ---- 中立衍生牌（不入卡组；指挥点 = Kredits）----
+            # ---- 中立衍生牌（不入卡组；消耗指挥点）----
             NEUTRAL_ROUT,
             NEUTRAL_PRODUCTION,
             NEUTRAL_DEMOLITION,
@@ -1674,6 +1685,11 @@ class Player:
         self.discard = []
         self.counters = []      # 暗置的反制卡
         self.hq = self.hq_card.hp
+        # 指挥点（原 Kredits）与指挥点槽：
+        #   槽 = 每回合的上限，开局 0，我方回合开始 +1（成长上限 12，绝对上限 24）
+        #   kredits = 当前可用指挥点，回合开始时回满到槽数（卡牌还能临时加）
+        # 分开存是为了以后做「+1 槽」类卡牌：只加槽，成长曲线不跟着乱。
+        self.cp_slots = 0
         self.kredits = 0
         self.fatigue = 0
         self.temp_buffs = []    # 本回合临时攻击增益 [(unit, amount)]，回合结束还原
@@ -1871,14 +1887,14 @@ class Game:
             if watcher is not None:
                 self.draw_cards(watcher, 1)
                 self.log(f"  [第738猎兵团] 标记的目标 {unit.name} 被消灭，抽一张牌！")
-            # 第158补给营：友方回合中消灭敌方单位时 +2 Kredits（一回合一次）
+            # 第158补给营：友方回合中消灭敌方单位时 +2 指挥点（一回合一次）
             killer_side = self.opponent_of(unit.owner)
             if self.current is killer_side:
                 for x in killer_side.board:
                     if (x.traits.get("kill_kredits") and x.defense > 0
                             and self._once(killer_side, f"supply_{id(x)}")):
                         killer_side.kredits += 2
-                        self.log(f"  {x.name}：消灭敌军，获得 2 Kredits（共 {killer_side.kredits}）。")
+                        self.log(f"  {x.name}：消灭敌军，获得 2 指挥点（共 {killer_side.kredits}）。")
             # [亡计]：被消灭时对敌方总部造成伤害
             if unit.dying_hq:
                 foe = self.opponent_of(unit.owner)
@@ -1935,13 +1951,13 @@ class Game:
             for x in p.board:
                 if x is not u and x.traits.get("vet_when") == "ally_tank_deploy":
                     self._vet_upgrade(x)
-        # 统帅堂装甲掷弹兵师：部署攻击力≥4 的其他单位时 +2 Kredits（一回合一次）
+        # 统帅堂装甲掷弹兵师：部署攻击力≥4 的其他单位时 +2 指挥点（一回合一次）
         if u.attack >= 4:
             for x in p.board:
                 if (x is not u and x.traits.get("deploy_kredits4")
                         and self._once(p, f"shizhongtang_{id(x)}")):
                     p.kredits += 2
-                    self.log(f"  {x.name}：部署强力单位，获得 2 Kredits（共 {p.kredits}）。")
+                    self.log(f"  {x.name}：部署强力单位，获得 2 指挥点（共 {p.kredits}）。")
         # 九七式坦克光环：友方步兵部署时 +1 攻击
         for other in p.board:
             if other is not u and other.traits.get("inf_aura") and u.unit_type == "步兵":
@@ -2204,7 +2220,7 @@ class Game:
             return False
         return sum(1 for u in p.board if u.position == "前线") < FRONTLINE_SLOTS
 
-    # ---------------- 新词条钩子（烟幕/山地/协力/钳击/守护/老兵；指挥点=Kredits） ----------------
+    # ---------------- 新词条钩子（烟幕/山地/协力/钳击/守护/老兵） ----------------
 
     def _once(self, p, tag):
         """一回合一次触发检查：本回合已用过返回 False，否则登记并返回 True。"""
@@ -2237,7 +2253,7 @@ class Game:
         self.emit({"type": "veteran", "unit": u})
         if vet.get("effect") == "kredits2":
             u.owner.kredits += 2
-            self.log(f"  升级奖励：获得 2 Kredits（共 {u.owner.kredits}）。")
+            self.log(f"  升级奖励：获得 2 指挥点（共 {u.owner.kredits}）。")
 
     def _on_arrive_frontline(self, u):
         """任何方式抵达前线后的触发（普通移动 / [进军]）。"""
@@ -2282,7 +2298,7 @@ class Game:
             self.log(f"  {u.name} 撤回后方，前线加成消失（{u.attack}）。")
 
     def _post_action(self, u, spent=0, attack=False):
-        """一次行动（移动/攻击，spent=本次消耗的 Kredits）之后的联动结算。"""
+        """一次行动（移动/攻击，spent=本次消耗的指挥点）之后的联动结算。"""
         owner = u.owner
         if attack and u.has("烟幕"):     # 烟幕：行动（攻击）后失去
             u.keywords.remove("烟幕")
@@ -2303,7 +2319,7 @@ class Game:
                 if x is not u and x.traits.get("ger_act_grow"):
                     self._bump(x, why=f"{u.name} 行动")  # 第3装甲掷弹兵团
         if spent:
-            for x in owner.board:        # 蓝色军团：行动每花费 1 Kredits → 行动单位 +1/+1
+            for x in owner.board:        # 蓝色军团：行动每花费 1 指挥点 → 行动单位 +1/+1
                 if x.traits.get("blue_legion"):
                     self._bump(u, spent, spent, why=f"蓝色军团（花费 {spent}）")
                     break
@@ -2338,7 +2354,7 @@ class Game:
         spent = 0
         if unit.operate:
             if unit.owner.kredits < unit.operate:
-                self.log(f"  {unit.name} 移动需要 {unit.operate} 点行动费，Kredits 不足！")
+                self.log(f"  {unit.name} 移动需要 {unit.operate} 点行动费，指挥点不足！")
                 return False
             unit.owner.kredits -= unit.operate
             spent = unit.operate
@@ -2528,7 +2544,7 @@ class Game:
         spent = 0
         if attacker.operate:
             if attacker.owner.kredits < attacker.operate:
-                self.log(f"  {attacker.name} 需要 {attacker.operate} 点行动费，Kredits 不足，攻击取消！")
+                self.log(f"  {attacker.name} 需要 {attacker.operate} 点行动费，指挥点不足，攻击取消！")
                 return
             attacker.owner.kredits -= attacker.operate
             spent = attacker.operate
@@ -2624,7 +2640,7 @@ class Game:
         spent = 0
         if attacker.operate:
             if attacker.owner.kredits < attacker.operate:
-                self.log(f"  {attacker.name} 需要 {attacker.operate} 点行动费，Kredits 不足，攻击取消！")
+                self.log(f"  {attacker.name} 需要 {attacker.operate} 点行动费，指挥点不足，攻击取消！")
                 return
             attacker.owner.kredits -= attacker.operate
             spent = attacker.operate
@@ -2680,7 +2696,7 @@ class Game:
         card = p.hand[idx]
         cost = self.get_cost(card, p)
         if cost > p.kredits:
-            self.log("  Kredits 不足！")
+            self.log("  指挥点不足！")
             return False
         p.kredits -= cost
         p.hand.pop(idx)
@@ -2748,15 +2764,21 @@ class Game:
     def start_turn(self):
         # 对局已结束（有人总部倒下 / 投降）就不要再推进回合了。
         # GUI 有多处会无条件调用 start_turn，缺这道守卫时死掉的玩家
-        # 还会继续抽牌、拿 Kredits、结算动员。
+        # 还会继续抽牌、拿指挥点、结算动员。
         if self.over or self.current.hq <= 0:
             return
         self.turn_num += 1
         self.force_end = False
         p = self.current
-        p.kredits = min(MAX_KREDITS, self.turn_num // 2 + 1)
+        # 指挥点槽：我方回合开始 +1，涨到 12 为止（绝对上限 24，留给「加槽」类卡牌）。
+        # 然后指挥点回满 = 槽数。注意这里**按玩家自己的槽数**算，不再用
+        # turn_num//2+1 —— 那个公式会让后手第一回合白拿 1 点。
+        if p.cp_slots < CP_SLOT_GROWTH_CAP:
+            p.cp_slots += 1
+        p.cp_slots = min(p.cp_slots, CP_SLOT_MAX)
+        p.kredits = p.cp_slots
         self.log(f"\n===== 第 {self.turn_num} 回合 | {p.name} ({p.nation}) =====")
-        self.log(f"  Kredits: {p.kredits} | HQ: {p.hq} | 手牌 {len(p.hand)} 张")
+        self.log(f"  指挥点: {p.kredits}/{p.cp_slots}（槽） | HQ: {p.hq} | 手牌 {len(p.hand)} 张")
         if p.hq_card.perk == "regen" and p.hq < p.hq_card.hp:
             p.hq += 1
             self.emit({"type": "hq_heal", "player": p, "amount": 1})
@@ -2768,10 +2790,10 @@ class Game:
             u.attacks_made = 0
             u.moved = False
             u.fresh_deploy = False
-            # 第95山地工兵营：友方回合开始时获得 1 Kredits
+            # 第95山地工兵营：友方回合开始时获得 1 指挥点
             if u.traits.get("turn_kredits") and u.defense > 0:
                 p.kredits += 1
-                self.log(f"  {u.name}：回合开始，获得 1 Kredits（共 {p.kredits}）。")
+                self.log(f"  {u.name}：回合开始，获得 1 指挥点（共 {p.kredits}）。")
             # 第3空降猎兵团：回合开始时，同阵线每有一个友方坦克，攻击 +1（累计）
             if u.traits.get("tank_line_grow") and u.defense > 0:
                 n = sum(1 for x in p.board
@@ -2805,7 +2827,7 @@ class Game:
         self._cleanup_own_turn()
         if any(p.hq <= 0 for p in self.players):
             # 任一方总部倒下就结束。只看 self.current 会漏掉「对手已死但
-            # 还没轮到我方结算」的情形，导致死人继续抽牌拿 Kredits。
+            # 还没轮到我方结算」的情形，导致死人继续抽牌拿指挥点。
             self.over = True
             return
         self.force_end = False
@@ -2831,21 +2853,21 @@ class Game:
         me, foe = self.current, self.opponent_of(self.current)
         print("\n--- 敌方 ---")
         print(f"  [{foe.name}] {foe.hq_card.name} HQ: {foe.hq} HP | 手牌 {len(foe.hand)} 张 | "
-              f"Kredits: {foe.kredits} | 反制 ❓×{len(foe.counters)}")
+              f"指挥点: {foe.kredits} | 反制 ❓×{len(foe.counters)}")
         for i, u in enumerate(foe.board):
             print(f"    E{i}: {u}")
         print(f"  --- 前线: {self.frontline_status()} ---")
         print("--- 我方 ---")
         for i, u in enumerate(me.board):
             print(f"    M{i}: {u}")
-        print(f"  [{me.name}] {me.hq_card.name} HQ: {me.hq} HP | Kredits: {me.kredits} | "
+        print(f"  [{me.name}] {me.hq_card.name} HQ: {me.hq} HP | 指挥点: {me.kredits}/{me.cp_slots} | "
               f"研发: {me.hq_card.perk_desc}")
         if me.counters:
             print("  反制区: " + " | ".join(c.name for c in me.counters))
         print("--- 手牌 ---")
         for i, c in enumerate(me.hand):
             cost = self.get_cost(c, me)
-            tag = "" if cost <= me.kredits else " (资源不足)"
+            tag = "" if cost <= me.kredits else " (指挥点不足)"
             if c.kind == "unit":
                 kws = "".join(f"[{k}]" for k in c.keywords)
                 op = f" ⚡行动{c.operate}" if getattr(c, "operate", 0) else ""

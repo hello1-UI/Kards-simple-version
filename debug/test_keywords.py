@@ -54,15 +54,16 @@ def main():
         bad = [(n, d) for n, d in rows if not n or not d]
         check(f"{k} 每项都有名称和说明", not bad, bad)
         total += len(rows)
-    check("条目总数合理（38）", total == 38, total)
+    allnames = [n for _k, rows in g for n, _d in rows]
+    check("条目总数合理（37）", total == 37, total)
 
-    print("2b. 原版词条分组（未实装，供查阅）")
+    print("2b. 词条覆盖面（实装组 + 未实装组）")
     planned = dict(g)["kw_group_planned"]
     pnames = [n for n, _d in planned]
-    check("含「烟幕」（用户提供，本作未实装）", "烟幕" in pnames)
+    check("含「烟幕」（已实装）", "烟幕" in allnames)
     check("含「重甲X」并说明本作叫装甲", "装甲" in core.kw_desc("重甲X", "zh"))
-    check("含「士气伤害」", "士气伤害" in pnames)
-    check("含「老兵」", "老兵" in pnames)
+    check("含「士气伤害」（规则术语）", "士气伤害" in allnames)
+    check("含「老兵」（已实装）", "老兵" in allnames)
     # 未实装词条不能混进「已实装」分组
     impl = [n for k, rows in g if k != "kw_group_planned" for n, _d in rows]
     overlap = [n for n in pnames if n in impl]

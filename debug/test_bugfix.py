@@ -18,7 +18,7 @@ def check(name, cond, detail=""):
     print(("  PASS " if cond else "  FAIL ") + name + (f"  [{detail}]" if detail and not cond else ""))
 
 
-def make_game(n1="苏联", n2="德国", filler1="动员兵", filler2="步兵班"):
+def make_game(n1="苏联", n2="德国", filler1="动员兵", filler2="溃军"):
     db = K.card_database()
     p1 = K.Player("你", n1, [db[filler1]] * K.DECK_SIZE)
     p2 = K.Player("敌", n2, [db[filler2]] * K.DECK_SIZE)
@@ -70,7 +70,7 @@ def main():
     check("装甲3不减效果伤害", heavy.defense == 3, f"d={heavy.defense}")
 
     print("== 2. 大和号：之后部署的日军单位也获得亡计 ==")
-    g2, q1, q2 = make_game("日本", "美国", filler2="步兵班")
+    g2, q1, q2 = make_game("日本", "美国", filler2="溃军")
     old = deploy(g2, q1, db["零式战斗机"])
     q1.kredits = 12
     yamato = db["大和号战列舰"]
@@ -85,7 +85,7 @@ def main():
     check("场上单位亡计结算 2 伤", q2.hq == hq0 - 2, f"{hq0}->{q2.hq}")
 
     print("== 3. 双倍力量：复制为独立对象 ==")
-    g3, r1, r2 = make_game("英国", "苏联", filler1="步兵班", filler2="动员兵")
+    g3, r1, r2 = make_game("英国", "苏联", filler1="溃军", filler2="溃军")
     ds = db["总动员"]
     other = db["皇家海军炮击"]
     r1.kredits = 12
