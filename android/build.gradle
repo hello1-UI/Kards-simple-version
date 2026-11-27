@@ -1,0 +1,4 @@
+// 根构建文件。用 Android Studio 打开 android/ 目录即可构建。
+plugins {
+    id "com.android.application" version "8.5.2" apply false
+}

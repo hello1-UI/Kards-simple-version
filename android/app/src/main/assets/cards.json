@@ -1,0 +1,3971 @@
+{
+ "meta": {
+  "schema": 1,
+  "source": "kards_engine.card_database() @ v1.6.3.12",
+  "counts": {
+   "cards": 257,
+   "hqs": 5
+  },
+  "rules": {
+   "deckSize": 39,
+   "handLimit": 10,
+   "startHand": 3,
+   "boardSize": 9,
+   "rearSlots": 4,
+   "frontlineSlots": 5,
+   "counterSlots": 3,
+   "cpSlotGrowthCap": 12,
+   "cpSlotMax": 24,
+   "allyLimit": 20,
+   "mainNations": [
+    "德国",
+    "苏联",
+    "美国",
+    "英国",
+    "日本"
+   ],
+   "allyNations": [
+    "意大利",
+    "法国",
+    "芬兰",
+    "波兰",
+    "澳新军团"
+   ],
+   "rarityCopies": {
+    "普通": 4,
+    "稀有": 3,
+    "史诗": 2,
+    "传说": 1
+   },
+   "rangedTypes": [
+    "炮兵",
+    "战斗机",
+    "轰炸机"
+   ],
+   "hqHp": 20
+  }
+ },
+ "hqs": [
+  {
+   "nation": "德国",
+   "name": "德国国防军总部",
+   "hp": 20,
+   "perk": "tank_discount",
+   "perkDesc": "研发·闪电战术: 你的坦克费用 -1"
+  },
+  {
+   "nation": "苏联",
+   "name": "苏联最高统帅部",
+   "hp": 20,
+   "perk": "regen",
+   "perkDesc": "研发·纵深防御: 每回合开始总部恢复 1 点生命"
+  },
+  {
+   "nation": "美国",
+   "name": "盟军远征军总部",
+   "hp": 20,
+   "perk": "air_attack",
+   "perkDesc": "研发·航空引擎: 你的战斗机与轰炸机攻击 +1"
+  },
+  {
+   "nation": "英国",
+   "name": "英国皇家司令部",
+   "hp": 20,
+   "perk": "support_discount",
+   "perkDesc": "研发·情报部门: 你的指令与反制费用 -1"
+  },
+  {
+   "nation": "日本",
+   "name": "大日本帝国大本营",
+   "hp": 20,
+   "perk": "inf_attack",
+   "perkDesc": "研发·精神注入: 你的步兵攻击 +1"
+  }
+ ],
+ "cards": [
+  {
+   "kind": "unit",
+   "name": "105毫米轻型榴弹炮",
+   "nation": "德国",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "150毫米榴弹炮",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "传说",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "2 磅炮",
+   "nation": "英国",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "25 磅炮",
+   "nation": "英国",
+   "cost": 4,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "35(t)指挥车",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "75毫米野战炮",
+   "nation": "法国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [
+    "动员"
+   ],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "88毫米炮",
+   "nation": "德国",
+   "cost": 6,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 4,
+   "keywords": [
+    "伏击"
+   ],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {
+    "dmg2": [
+     "空军",
+     "坦克"
+    ]
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "9.2英寸岸防炮",
+   "nation": "英国",
+   "cost": 7,
+   "rarity": "稀有",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "A-20 浩劫",
+   "nation": "美国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "A-24 女妖",
+   "nation": "美国",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 4,
+   "keywords": [
+    "装甲"
+   ],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "A-26 入侵者",
+   "nation": "美国",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "A-36 阿帕齐",
+   "nation": "美国",
+   "cost": 6,
+   "rarity": "稀有",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "A34 彗星",
+   "nation": "英国",
+   "cost": 6,
+   "rarity": "传说",
+   "attack": 6,
+   "defense": 6,
+   "keywords": [
+    "装甲"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "B-17空中堡垒",
+   "nation": "美国",
+   "cost": 10,
+   "rarity": "传说",
+   "attack": 6,
+   "defense": 6,
+   "keywords": [
+    "闪击",
+    "装甲"
+   ],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {
+    "untargetable": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "B6N 天山舰攻",
+   "nation": "日本",
+   "cost": 5,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "BF 109E-7 热带型",
+   "nation": "德国",
+   "cost": 4,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "BP-42 装甲列车",
+   "nation": "德国",
+   "cost": 9,
+   "rarity": "传说",
+   "attack": 5,
+   "defense": 9,
+   "keywords": [
+    "装甲"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "BP-43 装甲列车",
+   "nation": "苏联",
+   "cost": 5,
+   "rarity": "传说",
+   "attack": 3,
+   "defense": 7,
+   "keywords": [
+    "警卫",
+    "装甲"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "Bf-109战斗机",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "D3A1 九九舰爆",
+   "nation": "日本",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 2,
+   "defense": 1,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "D4Y 彗星舰爆",
+   "nation": "日本",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 1,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "F4F-3 野猫",
+   "nation": "美国",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "F4U-1C 海盗",
+   "nation": "美国",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 4,
+   "defense": 6,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "Fw 190A 百舌鸟",
+   "nation": "德国",
+   "cost": 6,
+   "rarity": "普通",
+   "attack": 5,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "Fw 200 秃鹰",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "HX 175 护航队",
+   "nation": "英国",
+   "cost": 3,
+   "rarity": "普通",
+   "desc": "抽 2 张牌",
+   "effect": {
+    "id": "draw",
+    "params": {
+     "n": 2
+    }
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "IS-2重型坦克",
+   "nation": "苏联",
+   "cost": 10,
+   "rarity": "传说",
+   "attack": 8,
+   "defense": 8,
+   "keywords": [
+    "装甲2"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "ISU-152",
+   "nation": "苏联",
+   "cost": 7,
+   "rarity": "传说",
+   "attack": 4,
+   "defense": 6,
+   "keywords": [
+    "装甲2"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "KV-1 1939",
+   "nation": "苏联",
+   "cost": 6,
+   "rarity": "史诗",
+   "attack": 4,
+   "defense": 6,
+   "keywords": [
+    "警卫",
+    "装甲"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "Ki-21 九七重爆",
+   "nation": "日本",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 5,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "Ki-51 九九轻爆",
+   "nation": "日本",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 1,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "Ki-61 三式战 飞燕",
+   "nation": "日本",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 5,
+   "defense": 4,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "Ki-61 三式战改 飞燕",
+   "nation": "日本",
+   "cost": 6,
+   "rarity": "稀有",
+   "attack": 5,
+   "defense": 4,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "M10狼獾",
+   "nation": "美国",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {
+    "kill_damaged_tank": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "M13/40坦克",
+   "nation": "意大利",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {
+    "deploy": "m1340"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "M18 地狱猫",
+   "nation": "美国",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 4,
+   "defense": 2,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "M4 萤火虫",
+   "nation": "英国",
+   "cost": 5,
+   "rarity": "传说",
+   "attack": 8,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "M4A3E8",
+   "nation": "美国",
+   "cost": 4,
+   "rarity": "史诗",
+   "attack": 4,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {
+    "untargetable": true,
+    "recycle_discard": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "M6A1 晴岚特攻",
+   "nation": "日本",
+   "cost": 4,
+   "rarity": "史诗",
+   "attack": 1,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "M7 牧师",
+   "nation": "美国",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 1,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "M8 灰狗",
+   "nation": "美国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 3,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "Me 410 大黄蜂",
+   "nation": "德国",
+   "cost": 7,
+   "rarity": "传说",
+   "attack": 3,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "P-38 闪电",
+   "nation": "美国",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "P-40 小鹰",
+   "nation": "英国",
+   "cost": 3,
+   "rarity": "传说",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "P-51野马",
+   "nation": "美国",
+   "cost": 6,
+   "rarity": "稀有",
+   "attack": 6,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {
+    "deploy": "air4"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "P-61 黑寡妇",
+   "nation": "美国",
+   "cost": 5,
+   "rarity": "传说",
+   "attack": 4,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "PZL P.7",
+   "nation": "波兰",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 2,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "Pak36反坦克炮",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "RAAF飓风",
+   "nation": "澳新军团",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "SM.79 食雀鹰",
+   "nation": "意大利",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 5,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "SU-85坦克歼击车",
+   "nation": "苏联",
+   "cost": 4,
+   "rarity": "普通",
+   "attack": 5,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {
+    "dmg2": [
+     "坦克"
+    ]
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "T-34坦克",
+   "nation": "苏联",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 5,
+   "defense": 5,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "T-60",
+   "nation": "苏联",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 2,
+   "defense": 4,
+   "keywords": [
+    "警卫"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "T-70",
+   "nation": "苏联",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [
+    "警卫"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "T19 榴弹炮",
+   "nation": "美国",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "TBF-1 复仇者",
+   "nation": "美国",
+   "cost": 8,
+   "rarity": "史诗",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "万岁冲锋",
+   "nation": "日本",
+   "cost": 7,
+   "rarity": "传说",
+   "desc": "消灭所有攻击力≤4 的陆军单位（双方），并结束你的回合",
+   "effect": {
+    "id": "banzai",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "三号坦克 G 型",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 4,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "三号坦克 H 型",
+   "nation": "德国",
+   "cost": 4,
+   "rarity": "史诗",
+   "attack": 2,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "三号突击炮",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {
+    "dmg2": [
+     "坦克"
+    ]
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "三号突击炮 G 型",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "三式中战车",
+   "nation": "日本",
+   "cost": 5,
+   "rarity": "稀有",
+   "attack": 4,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "丘吉尔坦克",
+   "nation": "英国",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 6,
+   "keywords": [
+    "警卫",
+    "装甲"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "丛林渗透队",
+   "nation": "日本",
+   "cost": 3,
+   "rarity": "传说",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {
+    "deploy": "snipe2"
+   }
+  },
+  {
+   "kind": "order",
+   "name": "为了祖国",
+   "nation": "苏联",
+   "cost": 3,
+   "rarity": "史诗",
+   "desc": "本回合所有苏联单位 +3 攻击，溢出伤害转移到敌方总部",
+   "effect": {
+    "id": "ura",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "九七式坦克",
+   "nation": "日本",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {
+    "inf_aura": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "九七式改中战车",
+   "nation": "日本",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "九三式装甲车",
+   "nation": "日本",
+   "cost": 1,
+   "rarity": "稀有",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "九五式轻战车",
+   "nation": "日本",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {
+    "order_pain": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "九零式野战炮",
+   "nation": "日本",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "二号坦克 C 型",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "亨舍尔 Hs 123",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 1,
+   "defense": 3,
+   "keywords": [
+    "奋战"
+   ],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "伊-15 海鸥",
+   "nation": "苏联",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 1,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "伊尔-2M PL",
+   "nation": "波兰",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [
+    "装甲"
+   ],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "伊尔-2攻击机",
+   "nation": "苏联",
+   "cost": 4,
+   "rarity": "普通",
+   "attack": 4,
+   "defense": 3,
+   "keywords": [
+    "装甲"
+   ],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {
+    "overflow_hq": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "伞兵连",
+   "nation": "美国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "佩-2",
+   "nation": "苏联",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "俾斯麦号",
+   "nation": "德国",
+   "cost": 10,
+   "rarity": "传说",
+   "desc": "对敌方总部造成 7 点伤害",
+   "effect": {
+    "id": "deal_hq",
+    "params": {
+     "amount": 7
+    }
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "克伦威尔坦克",
+   "nation": "英国",
+   "cost": 4,
+   "rarity": "史诗",
+   "attack": 3,
+   "defense": 6,
+   "keywords": [
+    "装甲"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {
+    "kill_grow": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "八八式高射炮",
+   "nation": "日本",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "兰开斯特轰炸机",
+   "nation": "英国",
+   "cost": 9,
+   "rarity": "稀有",
+   "attack": 7,
+   "defense": 4,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "冬季战争",
+   "nation": "苏联",
+   "cost": 1,
+   "rarity": "稀有",
+   "desc": "对所有敌方单位造成 1 点伤害",
+   "effect": {
+    "id": "deal_all",
+    "params": {
+     "amount": 1
+    }
+   }
+  },
+  {
+   "kind": "order",
+   "name": "冬季攻势",
+   "nation": "苏联",
+   "cost": 8,
+   "rarity": "传说",
+   "desc": "对所有敌方单位造成 4 点伤害",
+   "effect": {
+    "id": "deal_all",
+    "params": {
+     "amount": 4
+    }
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "冷溪近卫团",
+   "nation": "英国",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 1,
+   "defense": 4,
+   "keywords": [
+    "警卫"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "剑鱼 Mk I",
+   "nation": "英国",
+   "cost": 1,
+   "rarity": "稀有",
+   "attack": 1,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "加州第 2 步兵团",
+   "nation": "美国",
+   "cost": 6,
+   "rarity": "普通",
+   "attack": 7,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "动员",
+   "nation": "美国",
+   "cost": 5,
+   "rarity": "史诗",
+   "desc": "抽 3 张牌",
+   "effect": {
+    "id": "draw",
+    "params": {
+     "n": 3
+    }
+   }
+  },
+  {
+   "kind": "order",
+   "name": "动员兵",
+   "nation": "苏联",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "无其他效果的指令（可触发指令联动）",
+   "effect": {
+    "id": "conscripts",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "华沙守军",
+   "nation": "波兰",
+   "cost": 5,
+   "rarity": "史诗",
+   "attack": 4,
+   "defense": 7,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {
+    "deploy": "draw1"
+   }
+  },
+  {
+   "kind": "counter",
+   "name": "华沙战士",
+   "nation": "波兰",
+   "cost": 3,
+   "rarity": "普通",
+   "desc": "暗置：当敌方步兵攻击时，将其消灭",
+   "trigger": "attack_inf",
+   "effect": null
+  },
+  {
+   "kind": "unit",
+   "name": "卡茨曼团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {
+    "katzmann": true
+   }
+  },
+  {
+   "kind": "counter",
+   "name": "反坦克炮",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "暗置：当敌方坦克攻击时，将其消灭",
+   "trigger": "attack_tank",
+   "effect": null
+  },
+  {
+   "kind": "unit",
+   "name": "台风 Mk IB",
+   "nation": "英国",
+   "cost": 4,
+   "rarity": "史诗",
+   "attack": 5,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "喀秋莎",
+   "nation": "苏联",
+   "cost": 2,
+   "rarity": "稀有",
+   "attack": 1,
+   "defense": 2,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {
+    "katyusha": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "喷火 Mk II",
+   "nation": "英国",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "喷火战斗机",
+   "nation": "英国",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 5,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "四号坦克",
+   "nation": "德国",
+   "cost": 6,
+   "rarity": "稀有",
+   "attack": 5,
+   "defense": 5,
+   "keywords": [
+    "召集"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {
+    "deploy": "retreat"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "四号突击炮",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 4,
+   "keywords": [
+    "奋战"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "因尼斯基林燧发枪团",
+   "nation": "英国",
+   "cost": 5,
+   "rarity": "史诗",
+   "attack": 4,
+   "defense": 6,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "counter",
+   "name": "地下抵抗",
+   "nation": "法国",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "暗置：当敌方步兵攻击时，将其消灭",
+   "trigger": "attack_inf",
+   "effect": null
+  },
+  {
+   "kind": "order",
+   "name": "大和号战列舰",
+   "nation": "日本",
+   "cost": 4,
+   "rarity": "传说",
+   "desc": "你的日军单位获得「亡计：对敌方总部造成 2 点伤害」（仅当前场上的单位）",
+   "effect": {
+    "id": "yamato",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "大阪联队",
+   "nation": "日本",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 4,
+   "defense": 7,
+   "keywords": [
+    "警卫"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "姬路联队",
+   "nation": "日本",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 1,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "容克 Ju 88 A",
+   "nation": "德国",
+   "cost": 5,
+   "rarity": "稀有",
+   "attack": 4,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "山地人营",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "稀有",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [
+    "闪击",
+    "山地"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "order_draw_once": true
+   }
+  },
+  {
+   "kind": "counter",
+   "name": "山地伏击",
+   "nation": "意大利",
+   "cost": 4,
+   "rarity": "稀有",
+   "desc": "暗置：当敌方单位攻击时，将其消灭",
+   "trigger": "attack_any",
+   "effect": null
+  },
+  {
+   "kind": "unit",
+   "name": "库尔马克侦察营",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [
+    "山地"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "counter_from_hand"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "廓尔喀步枪团",
+   "nation": "英国",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 1,
+   "defense": 4,
+   "keywords": [
+    "奋战"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {
+    "deploy": "gurkha"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "德哈维兰蚊式",
+   "nation": "英国",
+   "cost": 6,
+   "rarity": "传说",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {
+    "deploy": "nuke3"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "德州第 1 步兵团",
+   "nation": "美国",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "总动员",
+   "nation": "英国",
+   "cost": 1,
+   "rarity": "史诗",
+   "desc": "随机复制一张手中的指令牌，洗入卡组",
+   "effect": {
+    "id": "double_strength",
+    "params": {}
+   }
+  },
+  {
+   "kind": "order",
+   "name": "总参二局",
+   "nation": "波兰",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "抽 1 张牌",
+   "effect": {
+    "id": "draw",
+    "params": {
+     "n": 1
+    }
+   }
+  },
+  {
+   "kind": "order",
+   "name": "总攻命令",
+   "nation": "苏联",
+   "cost": 1,
+   "rarity": "普通",
+   "desc": "[进军] 将攻击力最高的支援阵线友方单位移动到前线",
+   "effect": {
+    "id": "advance_ally",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "惩戒营",
+   "nation": "苏联",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 4,
+   "defense": 2,
+   "keywords": [
+    "冲击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "意大利炮兵团",
+   "nation": "意大利",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 1,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "战地医疗",
+   "nation": "英国",
+   "cost": 1,
+   "rarity": "普通",
+   "desc": "你的所有英军单位 +2 防御",
+   "effect": {
+    "id": "cup_of_tea",
+    "params": {}
+   }
+  },
+  {
+   "kind": "order",
+   "name": "战术撤退",
+   "nation": "英国",
+   "cost": 1,
+   "rarity": "普通",
+   "desc": "[召集] 将防御最低的前线友方单位撤回支援阵线",
+   "effect": {
+    "id": "rally_ally",
+    "params": {}
+   }
+  },
+  {
+   "kind": "counter",
+   "name": "战术欺骗",
+   "nation": "英国",
+   "cost": 3,
+   "rarity": "普通",
+   "desc": "暗置：当敌方打出指令牌时，使其无效",
+   "trigger": "order",
+   "effect": null
+  },
+  {
+   "kind": "order",
+   "name": "抵抗网络",
+   "nation": "法国",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "抽 1 张牌，总部恢复 1 点生命",
+   "effect": {
+    "id": "resistance",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "拉-7战斗机",
+   "nation": "苏联",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "摩托化步兵第 15 团",
+   "nation": "苏联",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 1,
+   "defense": 5,
+   "keywords": [
+    "警卫"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "斯图卡 B2",
+   "nation": "德国",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "斯图卡俯冲轰炸机",
+   "nation": "德国",
+   "cost": 4,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {
+    "stuka_hq": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "斯特林 Mk I S3",
+   "nation": "英国",
+   "cost": 6,
+   "rarity": "史诗",
+   "attack": 6,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "日托米尔第 71 团",
+   "nation": "苏联",
+   "cost": 5,
+   "rarity": "史诗",
+   "attack": 3,
+   "defense": 5,
+   "keywords": [
+    "伏击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "暴风 Mk V",
+   "nation": "英国",
+   "cost": 7,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 7,
+   "keywords": [
+    "伏击"
+   ],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "本土防卫军",
+   "nation": "英国",
+   "cost": 4,
+   "rarity": "传说",
+   "desc": "本回合敌方总部受到 3 点或以上伤害时，你抽一张牌",
+   "effect": {
+    "id": "ats",
+    "params": {}
+   }
+  },
+  {
+   "kind": "counter",
+   "name": "步兵增援",
+   "nation": "美国",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "暗置：友方单位被消灭时，随机友方单位 +2/+3",
+   "trigger": "friendly_death",
+   "effect": {
+    "id": "fresh_recruits",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "步兵第 1005 团",
+   "nation": "苏联",
+   "cost": 4,
+   "rarity": "普通",
+   "attack": 5,
+   "defense": 3,
+   "keywords": [
+    "伏击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "步兵第 35 团",
+   "nation": "苏联",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 3,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "步兵第 456 团",
+   "nation": "苏联",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "步兵第 461 团",
+   "nation": "苏联",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 5,
+   "defense": 3,
+   "keywords": [
+    "伏击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "步兵第 554 团",
+   "nation": "苏联",
+   "cost": 0,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "步兵第 756 团",
+   "nation": "苏联",
+   "cost": 7,
+   "rarity": "稀有",
+   "attack": 7,
+   "defense": 7,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "步兵第 84 团",
+   "nation": "苏联",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 8,
+   "keywords": [
+    "警卫"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "步兵第 89 团",
+   "nation": "苏联",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 3,
+   "keywords": [
+    "警卫"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "步兵联队",
+   "nation": "日本",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [
+    "奋战"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "死神降临",
+   "nation": "美国",
+   "cost": 4,
+   "rarity": "稀有",
+   "desc": "消灭一个随机敌方单位",
+   "effect": {
+    "id": "destroy_random",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "殖民步兵",
+   "nation": "法国",
+   "cost": 5,
+   "rarity": "稀有",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [
+    "闪击",
+    "动员"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {
+    "deploy": "foe_hand"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "水户联队",
+   "nation": "日本",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {
+    "dying_hq": 2
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "水牛 Mk I",
+   "nation": "英国",
+   "cost": 2,
+   "rarity": "稀有",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "波兰枪骑兵",
+   "nation": "波兰",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 1,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "波波沙冲锋队",
+   "nation": "苏联",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 1,
+   "keywords": [
+    "冲击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "洛塔组织",
+   "nation": "芬兰",
+   "cost": 2,
+   "rarity": "稀有",
+   "desc": "己方所有单位 +1 防御",
+   "effect": {
+    "id": "lotta",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "海军步兵第 6 旅",
+   "nation": "苏联",
+   "cost": 1,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 1,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "海军步兵第 83 旅",
+   "nation": "苏联",
+   "cost": 6,
+   "rarity": "传说",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [
+    "警卫",
+    "伏击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "海军特别陆战队",
+   "nation": "日本",
+   "cost": 2,
+   "rarity": "传说",
+   "attack": 1,
+   "defense": 3,
+   "keywords": [
+    "闪击",
+    "奋战"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {
+    "deploy": "yokosuka"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "海军陆战队",
+   "nation": "美国",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 4,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "海军陆战队第 2 营",
+   "nation": "苏联",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 4,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "游骑兵",
+   "nation": "美国",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 4,
+   "defense": 6,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "溃军",
+   "nation": "中立",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "counter",
+   "name": "滩头阵地",
+   "nation": "澳新军团",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "暗置：当敌方战斗机或轰炸机攻击时，将其消灭",
+   "trigger": "attack_air",
+   "effect": null
+  },
+  {
+   "kind": "order",
+   "name": "澳新军团精神",
+   "nation": "澳新军团",
+   "cost": 5,
+   "rarity": "稀有",
+   "desc": "对所有敌方单位造成 2 点伤害，抽 2 张牌",
+   "effect": {
+    "id": "anzac_spirit",
+    "params": {}
+   }
+  },
+  {
+   "kind": "order",
+   "name": "澳新风暴",
+   "nation": "澳新军团",
+   "cost": 3,
+   "rarity": "普通",
+   "desc": "己方所有单位 +1 攻击并获得 [冲击]",
+   "effect": {
+    "id": "anzac_storm",
+    "params": {}
+   }
+  },
+  {
+   "kind": "order",
+   "name": "炮火准备",
+   "nation": "意大利",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "对一个随机敌方单位造成 2 点伤害",
+   "effect": {
+    "id": "naval_support",
+    "params": {}
+   }
+  },
+  {
+   "kind": "order",
+   "name": "爆破",
+   "nation": "中立",
+   "cost": 0,
+   "rarity": "普通",
+   "desc": "对一个（防御最低的）敌方单位造成 1 点伤害。",
+   "effect": {
+    "id": "demolition",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "特种空勤团",
+   "nation": "英国",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {
+    "lock5": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "瓦伦丁 Mk III",
+   "nation": "英国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 4,
+   "keywords": [
+    "奋战"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "生产",
+   "nation": "中立",
+   "cost": 0,
+   "rarity": "普通",
+   "desc": "获得 1 指挥点。",
+   "effect": {
+    "id": "production",
+    "params": {}
+   }
+  },
+  {
+   "kind": "order",
+   "name": "皇家海军炮击",
+   "nation": "英国",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "一个（防御最高的）友方单位攻击力变为等同于其防御力",
+   "effect": {
+    "id": "naval_support_uk",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "皇家西肯特郡团",
+   "nation": "英国",
+   "cost": 5,
+   "rarity": "稀有",
+   "attack": 2,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "神风特攻队",
+   "nation": "日本",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 5,
+   "defense": 2,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "福山自行车联队",
+   "nation": "日本",
+   "cost": 1,
+   "rarity": "史诗",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [
+    "闪击",
+    "奋战"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "秋田联队",
+   "nation": "日本",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 1,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "租借法案",
+   "nation": "英国",
+   "cost": 7,
+   "rarity": "稀有",
+   "desc": "抽 4 张牌",
+   "effect": {
+    "id": "draw",
+    "params": {
+     "n": 4
+    }
+   }
+  },
+  {
+   "kind": "order",
+   "name": "空中闪击",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "稀有",
+   "desc": "对敌方总部造成 3 点伤害",
+   "effect": {
+    "id": "deal_hq",
+    "params": {
+     "amount": 3
+    }
+   }
+  },
+  {
+   "kind": "order",
+   "name": "突然袭击",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "稀有",
+   "desc": "消灭一个费用不大于 2 的敌方单位（攻击力最高者优先）",
+   "effect": {
+    "id": "destroy_cost_le",
+    "params": {
+     "cost": 2
+    }
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第 104 装甲掷弹兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "ger_tank_minus"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第 106 军需连",
+   "nation": "美国",
+   "cost": 4,
+   "rarity": "史诗",
+   "attack": 2,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第 2 旅",
+   "nation": "法国",
+   "cost": 4,
+   "rarity": "史诗",
+   "attack": 2,
+   "defense": 6,
+   "keywords": [
+    "警卫",
+    "动员"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第 22 卫队旅",
+   "nation": "英国",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 2,
+   "defense": 5,
+   "keywords": [
+    "警卫"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第 3 空降猎兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "稀有",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "tank_line_grow": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第 32 步兵团",
+   "nation": "美国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 1,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第 332 工兵团",
+   "nation": "美国",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第 4 先锋营",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {
+    "deploy": "front_army_def"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第 5 伞兵旅",
+   "nation": "英国",
+   "cost": 0,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [
+    "动员"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第 7 步兵团",
+   "nation": "美国",
+   "cost": 4,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 6,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第 73 步兵团",
+   "nation": "法国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 0,
+   "defense": 1,
+   "keywords": [
+    "动员"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第 8 空降猎兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "传说",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [
+    "闪击",
+    "奋战"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第 81 步兵团",
+   "nation": "德国",
+   "cost": 4,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 7,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第 980 国民掷弹兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 6,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第 99 步兵营",
+   "nation": "美国",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第101步兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 5,
+   "keywords": [
+    "钳击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "pincer_grow": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第102掷弹兵团",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 3,
+   "keywords": [
+    "冲击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "vet_when": "acted",
+    "vet": {
+     "atk": 2,
+     "hp": 3,
+     "kw": [
+      "冲击"
+     ]
+    }
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第1097国民掷弹兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "guard_if_blitz"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第136山地猎兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 4,
+   "defense": 3,
+   "keywords": [
+    "山地"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第13山地猎兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [
+    "山地"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "mtn_grow": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第13步兵团",
+   "nation": "芬兰",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 4,
+   "keywords": [
+    "警卫"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "per_enemy"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第141山地猎兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [
+    "山地"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "order_immune": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第14装甲掷弹兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 3,
+   "defense": 5,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "vet_when": "ally_tank_deploy",
+    "vet": {
+     "atk": 3,
+     "hp": 5,
+     "kw": [
+      "冲击"
+     ]
+    }
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第158补给营",
+   "nation": "德国",
+   "cost": 4,
+   "rarity": "传说",
+   "attack": 0,
+   "defense": 4,
+   "keywords": [
+    "烟幕"
+   ],
+   "unitType": "步兵",
+   "operate": 4,
+   "traits": {
+    "kill_kredits": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第15侦察营",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "counter_develop"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第18步兵团",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [
+    "协力",
+    "冲击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "self_advance"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第1战斗群",
+   "nation": "芬兰",
+   "cost": 2,
+   "rarity": "稀有",
+   "attack": 1,
+   "defense": 4,
+   "keywords": [
+    "收缴"
+   ],
+   "unitType": "步兵",
+   "operate": 2,
+   "traits": {
+    "anti_strong": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第22步兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 2,
+   "defense": 1,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "end_draw": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第25澳新营",
+   "nation": "澳新军团",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 5,
+   "keywords": [
+    "警卫"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第27燧发枪兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "稀有",
+   "attack": 2,
+   "defense": 4,
+   "keywords": [
+    "协力",
+    "冲击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "ger_hand_discount": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第28猎兵团",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 1,
+   "keywords": [
+    "烟幕"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "front_gain_ambush": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第304装甲掷弹兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "hq_hit_check"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第30步兵团",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 4,
+   "traits": {
+    "act_minus": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第33装甲掷弹兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 4,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "ally_tank_atk2"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第342燧发枪兵营",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "front_buff2": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第361非洲兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "front_hq3": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第36摩托化步兵营",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 1,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "moto_buff": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第39装甲掷弹兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 4,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "front_atk2": true,
+    "deploy": "swap_position"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第3装甲掷弹兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "ger_act_grow": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第432步兵团",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第4空降猎兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "传说",
+   "attack": 4,
+   "defense": 2,
+   "keywords": [
+    "闪击",
+    "奋战"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "free_unit2"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第50步兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "vet_when": "front_move",
+    "vet": {
+     "atk": 4,
+     "hp": 3,
+     "kw": [
+      "伏击"
+     ]
+    }
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第56猎兵团",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 1,
+   "keywords": [
+    "钳击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "第59装甲掷弹兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "move_and_attack": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第5装甲掷弹兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [
+    "钳击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "pincer_spread": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第62步兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [
+    "冲击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "ally_minus_operate"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第64装甲掷弹兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "稀有",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "vet_when": "turn_start_front",
+    "vet": {
+     "atk": 3,
+     "hp": 3,
+     "effect": "kredits2"
+    }
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第738猎兵团",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "稀有",
+   "attack": 1,
+   "defense": 2,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "deathmark"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第74装甲掷弹兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 3,
+   "keywords": [
+    "闪击",
+    "协力"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "bounce_ally"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第87掷弹兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "counter_grow": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第957国民掷弹兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "production_to_hand"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第95山地工兵营",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "史诗",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [
+    "山地"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "turn_kredits": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第96步兵团",
+   "nation": "德国",
+   "cost": 2,
+   "rarity": "传说",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "self_destruct_on_deploy": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第989步兵团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy": "unique_buff"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "第一步兵团",
+   "nation": "德国",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "米格-3",
+   "nation": "苏联",
+   "cost": 5,
+   "rarity": "稀有",
+   "attack": 4,
+   "defense": 5,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "索玛S35",
+   "nation": "法国",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "统帅堂装甲掷弹兵师",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "deploy_kredits4": true
+   }
+  },
+  {
+   "kind": "order",
+   "name": "翼骑兵冲锋",
+   "nation": "波兰",
+   "cost": 2,
+   "rarity": "稀有",
+   "desc": "随机友方单位 +1/+1，并部署一个 1/1 军团",
+   "effect": {
+    "id": "hussars",
+    "params": {}
+   }
+  },
+  {
+   "kind": "order",
+   "name": "致命一击",
+   "nation": "苏联",
+   "cost": 4,
+   "rarity": "稀有",
+   "desc": "消灭一个已受损的敌方单位（攻击力最高者优先）",
+   "effect": {
+    "id": "destroy_damaged",
+    "params": {}
+   }
+  },
+  {
+   "kind": "order",
+   "name": "舰炮支援",
+   "nation": "日本",
+   "cost": 4,
+   "rarity": "传说",
+   "desc": "对一个随机敌方目标 3 伤，其相邻目标 2 伤",
+   "effect": {
+    "id": "bombing_raid",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "莫拉纳 M.S.406",
+   "nation": "法国",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "菲亚特 C.R.42",
+   "nation": "意大利",
+   "cost": 0,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "萨伏依骑兵团",
+   "nation": "意大利",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "蓝色军团",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 1,
+   "traits": {
+    "blue_legion": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "虎式坦克",
+   "nation": "德国",
+   "cost": 8,
+   "rarity": "史诗",
+   "attack": 8,
+   "defense": 8,
+   "keywords": [
+    "装甲2"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "虎！虎！虎！",
+   "nation": "日本",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "对所有敌方单位造成 1 点伤害",
+   "effect": {
+    "id": "deal_all",
+    "params": {
+     "amount": 1
+    }
+   }
+  },
+  {
+   "kind": "counter",
+   "name": "西苏精神",
+   "nation": "芬兰",
+   "cost": 3,
+   "rarity": "稀有",
+   "desc": "暗置：你的总部即将受到伤害时，改为敌方总部承受",
+   "trigger": "hq_damage",
+   "effect": null
+  },
+  {
+   "kind": "unit",
+   "name": "西里西亚第 74 步兵团",
+   "nation": "波兰",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "计划",
+   "nation": "中立",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "抽一张牌。",
+   "effect": {
+    "id": "plan",
+    "params": {}
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "谢尔曼坦克",
+   "nation": "美国",
+   "cost": 4,
+   "rarity": "普通",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {
+    "deploy": "us_draw2"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "豹式坦克 G 型",
+   "nation": "德国",
+   "cost": 5,
+   "rarity": "史诗",
+   "attack": 6,
+   "defense": 5,
+   "keywords": [
+    "装甲"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "近卫步兵",
+   "nation": "苏联",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 1,
+   "defense": 1,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {
+    "hq_hurt_grow": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "近卫步兵第 1 团",
+   "nation": "苏联",
+   "cost": 4,
+   "rarity": "传说",
+   "attack": 3,
+   "defense": 5,
+   "keywords": [
+    "警卫"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "远程榴弹炮",
+   "nation": "美国",
+   "cost": 5,
+   "rarity": "传说",
+   "attack": 2,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "炮兵",
+   "operate": 0,
+   "traits": {
+    "barrage": true
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "追猎者坦克歼击车",
+   "nation": "德国",
+   "cost": 5,
+   "rarity": "史诗",
+   "attack": 5,
+   "defense": 3,
+   "keywords": [
+    "装甲"
+   ],
+   "unitType": "坦克",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "长程沙漠群",
+   "nation": "澳新军团",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [
+    "闪击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "order",
+   "name": "闪电战",
+   "nation": "德国",
+   "cost": 3,
+   "rarity": "稀有",
+   "desc": "本回合前线友方单位 +3 攻击（回合结束还原）",
+   "effect": {
+    "id": "blitzkrieg",
+    "params": {}
+   }
+  },
+  {
+   "kind": "counter",
+   "name": "防空火力",
+   "nation": "美国",
+   "cost": 2,
+   "rarity": "普通",
+   "desc": "暗置：当敌方战斗机或轰炸机攻击时，将其消灭",
+   "trigger": "attack_air",
+   "effect": null
+  },
+  {
+   "kind": "unit",
+   "name": "阿盖尔郡高地人团",
+   "nation": "英国",
+   "cost": 3,
+   "rarity": "稀有",
+   "attack": 1,
+   "defense": 6,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "隼式战斗机",
+   "nation": "日本",
+   "cost": 4,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {
+    "dying_hq": 2
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "雅克-3",
+   "nation": "苏联",
+   "cost": 4,
+   "rarity": "稀有",
+   "attack": 3,
+   "defense": 5,
+   "keywords": [
+    "伏击"
+   ],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "雅克-7",
+   "nation": "苏联",
+   "cost": 2,
+   "rarity": "传说",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "零式战斗机",
+   "nation": "日本",
+   "cost": 5,
+   "rarity": "普通",
+   "attack": 4,
+   "defense": 4,
+   "keywords": [
+    "伏击"
+   ],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {
+    "deploy": "bomb1"
+   }
+  },
+  {
+   "kind": "unit",
+   "name": "青花鱼 Mk I",
+   "nation": "英国",
+   "cost": 2,
+   "rarity": "史诗",
+   "attack": 1,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "轰炸机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "静冈联队",
+   "nation": "日本",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 2,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "飓风 PL",
+   "nation": "波兰",
+   "cost": 3,
+   "rarity": "普通",
+   "attack": 3,
+   "defense": 3,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "马基 C.202",
+   "nation": "意大利",
+   "cost": 2,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 4,
+   "keywords": [],
+   "unitType": "战斗机",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "鹿儿岛联队",
+   "nation": "日本",
+   "cost": 3,
+   "rarity": "史诗",
+   "attack": 5,
+   "defense": 3,
+   "keywords": [
+    "伏击"
+   ],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  },
+  {
+   "kind": "unit",
+   "name": "黑衫军",
+   "nation": "意大利",
+   "cost": 1,
+   "rarity": "普通",
+   "attack": 2,
+   "defense": 1,
+   "keywords": [],
+   "unitType": "步兵",
+   "operate": 0,
+   "traits": {}
+  }
+ ],
+ "keywords": {
+  "闪击": "部署当回合即可移动和攻击",
+  "装甲": "战斗伤害减少 1（指令等效果伤害不减）",
+  "装甲2": "战斗伤害减少 2（指令等效果伤害不减）",
+  "装甲3": "战斗伤害减少 3（指令等效果伤害不减）",
+  "警卫": "保护相邻位置的单位；#0位警卫保护总部（炮兵/轰炸机无视警卫）",
+  "冲击": "攻击单位免反击，攻击后消耗",
+  "伏击": "被攻击时先出手打击攻击者；攻击者若阵亡则攻击无效",
+  "奋战": "每回合可攻击两次",
+  "动员": "你的回合开始时 +1/+1；受到伤害后失去该关键词（已获得的加成保留）",
+  "收缴": "消灭敌方单位时，将一张 1/1 副本（费用至多 3）加入手牌",
+  "亡计": "被消灭时，对敌方总部造成伤害（由卡牌效果授予）",
+  "召集": "将一个单位移动到支援阵线（不耗行动费、不算本回合移动）",
+  "进军": "将一个单位移动到前线（不耗行动费、不算本回合移动）",
+  "烟幕": "无法被敌方单位攻击；该单位行动后失去烟幕。位于前线的单位不能具有烟幕",
+  "山地": "部署时，每控制一个其他山地单位，新单位获得 +1/+1",
+  "协力": "打出时若场上没有同国家的其他友方单位，总部受到士气伤害（1 起，每次递增 1）",
+  "钳击": "与钳击相关的单位协同作战（具体加成见各卡说明）",
+  "守护": "其两侧相邻位置的友方单位获得[被守护]",
+  "被守护": "只能被炮兵、轰炸机攻击（由[守护]赋予）",
+  "老兵": "满足条件后升级为老兵：攻击力与防御力重置为老兵值，并可能获得新词条"
+ },
+ "keywordsI18n": {
+  "闪击": {
+   "en": "Blitz",
+   "ja": "電撃"
+  },
+  "警卫": {
+   "en": "Guard",
+   "ja": "護衛"
+  },
+  "奋战": {
+   "en": "Fury",
+   "ja": "奮戦"
+  },
+  "伏击": {
+   "en": "Ambush",
+   "ja": "伏撃"
+  },
+  "装甲": {
+   "en": "Armor 1",
+   "ja": "装甲1"
+  },
+  "装甲2": {
+   "en": "Armor 2",
+   "ja": "装甲2"
+  },
+  "装甲3": {
+   "en": "Armor 3",
+   "ja": "装甲3"
+  },
+  "冲击": {
+   "en": "Charge",
+   "ja": "突撃"
+  },
+  "动员": {
+   "en": "Mobilize",
+   "ja": "動員"
+  },
+  "亡计": {
+   "en": "Deathrattle",
+   "ja": "遺言"
+  },
+  "收缴": {
+   "en": "Confiscate",
+   "ja": "接収"
+  },
+  "召集": {
+   "en": "Rally",
+   "ja": "召集"
+  },
+  "进军": {
+   "en": "Advance",
+   "ja": "進軍"
+  },
+  "烟幕": {
+   "en": "Smoke",
+   "ja": "煙幕"
+  },
+  "山地": {
+   "en": "Mountain",
+   "ja": "山岳"
+  },
+  "协力": {
+   "en": "Cooperation",
+   "ja": "協力"
+  },
+  "钳击": {
+   "en": "Pincer",
+   "ja": "挟撃"
+  },
+  "守护": {
+   "en": "Guard",
+   "ja": "守護"
+  },
+  "被守护": {
+   "en": "Guarded",
+   "ja": "被守護"
+  },
+  "老兵": {
+   "en": "Veteran",
+   "ja": "古参兵"
+  },
+  "行动费": {
+   "en": "Operation cost",
+   "ja": "行動コスト"
+  },
+  "前线": {
+   "en": "Frontline",
+   "ja": "前線"
+  },
+  "支援阵线": {
+   "en": "Support line",
+   "ja": "支援ライン"
+  },
+  "步兵": {
+   "en": "Infantry",
+   "ja": "歩兵"
+  },
+  "坦克": {
+   "en": "Tank",
+   "ja": "戦車"
+  },
+  "炮兵": {
+   "en": "Artillery",
+   "ja": "砲兵"
+  },
+  "战斗机": {
+   "en": "Fighter",
+   "ja": "戦闘機"
+  },
+  "轰炸机": {
+   "en": "Bomber",
+   "ja": "爆撃機"
+  },
+  "研发": {
+   "en": "Research",
+   "ja": "研究"
+  },
+  "指挥点": {
+   "en": "Kredits",
+   "ja": "Kredits"
+  },
+  "士气伤害": {
+   "en": "Morale damage",
+   "ja": "士気ダメージ"
+  },
+  "疲劳": {
+   "en": "Fatigue",
+   "ja": "疲労"
+  },
+  "部署": {
+   "en": "Deploy",
+   "ja": "配置"
+  },
+  "重甲X": {
+   "en": "Heavy Armor X",
+   "ja": "重装甲X"
+  },
+  "隐蔽": {
+   "en": "Camouflage",
+   "ja": "隠蔽"
+  },
+  "流亡": {
+   "en": "Exile",
+   "ja": "亡命"
+  },
+  "控制": {
+   "en": "Control",
+   "ja": "掌握"
+  },
+  "情报X": {
+   "en": "Intel X",
+   "ja": "情報X"
+  },
+  "抑制": {
+   "en": "Suppress",
+   "ja": "抑圧"
+  },
+  "特殊词条": {
+   "en": "Special keyword",
+   "ja": "特殊キーワード"
+  }
+ }
+}
