@@ -3,6 +3,7 @@ import com.kards.engine.CardDef;
 import com.kards.engine.Effects;
 import com.kards.engine.Game;
 import com.kards.engine.Player;
+import com.kards.engine.Rng;
 import com.kards.engine.Unit;
 
 import java.io.File;
@@ -28,6 +29,10 @@ public final class KardsCli {
         if (args.length > 0 && args[0].equals("--battle")) {
             int n = args.length > 1 ? Integer.parseInt(args[1]) : 3;
             battle(n);
+            return;
+        }
+        if (args.length > 0 && args[0].equals("--netprobe")) {
+            NetProbe.run(Integer.parseInt(args[1]));
             return;
         }
         tests(quiet);
@@ -247,6 +252,28 @@ public final class KardsCli {
                 db.validateDeck(deck, "德国"));
         deck.add(db.get("虎式坦克"));
         check(db.validateDeck(deck, "德国") != null, "多一张被拒", deck.size());
+
+        System.out.println("== 14. 跨端 PRNG 对拍（kards_engine.EngineRng 固定向量） ==");
+        // 向量由 Python 端生成（EngineRng.next32 ×8），两端必须逐位一致
+        long[] seeds = {1L, 12345L, 20261127L, 999999999L};
+        int[][] want = {
+            {270369, 67634689, -1647531835, 307599695, -1896278063,
+             745495504, 632435482, 435756210},
+            {-958040966, 1697253807, -1478455392, 1955480042, 718842323,
+             -1011346846, -9281128, -614056136},
+            {648477357, -946344748, 2074299282, 1223777722, 193179449,
+             -1292717717, 2133574532, -332184311},
+            {906366221, 56429854, -47378367, -1148787277, -2128186549,
+             -1498830484, -485984914, 1495118908},
+        };
+        for (int si = 0; si < seeds.length; si++) {
+            Rng r = new Rng(seeds[si]);
+            boolean ok = true;
+            for (int vi = 0; vi < 8; vi++) {
+                if (r.next32() != want[si][vi]) { ok = false; break; }
+            }
+            check(ok, "PRNG 序列一致 seed=" + seeds[si], "");
+        }
     }
 
     // ---------------- AI 对战 ----------------

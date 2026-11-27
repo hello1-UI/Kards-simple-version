@@ -25,7 +25,8 @@ public final class Game {
     public boolean over = false;
     public Player conceded = null;
     public boolean forceEnd = false;
-    public final Random rng;
+    public final Rng rng;               // 对局内随机效果（跨端确定性，见 Rng）
+    public final Random aiRandom;       // AI 决策专用（不进两端共同结算路径）
     private final Map<Player, Integer> hqHitTurn = new LinkedHashMap<>();
     private Consumer<String> logSink = s -> { };
     private Consumer<String> eventSink = s -> { };
@@ -35,7 +36,8 @@ public final class Game {
         players[1] = p2;
         this.db = db;
         current = p1;
-        this.rng = new Random(seed);
+        this.rng = new Rng(seed);
+        this.aiRandom = new Random(seed);
     }
 
     public void setLogSink(Consumer<String> sink) { this.logSink = sink; }
@@ -1156,9 +1158,9 @@ public final class Game {
                     if (u.attack - t.armor() >= t.defense) killable.add(t);
                 }
                 Unit target;
-                if (!killable.isEmpty() && rng.nextInt(10) < 7) {
-                    target = killable.get(rng.nextInt(killable.size()));
-                } else if (canHitHq(u) && rng.nextInt(10) < 5) {
+                if (!killable.isEmpty() && aiRandom.nextInt(10) < 7) {
+                    target = killable.get(aiRandom.nextInt(killable.size()));
+                } else if (canHitHq(u) && aiRandom.nextInt(10) < 5) {
                     doHqAttack(u);
                     continue;
                 } else {

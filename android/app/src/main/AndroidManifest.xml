@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 联机对战需要联网；本应用只作为客户端连接服务器，不含任何开服能力 -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:label="KARDS Java"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen"

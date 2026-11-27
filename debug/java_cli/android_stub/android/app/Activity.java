@@ -9,5 +9,7 @@ public class Activity extends Context {
     public void setContentView(View v) { }
     public void finish() { }
     public android.content.res.AssetManager getAssets() { return null; }
+    public android.content.res.Resources getResources() { return null; }
     public void runOnUiThread(Runnable r) { }
+    public void onBackPressed() { }
 }

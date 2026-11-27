@@ -631,7 +631,7 @@ def effect_fresh_recruits(game, caster):
     if not caster.board:
         game.log("  没有友方单位，新兵入伍落空。")
         return
-    u = random.choice(caster.board)
+    u = game.rng.choice(caster.board)
     u.attack += 2
     u.defense += 3
     u.max_defense += 3
@@ -655,8 +655,8 @@ def effect_double_strength(game, caster):
     if not orders:
         game.log("  手中没有指令牌，双倍力量落空。")
         return
-    c = random.choice(orders)
-    caster.deck.insert(random.randrange(len(caster.deck) + 1), copy.deepcopy(c))
+    c = game.rng.choice(orders)
+    caster.deck.insert(game.rng.randrange(len(caster.deck) + 1), copy.deepcopy(c))
     game.log(f"  双倍力量：复制了一张 [ {c.name} ] 洗入卡组。")
 
 
@@ -676,7 +676,7 @@ def effect_naval_support(game, caster):
     targets = [u for u in game.opponent_of(caster).board
                if u.defense > 0 and not u.traits.get("untargetable")]
     if targets:
-        t = random.choice(targets)
+        t = game.rng.choice(targets)
         game.log(f"  炮火准备命中 {t.name}，造成 2 点伤害！")
         game.damage_unit(t, 2)
     else:
@@ -704,7 +704,7 @@ def effect_winter_war(game, caster):
 def effect_hussars(game, caster):
     """冲锋在前(近似原版军团机制): 随机一个友方单位 +1/+1，并部署一个 1/1 军团"""
     if caster.board:
-        u = random.choice(caster.board)
+        u = game.rng.choice(caster.board)
         u.attack += 1
         u.defense += 1
         u.max_defense += 1
@@ -783,7 +783,7 @@ def effect_bombing_raid(game, caster):
         game.log("  轰炸突袭：敌方总部受到 3 点伤害！")
         game.damage_hq(foe, 3)
         return
-    t = random.choice(live)
+    t = game.rng.choice(live)
     game.log(f"  轰炸突袭：{t.name} 受到 3 点伤害！")
     game.damage_unit(t, 3)
     for u in list(foe.board):
@@ -858,7 +858,7 @@ def mk_destroy_random():
         live = [u for u in foe.board
                 if u.defense > 0 and not u.traits.get("untargetable")]
         if live:
-            t = random.choice(live)
+            t = game.rng.choice(live)
             game.log(f"  精确清除：{t.name} 被消灭！")
             game.destroy_unit(t)
         else:
@@ -1701,8 +1701,53 @@ class Player:
 
 # ---------------------------------------------------------------- 游戏主体
 
+class EngineRng:
+    """跨端确定性随机数（xorshift32）。
+
+    Python/Java 两端实现逐位一致：联机对局时双方用同一 match seed 构造
+    Game，同一行动序列消耗同一随机数序列 → 喀秋莎加成、拦截、随机目标等
+    效果在两端结算结果一致，不会分叉。
+
+    ⚠ 所有**对局内**随机（效果/战斗附加）必须走 Game.rng；AI 决策、组卡
+    推荐、UI 抖动等不在两端共同结算路径上的随机仍用全局 random。
+    取模直接截断（有偏但确定），两端同式即可。
+    """
+
+    def __init__(self, seed=0):
+        # xorshift32 状态不能为 0：种子为 0 时用黄金分割常数兜底
+        self.state = (seed & 0xFFFFFFFF) or 0x9E3779B9
+
+    def next32(self):
+        x = self.state
+        x ^= (x << 13) & 0xFFFFFFFF
+        x ^= x >> 17
+        x ^= (x << 5) & 0xFFFFFFFF
+        self.state = x
+        return x
+
+    def below(self, bound):
+        """[0, bound) 的随机整数（bound > 0）"""
+        return self.next32() % bound
+
+    def randrange(self, n):
+        return self.below(n)
+
+    def randint(self, a, b):
+        """[a, b] 闭区间"""
+        return a + self.below(b - a + 1)
+
+    def choice(self, seq):
+        return seq[self.below(len(seq))]
+
+    def shuffle(self, seq):
+        """Fisher-Yates，从尾往前（Java 端同式）"""
+        for i in range(len(seq) - 1, 0, -1):
+            j = self.below(i + 1)
+            seq[i], seq[j] = seq[j], seq[i]
+
+
 class Game:
-    def __init__(self, p1, p2, interactive=True):
+    def __init__(self, p1, p2, interactive=True, rng_seed=None):
         self.players = [p1, p2]
         self.turn_num = 0
         self.current = p1
@@ -1711,6 +1756,10 @@ class Game:
         self.conceded = None    # 投降方（Player）；None = 正常打到总部倒下
         self.force_end = False  # 万岁冲锋等强制结束回合标记
         self.event_hook = None  # GUI 动画钩子: fn(event: dict)
+        # 联机时双方传同一 match seed；单机缺省从全局 random 取（不影响
+        # 结算路径——结算只走 self.rng）。
+        self.rng = EngineRng(rng_seed if rng_seed is not None
+                             else random.randrange(2 ** 32))
         write_game_log(f"===== 新对局: {p1.name}({p1.nation}) vs "
                         f"{p2.name}({p2.nation}) =====")
 
@@ -2009,7 +2058,7 @@ class Game:
         elif d == "air4":       # P-51: 随机对一个敌方空军造成 4 点伤害
             air = [u for u in foe.board if u.unit_type in ("战斗机", "轰炸机")]
             if air:
-                t = random.choice(air)
+                t = self.rng.choice(air)
                 self.log(f"  [部署] {unit.name} 对 {t.name} 造成 4 点伤害！")
                 self.damage_unit(t, 4, source=unit)
             else:
@@ -2022,7 +2071,7 @@ class Game:
         elif d == "bomb1":      # 零战: 造成 1 点伤害（随机敌方单位，无则打总部）
             live = [u for u in foe.board if u.defense > 0]
             if live:
-                t = random.choice(live)
+                t = self.rng.choice(live)
                 self.log(f"  [部署] {unit.name} 对 {t.name} 造成 1 点伤害。")
                 self.damage_unit(t, 1, source=unit)
             else:
@@ -2513,7 +2562,7 @@ class Game:
             dmg *= 2
             self.log(f"  {attacker.name} 对{target.unit_type}造成双倍伤害！")
         if attacker.traits.get("katyusha"):
-            extra = random.randint(0, 1)
+            extra = self.rng.randint(0, 1)
             if extra:
                 dmg += extra
                 self.log(f"  喀秋莎的火箭弹造成 {extra} 点额外伤害！")
@@ -2571,7 +2620,7 @@ class Game:
                     live = [u for u in foe.board if u.defense > 0]
                     if not live:
                         break
-                    self.damage_unit(random.choice(live), 1, source=attacker, combat=True)
+                    self.damage_unit(self.rng.choice(live), 1, source=attacker, combat=True)
             else:
                 self.log(f"  {attacker.name} 对敌方总部造成 3 点伤害！")
                 self.damage_hq(foe, 3, source=attacker)
@@ -2636,7 +2685,7 @@ class Game:
         dmg = self.hq_damage(attacker)
         bonus = "（轰炸机 +2）" if attacker.unit_type == "轰炸机" else ""
         if attacker.traits.get("katyusha"):
-            extra = random.randint(0, 1)
+            extra = self.rng.randint(0, 1)
             if extra:
                 dmg += extra
                 bonus += f"，喀秋莎额外 +{extra}"
@@ -2646,7 +2695,7 @@ class Game:
         self._post_action(attacker, spent, attack=True)
         # 斯图卡：对敌方总部造成伤害时，弃掉对手一张手牌
         if attacker.traits.get("stuka_hq") and enemy.hand:
-            lost = enemy.hand.pop(random.randrange(len(enemy.hand)))
+            lost = enemy.hand.pop(self.rng.randrange(len(enemy.hand)))
             enemy.discard.append(lost)
             self.log(f"  {attacker.name} 迫使 {enemy.name} 弃掉了一张手牌！")
             self.emit({"type": "discard", "player": enemy, "card": lost})

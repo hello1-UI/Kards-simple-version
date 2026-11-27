@@ -136,4 +136,72 @@ public final class MiniJson {
     }
 
     public static boolean bool(Object v) { return Boolean.TRUE.equals(v); }
+
+    // ---- 序列化（联机协议需要把消息写回服务器）----
+
+    /** 把 Map/List/String/Number/Boolean/null 序列化为 JSON 文本。 */
+    public static String write(Object v) {
+        StringBuilder sb = new StringBuilder();
+        writeValue(v, sb);
+        return sb.toString();
+    }
+
+    private static void writeValue(Object v, StringBuilder sb) {
+        if (v == null) { sb.append("null"); return; }
+        if (v instanceof String) { writeString((String) v, sb); return; }
+        if (v instanceof Boolean) { sb.append(v.equals(Boolean.TRUE) ? "true" : "false"); return; }
+        if (v instanceof Double) {
+            double d = (Double) v;
+            if (d == Math.rint(d) && !Double.isInfinite(d) && Math.abs(d) < 9.0E15) {
+                sb.append((long) d);            // 整数值的 Double 去掉 .0
+            } else {
+                sb.append(d);
+            }
+            return;
+        }
+        if (v instanceof Number) { sb.append(v.toString()); return; }
+        if (v instanceof Map) {
+            sb.append('{');
+            boolean first = true;
+            for (Map.Entry<?, ?> e : ((Map<?, ?>) v).entrySet()) {
+                if (!first) sb.append(',');
+                first = false;
+                writeString(String.valueOf(e.getKey()), sb);
+                sb.append(':');
+                writeValue(e.getValue(), sb);
+            }
+            sb.append('}');
+            return;
+        }
+        if (v instanceof List) {
+            sb.append('[');
+            boolean first = true;
+            for (Object o : (List<?>) v) {
+                if (!first) sb.append(',');
+                first = false;
+                writeValue(o, sb);
+            }
+            sb.append(']');
+            return;
+        }
+        writeString(String.valueOf(v), sb);
+    }
+
+    private static void writeString(String s, StringBuilder sb) {
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"': sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+            }
+        }
+        sb.append('"');
+    }
 }

@@ -377,8 +377,8 @@ def foe_hq_tooltip(foe):
 class GUIGame(core.Game):
     """把 log 输出重定向到回调"""
 
-    def __init__(self, p1, p2, log_fn, event_fn=None):
-        super().__init__(p1, p2, interactive=False)
+    def __init__(self, p1, p2, log_fn, event_fn=None, rng_seed=None):
+        super().__init__(p1, p2, interactive=False, rng_seed=rng_seed)
         self.log_fn = log_fn
         self.event_hook = event_fn        # 动画事件钩子（部署/伤害/摧毁…）
 
@@ -5128,16 +5128,20 @@ class App(tk.Tk):
         foe_name = self.mp_opp_name or f"对手·{opp.get('nation', '?')}"
         me = core.Player("你", self.deck_nation, my_deck)
         foe = core.Player(foe_name, opp.get("nation", "德国"), opp_deck)
-        self.game = GUIGame(me, foe, self.add_log, self.on_game_event)
+        self.game = GUIGame(me, foe, self.add_log, self.on_game_event,
+                            rng_seed=seed)
+        # 对局内随机效果（喀秋莎/拦截/随机目标…）走 game.rng，两端用同一
+        # seed → 结算一致，Python↔Android 联机不会分叉。
         self._game_online = True        # 联机对局 → 结算段位
         self._music_play("battle")
         for attr in ("start_frame", "builder_frame"):
             fr = getattr(self, attr, None)
             if fr is not None and fr.winfo_exists():
                 fr.destroy()
-        # 先手按 host/client 角色判定：双方同种子 → 角色结果一致，不会都认为自己是先手
-        first_role = random.choice(["host", "client"])
-        i_am_first = (first_role == self.mp_role)
+        # 先手判定跨端协议：种子为奇数 → 房主先手（Java 端同式）。
+        # 不能用 random.choice —— Android 端没有 Python 的 MT19937，
+        # 必须用与平台无关的判定，双方才能推出同一个先手方。
+        i_am_first = ((seed & 1) == 1) == (self.mp_role == "host")
         second = foe if i_am_first else me
         self.game.draw_cards(me, core.START_HP)
         self.game.draw_cards(foe, core.START_HP)
