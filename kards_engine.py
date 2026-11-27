@@ -25,7 +25,8 @@ KARDS 简化版 —— 二战卡牌对战游戏
     收缴  - 消灭敌方单位时，将一张 1/1 副本（费用至多 3）加入手牌（仅日本/芬兰有）
     亡计  - 被消灭时对敌方总部造成伤害（如隼式/大和号授予）
 - 反制：暗置在反制区（上限 3 张），满足条件时自动触发。日本与苏联没有反制卡。
-- 每回合开始抽 1 张牌，牌库抽空则受到 1 点疲劳伤害且疲劳+1。
+- 每回合开始抽 1 张牌，牌库抽空则受到士气伤害（第1次1点，之后每次递增1）。
+- [协力]：使用协力卡牌时，除非回合开始时友方场上有同国家单位，总部受到士气伤害。
 
 运行方式:
     python kards.py          # 人机对战（可选自组卡组/导入清单）
@@ -104,7 +105,7 @@ KEYWORD_DESC = {
     "进军": "将一个单位移动到前线（不耗行动费、不算本回合移动）",
     "烟幕": "无法被敌方单位攻击；该单位行动后失去烟幕。位于前线的单位不能具有烟幕",
     "山地": "部署时，每控制一个其他山地单位，新单位获得 +1/+1",
-    "协力": "打出时若场上没有同国家的其他友方单位，总部受到士气伤害（1 起，每次递增 1）",
+    "协力": "使用时若回合开始时场上没有同国家友方单位，总部受到士气伤害（第1次1点，之后每次递增1）",
     "钳击": "与钳击相关的单位协同作战（具体加成见各卡说明）",
     "守护": "其两侧相邻位置的友方单位获得[被守护]",
     "被守护": "只能被炮兵、轰炸机攻击（由[守护]赋予）",
@@ -130,7 +131,7 @@ KEYWORD_GUIDE = [
     ("进军", "将一个单位移动到前线（不耗行动费，也不算它本回合的移动）", "其他"),
     ("烟幕", "无法被敌方单位攻击；该单位行动后失去烟幕（前线单位不能具有烟幕）", "单位"),
     ("山地", "部署时，每控制一个其他山地单位，新单位获得 +1/+1", "单位"),
-    ("协力", "打出时若场上没有同国家的其他友方单位，总部受到士气伤害（1 起，每次递增 1）", "其他"),
+    ("协力", "使用时若回合开始时场上没有同国家友方单位，总部受到士气伤害（第1次1点，之后每次递增1）", "其他"),
     ("钳击", "与钳击相关的单位协同作战（具体加成见各卡说明）", "单位"),
     ("守护", "其两侧相邻位置的友方单位获得[被守护]", "单位"),
     ("被守护", "只能被炮兵、轰炸机攻击（由[守护]赋予）", "单位"),
@@ -150,8 +151,7 @@ TERM_GUIDE = [
     ("研发", "总部卡自带的被动，每个主国各不相同。"),
     ("指挥点", "打牌用的资源。开局指挥点槽为 0，我方每回合开始 +1 槽（涨到 12），"
                "随后指挥点回满为槽数；槽的绝对上限 24。"),
-    ("士气伤害", "由[协力]等效果直接造成的总部伤害，不经过单位结算。"),
-    ("疲劳", "牌库抽空后每回合受到的递增伤害。"),
+    ("士气伤害", "牌库抽空、打出[协力]卡而回合开始时无同国友军等触发：第1次1点，第2次2点，以此类推。"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ KEYWORD_I18N = {
     "进军": {"en": "Advance", "ja": "進軍"},
     "烟幕": {"en": "Smokescreen", "ja": "煙幕"},
     "山地": {"en": "Mountaineer", "ja": "山岳"},
-    "协力": {"en": "Alliance", "ja": "協力"},
+    "协力": {"en": "Synergy", "ja": "協力"},
     "钳击": {"en": "Pincer", "ja": "挟撃"},
     "守护": {"en": "Guardian", "ja": "守護"},
     "被守护": {"en": "Guarded", "ja": "被守護"},
@@ -208,7 +208,6 @@ KEYWORD_I18N = {
     "研发": {"en": "Research", "ja": "研究"},
     "指挥点": {"en": "Kredits", "ja": "Kredits"},
     "士气伤害": {"en": "Morale damage", "ja": "士気ダメージ"},
-    "疲劳": {"en": "Fatigue", "ja": "疲労"},
     # ---- 尚未实装（原版规则参考）----
     "部署": {"en": "Deploy", "ja": "配置"},
     "守护": {"en": "Guard", "ja": "守護"},
@@ -222,9 +221,6 @@ KEYWORD_I18N = {
     "情报X": {"en": "Intel X", "ja": "情報X"},
     "山地": {"en": "Mountain", "ja": "山岳"},
     "抑制": {"en": "Suppress", "ja": "抑圧"},
-    "协力": {"en": "Cooperation", "ja": "協力"},
-    "士气伤害": {"en": "Morale damage", "ja": "士気ダメージ"},
-    "老兵": {"en": "Veteran", "ja": "古参兵"},
     "特殊词条": {"en": "Special keyword", "ja": "特殊キーワード"},
 }
 
@@ -261,9 +257,9 @@ KEYWORD_DESC_I18N = {
              "ja": "敵ユニットから攻撃されない。行動すると煙幕を失う。前線のユニットは煙幕を持てない。"},
     "山地": {"en": "When deployed, gains +1/+1 for each other Mountaineer you control.",
              "ja": "配置時、他の山岳ユニット1体につき+1/+1を得る。"},
-    "协力": {"en": "If you control no other friendly units of this nation when played, "
-                   "your HQ takes escalating morale damage (1, 2, 3…).",
-             "ja": "プレイ時、同じ国の他の味方ユニットが場にいないと、本部が士気ダメージ（1,2,3…）を受ける。"},
+    "协力": {"en": "When played, unless you controlled a friendly unit of the same nation "
+                   "at the start of your turn, your HQ takes morale damage.",
+             "ja": "使用時、ターン開始時に同じ国の味方ユニットが場にいなければ、本部が士気ダメージを受ける。"},
     "钳击": {"en": "Pincer tactics — see each card for its bonus.",
              "ja": "挟撃戦術 — 各カードの効果を参照。"},
     "守护": {"en": "Adjacent friendly units gain [Guarded].",
@@ -296,10 +292,13 @@ KEYWORD_DESC_I18N = {
                      "points then refill to the number of slots. Hard cap: 24 slots.",
                "ja": "カードを出すための資源。指揮点スロットは開始時 0、自ターン開始ごとに "
                      "+1（12 まで）。その後、指揮点はスロット数まで回復する。上限は 24。"},
-    "士气伤害": {"en": "Damage dealt directly to an HQ by effects such as [Alliance]; units do not soak it.",
-                "ja": "［協力］などの効果で本部に直接与えるダメージ。ユニットでは受け止められない。"},
-    "疲劳": {"en": "Escalating damage each turn after your deck runs out.",
-             "ja": "山札が尽きた後、毎ターン受ける増加ダメージ。"},
+    "士气伤害": {"en": "Escalating damage dealt directly to an HQ (units do not soak it): "
+                       "the first time 1, then 2, 3, 4... Triggered by drawing from an "
+                       "empty deck, or by playing a [Synergy] card without a same-nation "
+                       "friendly unit at the start of your turn.",
+                "ja": "本部に直接与えられる増加ダメージ（ユニットでは受け止められない）："
+                      "1回目は1、以降2、3、4…。山札が尽きた時や、ターン開始時に同じ国の"
+                      "味方ユニットがいない状態で［協力］カードを使用した時に受ける。"},
     # ---- 尚未实装（原版规则参考）----
     "部署": {"en": "Triggers the moment the unit is deployed.",
              "ja": "ユニットを配置した瞬間に発動する。"},
@@ -339,11 +338,6 @@ KEYWORD_DESC_I18N = {
     "抑制": {"en": "The unit loses all traits, keywords and buffs, and its attack, "
                    "defense and operation cost are reset.",
              "ja": "全ての特性・キーワード・強化を失い、攻撃力・防御力・行動コストがリセットされる。"},
-    "协力": {"en": "When played, if you did not control a friendly unit of the same nation "
-                   "at the start of the turn, your HQ takes morale damage.",
-             "ja": "使用時、ターン開始時に同じ国の味方ユニットを支配していなければ本部が士気ダメージを受ける。"},
-    "士气伤害": {"en": "Starts at 1 and increases by 1 each time (1, 2, 3, 4...).",
-                 "ja": "1 から始まり、回を追うごとに 1 ずつ増える（1、2、3、4…）。"},
     "老兵": {"en": "Upgrades to a veteran once a condition is met, resetting its "
                    "attack and defense.",
              "ja": "条件を満たすと古参兵に昇格し、攻撃力と防御力がリセットされる。"},
@@ -1690,11 +1684,12 @@ class Player:
         # 分开存是为了以后做「+1 槽」类卡牌：只加槽，成长曲线不跟着乱。
         self.cp_slots = 0
         self.kredits = 0
-        self.fatigue = 0
+        self.morale = 0         # 士气伤害计数（旧"疲劳"，1 起递增；牌库抽空与
+                                # [协力]惩罚共用同一计数器——官方规则）
+        self.turn_start_nations = set()   # [协力]回合开始时场上友方单位的国家集合
         self.temp_buffs = []    # 本回合临时攻击增益 [(unit, amount)]，回合结束还原
         self.orders_played = 0  # 本回合已使用指令数（廓尔喀联动）
         self.ats_mark = 0       # 本土防卫军标记（1/2=标记方索引+1，0=无）
-        self.morale = 0         # [协力]士气伤害计数（1 起，每次递增 1）
         self.once_turn = {}     # 一回合一次的触发标记：{tag: turn_num}
 
     def alive_units(self):
@@ -1782,9 +1777,11 @@ class Game:
     def draw_cards(self, p, n=1):
         for _ in range(n):
             if not p.deck:
-                p.fatigue += 1
-                self.damage_hq(p, p.fatigue)
-                self.log(f"  {p.name} 牌库已空，受到 {p.fatigue} 点疲劳伤害！")
+                # 士气伤害（旧称疲劳）：牌库抽空时触发，第1次1点、第2次2点，
+                # 以此类推。与[协力]惩罚共用 p.morale 计数器（官方规则）。
+                p.morale += 1
+                self.damage_hq(p, p.morale)
+                self.log(f"  {p.name} 牌库已空，受到 {p.morale} 点士气伤害！")
                 continue
             if len(p.hand) >= HAND_LIMIT:
                 p.discard.append(p.deck.pop())
@@ -2700,12 +2697,13 @@ class Game:
             unit = self.deploy_unit(p, card)
             self.log(f"  {p.name} 部署了 {unit}")
             self.on_deploy(unit)
-            # [协力]：打出时场上没有同国家的其他友方单位 → 总部士气伤害（递增）
+            # [协力]：回合开始时场上没有同国家友方单位 → 总部士气伤害。
+            # 判定用回合开始时的快照（官方规则），不看出牌瞬间的场面；
+            # 士气伤害计数与牌库抽空共用 p.morale（1 起递增）。
             if "协力" in unit.keywords and unit in p.board:
-                if not any(x is not unit and x.card.nation == card.nation
-                           and x.defense > 0 for x in p.board):
+                if card.nation not in p.turn_start_nations:
                     p.morale += 1
-                    self.log(f"  [协力] {p.name} 场上没有 {card.nation} 友军，"
+                    self.log(f"  [协力] {p.name} 回合开始时场上没有 {card.nation} 友军，"
                              f"总部受到 {p.morale} 点士气伤害！")
                     self.damage_hq(p, p.morale)
             # 卡茨曼团：友方使用卡牌时，其行动费 +1（本回合）
@@ -2761,6 +2759,9 @@ class Game:
         self.turn_num += 1
         self.force_end = False
         p = self.current
+        # [协力]：回合开始时场上友方单位的国家快照。官方规则以此时刻为准：
+        # 本回合内友军阵亡不影响判定，本回合新部署的同国籍单位也不计入。
+        p.turn_start_nations = {u.card.nation for u in p.board if u.defense > 0}
         # 指挥点槽：我方回合开始 +1，涨到 12 为止（绝对上限 24，留给「加槽」类卡牌）。
         # 然后指挥点回满 = 槽数。注意这里**按玩家自己的槽数**算，不再用
         # turn_num//2+1 —— 那个公式会让后手第一回合白拿 1 点。
@@ -3055,12 +3056,30 @@ class Game:
             yield {"type": "concede", "player": p, "reason": self.ai_concede_reason(p)}
             return
         acted = True
+        skipped_violation = set()   # 本回合主动放弃违约的协力卡（按卡牌 id）
         while acted:
             acted = False
             if self.force_end:
                 break
-            for idx in sorted(self.playable_cards(p),
-                              key=lambda i: -self.get_cost(p.hand[i], p)):
+            cands = sorted(self.playable_cards(p),
+                           key=lambda i: -self.get_cost(p.hand[i], p))
+            # [协力]：回合开始没有同国友军时，打协力卡会给总部叠士气伤害。
+            # 有安全牌先出安全牌并记住放弃的协力卡；只有当手里再无可出的
+            # 安全牌、且本回合还没放弃过违约时，才肯吃一次士气伤害（避免
+            # 「先出安全牌、回头又违约」白忍一场，也避免把卡攥死造成停滞）。
+            viol = [i for i in cands
+                    if "协力" in getattr(p.hand[i], "keywords", [])
+                    and p.hand[i].nation not in p.turn_start_nations]
+            safe = [i for i in cands if i not in viol]
+            if safe:
+                pool = safe
+                for i in viol:
+                    skipped_violation.add(id(p.hand[i]))
+            elif not skipped_violation:
+                pool = cands
+            else:
+                pool = []
+            for idx in pool:
                 card = p.hand[idx]
                 if self.play_card(p, idx):
                     acted = True

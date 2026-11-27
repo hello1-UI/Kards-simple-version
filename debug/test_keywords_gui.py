@@ -263,7 +263,7 @@ def main():
     # 测试里要么卡死、要么棋盘一退出就把主窗 destroy 掉（后续步骤全炸）。
     # 这里按 test_finish.py 的做法直接装配：引擎对局 + pygame 棋盘。
     db = gui.core.card_database()
-    p1 = gui.core.Player("我", "德国", [db["步兵班"]] * gui.core.DECK_SIZE)
+    p1 = gui.core.Player("我", "德国", [db["四号坦克"]] * gui.core.DECK_SIZE)
     p2 = gui.core.Player("敌", "苏联", [db["动员兵"]] * gui.core.DECK_SIZE)
     game = gui.core.Game(p1, p2, interactive=False)
     game.draw_cards(p1, 8)

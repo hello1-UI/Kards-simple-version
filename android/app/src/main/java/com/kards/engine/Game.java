@@ -109,9 +109,10 @@ public final class Game {
     public void drawCards(Player p, int n) {
         for (int i = 0; i < n; i++) {
             if (p.deck.isEmpty()) {
-                p.fatigue++;
-                damageHq(p, p.fatigue, null);
-                log("  " + p.name + " 牌库已空，受到 " + p.fatigue + " 点疲劳伤害！");
+                // 士气伤害（旧称疲劳）：1起递增，与[协力]惩罚共用 p.morale
+                p.morale++;
+                damageHq(p, p.morale, null);
+                log("  " + p.name + " 牌库已空，受到 " + p.morale + " 点士气伤害！");
                 continue;
             }
             if (p.hand.size() >= rules().handLimit) {
@@ -878,17 +879,12 @@ public final class Game {
             Unit unit = deployUnit(p, card);
             log("  " + p.name + " 部署了 " + unit);
             Effects.onDeploy(this, unit);
+            // [协力]：回合开始时场上没有同国家友方单位 → 总部士气伤害
+            // （判定用回合开始快照，与牌库抽空共用 p.morale 计数）
             if (unit.has("协力") && p.board.contains(unit)) {
-                boolean sameNation = false;
-                for (Unit x : p.board) {
-                    if (x != unit && x.card.nation.equals(card.nation) && x.defense > 0) {
-                        sameNation = true;
-                        break;
-                    }
-                }
-                if (!sameNation) {
+                if (!p.turnStartNations.contains(card.nation)) {
                     p.morale += 1;
-                    log("  [协力] " + p.name + " 场上没有 " + card.nation + " 友军，"
+                    log("  [协力] " + p.name + " 回合开始时场上没有 " + card.nation + " 友军，"
                             + "总部受到 " + p.morale + " 点士气伤害！");
                     damageHq(p, p.morale, null);
                 }
@@ -949,6 +945,11 @@ public final class Game {
         turnNum++;
         forceEnd = false;
         Player p = current;
+        // [协力]：回合开始时场上友方单位的国家快照（本回合阵亡/新部署均不影响判定）
+        p.turnStartNations.clear();
+        for (Unit u0 : p.board) {
+            if (u0.defense > 0) p.turnStartNations.add(u0.card.nation);
+        }
         if (p.cpSlots < rules().cpSlotGrowthCap) p.cpSlots++;
         p.cpSlots = Math.min(p.cpSlots, rules().cpSlotMax);
         p.kredits = p.cpSlots;
@@ -1093,12 +1094,35 @@ public final class Game {
             return;
         }
         boolean acted = true;
+        java.util.Set<CardDef> skippedViolation =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         while (acted && !forceEnd) {
             acted = false;
             List<Integer> playable = playableCards(p);
             playable.sort((a, b) -> Integer.compare(
                     getCost(p.hand.get(b), p), getCost(p.hand.get(a), p)));
+            // [协力]：回合开始没有同国友军时，有安全牌先出安全牌并记住放弃的
+            // 协力卡；只有手里再无可出的安全牌、且本回合还没放弃过违约时，
+            // 才肯吃一次士气伤害（避免白忍一场，也避免把卡攥死造成停滞）。
+            List<Integer> viol = new ArrayList<>(), safe = new ArrayList<>();
             for (int idx : playable) {
+                CardDef c = p.hand.get(idx);
+                if (c.keywords.contains("协力") && !p.turnStartNations.contains(c.nation)) {
+                    viol.add(idx);
+                } else {
+                    safe.add(idx);
+                }
+            }
+            List<Integer> pool;
+            if (!safe.isEmpty()) {
+                pool = safe;
+                for (int idx : viol) skippedViolation.add(p.hand.get(idx));
+            } else if (skippedViolation.isEmpty()) {
+                pool = playable;
+            } else {
+                pool = new ArrayList<>();
+            }
+            for (int idx : pool) {
                 CardDef card = p.hand.get(idx);
                 if (playCard(p, idx)) {
                     acted = true;

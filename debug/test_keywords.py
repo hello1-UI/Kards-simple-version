@@ -55,7 +55,7 @@ def main():
         check(f"{k} 每项都有名称和说明", not bad, bad)
         total += len(rows)
     allnames = [n for _k, rows in g for n, _d in rows]
-    check("条目总数合理（37）", total == 37, total)
+    check("条目总数合理（36）", total == 36, total)
 
     print("2b. 词条覆盖面（实装组 + 未实装组）")
     planned = dict(g)["kw_group_planned"]
