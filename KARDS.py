@@ -28,6 +28,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, simpledialog
 
@@ -3543,11 +3544,22 @@ class App(tk.Tk):
         except Exception as exc:                   # noqa: BLE001
             self.add_log(f"[大厅] 走动大厅不可用：{exc}")
             return
+        # ⚠ 联机大厅页的 `_t_lobby` 轮询也在消费同一条 inbox，而
+        # `_lobby_handle_event` 不认识 hall_state/hall_invite —— 不停掉它，
+        # 走动大厅里的位置快照/邀请会被轮询抢走并静默丢弃（实测：
+        # 大厅里永远看不见别人、邀请也收不到）。
+        from_lobby = bool(getattr(self, "_lobby_active", False))
+        if from_lobby:
+            self._lobby_active = False
+            self._cancel_timer("_t_lobby")
         h = kards_hall.HallView(self)
         try:
             h.run(pump=self.update)
         finally:
-            pass
+            if from_lobby and h.result not in ("matched", "quit"):
+                # 正常退出（Esc/返回）：恢复联机大厅页的轮询
+                self._lobby_active = True
+                self._schedule("_t_lobby", 120, self._lobby_poll)
         if h.result == "matched" and h.matched:
             # 大厅邀请开局：与 matched 事件同一套准备流程（选国家 → 开局）
             m = h.matched
@@ -5099,6 +5111,39 @@ class App(tk.Tk):
 
     def _mp_launch(self, seed):
         """双方用同一种子同步开局：先手随机、发牌一致"""
+        try:
+            self._mp_launch_impl(seed)
+        except Exception:                          # noqa: BLE001
+            # 开局链路炸掉只会在 after 回调里留一具"半死的页面"（组卡页已
+            # 销毁、棋盘没跑起来 = 用户报的「卡出页面」），exe 下 stderr 又
+            # 不可见 —— 必须把异常摆到玩家面前并写进日志。
+            tb = traceback.format_exc()
+            self._mp_fatal(tb, "联机开局失败")
+
+    def _mp_fatal(self, tb, title):
+        traceback.print_exc()
+        try:
+            core.write_game_log(f"[联机] {title}：\n{tb}")
+        except Exception:                          # noqa: BLE001
+            pass
+        try:
+            messagebox.showerror(
+                i18n.t("mp_title"),
+                f"{title}，已返回主菜单。\n错误详情已写入对局日志，"
+                f"欢迎带日志反馈。\n\n{tb[-700:]}")
+        except Exception:                          # noqa: BLE001
+            pass
+        # 若对局/棋盘还活着（_mp_poll_net 炸掉的场合），先退棋盘再回菜单，
+        # 否则会留下一具"菜单重建了但 pygame 循环还在跑"的半死界面。
+        if getattr(self, "_pyboard", None) is not None:
+            try:
+                self._pyboard.quit()
+            except Exception:                      # noqa: BLE001
+                pass
+            self._deactivate_pyboard()
+        self._mp_cleanup_to_menu()
+
+    def _mp_launch_impl(self, seed):
         self._mp_pending_seed = None
         if self.mp_role == "client":
             self._lobby_log(i18n.t("mp_log_seed_client"))
@@ -5174,6 +5219,14 @@ class App(tk.Tk):
             self.mp_link.send({"m": "act", **act})
 
     def _mp_poll_net(self):
+        try:
+            self._mp_poll_net_impl()
+        except Exception:                          # noqa: BLE001
+            # 对局中的网络轮询一旦炸掉，棋盘还活着但再也收不到对手的
+            # 行动 = 玩家眼里「页面卡住、对手不动」。必须显性化。
+            self._mp_fatal(traceback.format_exc(), "联机对局出错")
+
+    def _mp_poll_net_impl(self):
         self._t_net = None
         link = self.mp_link
         if self.game is None or link is None:
@@ -6286,6 +6339,8 @@ def run_debug_auto(addr=None, tag="A"):
     app = App()
     app.title(f"KARDS 联机调试 · 窗口{tag}")
     app.geometry("+60+60" if tag == "A" else "+780+60")
+    if os.environ.get("KARDS_DEBUG_WITHDRAW"):
+        app.withdraw()          # 自动化测试：别在桌面弹窗
     app.on_battle()                 # 先进联机大厅：地址框/日志框在这里才建出来
     st = {"n": 0, "deck": False, "said": False}
 
@@ -6297,6 +6352,22 @@ def run_debug_auto(addr=None, tag="A"):
                 if not st["said"]:
                     st["said"] = True
                     print(f"[窗口{tag}] 就绪！联机对局已开始。")
+                # 联机自战机器人：轮到自己就出牌/攻击总部/结束回合，
+                # 让 act 应用路径（play/attack/hq/end）也被端到端测到
+                if (not getattr(app, "busy", False) and not app.game.over
+                        and getattr(app, "_pyboard", None) is not None):
+                    st["n_play"] = st.get("n_play", 0) + 1
+                    if st["n_play"] % 3 == 1:
+                        if app.game.players[0].hand:
+                            app._act_play(0)
+                    elif st["n_play"] % 3 == 2:
+                        fighters = [u for u in app.game.players[0].board
+                                    if app.game.unit_ready(u)
+                                    and app.game.can_hit_hq(u)]
+                        if fighters:
+                            app._attack_hq(fighters[0])
+                    else:
+                        app.on_end_turn()
                 app.after(500, tick)
                 return
             if n == 2:
@@ -6332,8 +6403,10 @@ def run_debug_auto(addr=None, tag="A"):
                 for c in deck:
                     app.deck_counts[c.name] = app.deck_counts.get(c.name, 0) + 1
                 app._start_mp()
-        except Exception as exc:                       # noqa: BLE001
-            print(f"[窗口{tag}] 异常：{exc!r}")
+        except Exception:                              # noqa: BLE001
+            # 打全栈：只打 exc repr 的话，开局链路里真正炸掉的那一行看不到
+            print(f"[窗口{tag}] 异常：")
+            traceback.print_exc()
         app.after(300, tick)
 
     app.after(300, tick)

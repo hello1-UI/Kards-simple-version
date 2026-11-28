@@ -143,6 +143,12 @@ class HallView:
 
     # ------------------------------------------------------------ 收发
 
+    # 大厅只消费这些消息；其余（ready/seed/act/peer_left/concede/lobby…）
+    # 原序归还 inbox，交回 App 的轮询 —— 走动大厅曾把开局协议消息整个吞掉
+    # （对手的 ready/seed 被吃 → 永远开不了局 / 对局中对手动作全部失灵）。
+    _HALL_MSGS = {"hall_state", "hall_invite", "hall_decline", "hall_gone",
+                  "matched", "kick", "err"}
+
     def _srv_send(self, obj):
         link = self.link
         if link is None or not getattr(link, "alive", False):
@@ -153,21 +159,29 @@ class HallView:
             return False
 
     def _drain(self):
-        """消费服务器推送（大厅期间没有别的消费者）。"""
+        """消费大厅自己的推送；不属于大厅的消息按序归还 inbox。"""
         link = self.link
         if link is None:
             return
         n = 0
+        keep = []
         while n < 200:
             try:
                 msg = link.inbox.get_nowait()
             except Exception:              # noqa: BLE001  queue.Empty 等
                 break
             n += 1
-            if isinstance(msg, dict):
+            if isinstance(msg, dict) and msg.get("m") in self._HALL_MSGS:
                 self._handle_msg(msg)
+            else:
+                keep.append(msg)
             if not self.running:
-                return
+                break
+        for m in keep:
+            try:
+                link.inbox.put(m)
+            except Exception:              # noqa: BLE001
+                pass
 
     def _handle_msg(self, msg):
         m = msg.get("m")
@@ -238,6 +252,11 @@ class HallView:
         self.screen = pygame.display.set_mode((self.W, self.H))
         pygame.display.set_caption("KARDS 简化版 — " + i18n.t("hall_title"))
         self.clock = pygame.time.Clock()
+        # 向服务器登记进场：服务器只把 in_hall 玩家放进快照/广播，
+        # 不发 hall_join 就等于隐身（谁也看不见你、你也看不见谁，
+        # 实测主症状「大厅看不见别人但能匹配上」）。
+        self._srv_send({"m": "hall_join",
+                        "x": self.me["x"], "y": self.me["y"]})
         frames = 0
         try:
             while self.running:
