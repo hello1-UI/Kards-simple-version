@@ -234,6 +234,10 @@ _REPLY_MAP = {
     "rank_board":   _m_is("rank_board", "err"),
     # 删除账号（应答 account_deleted 带 ok 字段；服务端拒绝时 err）
     "delete_account": _m_is("account_deleted", "err"),
+    # 邮箱验证码（绑定邮箱；找回密码的 reset 走 one_shot，不经这里）
+    "email_code":   _m_is("email_code_ok", "err"),
+    "bind_email":   _m_is("bind_email_ok", "err"),
+    "email_of":     _m_is("email_of", "err"),
 }
 
 
@@ -546,6 +550,38 @@ def parse_addr(text, default_port=6000):
     if not (1 <= port <= 65535) or not host:
         return None
     return host, port
+
+
+def one_shot(addr, msg, timeout=10.0):
+    """一次性请求：连上服务器 → 发一条消息 → 等一条应答 → 关闭。
+
+    用于**未登录**流程（找回密码的发码 / 重置）：这些操作不能也不需要
+    占用一条已认证的连接。服务器在握手阶段处理完就主动断开。
+    网络失败 / 超时返回 None（调用方统一转成友好文案）。
+    """
+    pp = parse_addr(addr)
+    if not pp:
+        return None
+    host, port = pp
+    try:
+        s = socket.create_connection((host, port), timeout=timeout)
+        s.settimeout(timeout)
+        try:
+            s.sendall((json.dumps(msg) + "\n").encode("utf-8"))
+            buf = b""
+            while b"\n" not in buf:
+                data = s.recv(4096)
+                if not data:
+                    return None
+                buf += data
+            return json.loads(buf.split(b"\n", 1)[0].decode("utf-8"))
+        finally:
+            try:
+                s.close()
+            except OSError:
+                pass
+    except (OSError, ValueError):
+        return None
 
 
 # 本机对外的公网 IP（UPnP 端口映射成功后由 kards_host 登记）。

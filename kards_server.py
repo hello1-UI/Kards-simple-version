@@ -136,6 +136,9 @@ class Store:
             cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(users)")}
             if "rank" not in cols:
                 self.conn.execute("ALTER TABLE users ADD COLUMN rank TEXT")
+            # email 列：邮箱验证码（绑定 / 找回密码）用，2026-11 加
+            if "email" not in cols:
+                self.conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
             self.conn.commit()
 
     def q(self, sql, args=()):
@@ -223,6 +226,37 @@ class Store:
             return {"win": 0, "lose": 0, "draw": 0}
         r = rows[0]
         return {"win": r["win"], "lose": r["lose"], "draw": r["draw"]}
+
+    # ---- 邮箱绑定 / 找回密码 ----
+
+    def email_of(self, name):
+        """账号绑定的邮箱（未绑定返回 None）"""
+        rows = self.q("SELECT email FROM users WHERE name=?", (name,))
+        return (rows[0]["email"] if rows else None) or None
+
+    def email_taken(self, email):
+        """该邮箱是否已被其它账号绑定"""
+        rows = self.q("SELECT name FROM users WHERE email=?", (email,))
+        return rows[0]["name"] if rows else None
+
+    def bind_email(self, name, email):
+        """绑定邮箱；一个邮箱只能绑一个账号（否则可拿它重置多个号的密码）"""
+        other = self.email_taken(email)
+        if other and other != name:
+            return "该邮箱已绑定其他账号"
+        self.x("UPDATE users SET email=? WHERE name=?", (email, name))
+        return ""
+
+    def find_by_email(self, email):
+        rows = self.q("SELECT name FROM users WHERE email=?", (email,))
+        return rows[0]["name"] if rows else None
+
+    def set_password(self, name, pw):
+        """重置密码并踢掉该账号所有会话（防旧 token 继续用）"""
+        salt = secrets.token_hex(16)
+        self.x("UPDATE users SET salt=?, pw=? WHERE name=?",
+               (salt, self.hash_pw(salt, pw), name))
+        self.x("DELETE FROM sessions WHERE name=?", (name,))
 
     def stats_add(self, name, result):
         if result not in ("win", "lose", "draw"):
@@ -634,6 +668,35 @@ class ClientHandler(socketserver.BaseRequestHandler):
         t = msg.get("m")
         log(f"握手请求({self.client_address[0]}): t={t} user={msg.get('user')!r}")
 
+        # ---- 未登录的一次性流程：找回密码（发码 / 重置）----
+        # 走握手通道、回一条就断开：不给未认证连接留任何常驻会话。
+        if t == "email_code" and msg.get("purpose") == "reset":
+            ok, err, left = issue_email_code("reset", msg.get("email"))
+            if ok:
+                self.send({"m": "email_code_ok"})
+            else:
+                self.send({"m": "err", "err": err or
+                           f"发送太频繁，{left} 秒后再试"})
+            return "close"
+        if t == "reset_password":
+            email = (msg.get("email") or "").strip()
+            # 校验顺序：先做不消耗状态的检查（密码规则），最后才消费
+            # 验证码 —— 否则密码太短这种低级错误也会白白作废一个码
+            err = norm_pw(msg.get("new_pw") or "")
+            if not err:
+                err = verify_email_code("reset", email, msg.get("code"))
+            if not err:
+                name = DB.find_by_email(email)
+                if not name:
+                    err = "该邮箱未绑定任何账号"
+                else:
+                    DB.set_password(name, msg["new_pw"])
+                    log(f"密码已重置: {name}（via {mask_email(email)}）")
+                    self.send({"m": "reset_ok", "user": name})
+                    return "close"
+            self.send({"m": "err", "err": err or "重置失败"})
+            return "close"
+
         if t == "register":
             name, err = norm_name(msg.get("user"))
             if err:
@@ -749,6 +812,34 @@ class ClientHandler(socketserver.BaseRequestHandler):
             self.do_relay(msg)
         elif t == "stats":
             self.send({"m": "stats", "stats": DB.stats(self.name)})
+        elif t == "email_of":
+            self.send({"m": "email_of", "email": mask_email(DB.email_of(self.name)),
+                       "bound": DB.email_of(self.name) is not None})
+        elif t == "email_code":
+            # 登录态发码（purpose=bind）；reset 走握手一次性通道，到不了这里
+            ok, err, left = issue_email_code("bind", msg.get("email"))
+            if ok:
+                self.send({"m": "email_code_ok",
+                           "email": mask_email((msg.get("email") or "").strip())})
+            else:
+                self.send({"m": "err", "err": err or
+                           f"发送太频繁，{left} 秒后再试"})
+        elif t == "bind_email":
+            email = (msg.get("email") or "").strip()
+            # 同 reset：先查占用（不消耗验证码），验码放最后
+            other = DB.email_taken(email)
+            err = ("该邮箱已绑定其他账号"
+                   if other and other != self.name else "")
+            if not err:
+                err = verify_email_code("bind", email, msg.get("code"))
+            if not err:
+                err = DB.bind_email(self.name, email)
+            if err:
+                self.send({"m": "err", "err": err})
+            else:
+                log(f"邮箱绑定成功: {self.name} -> {mask_email(email)}")
+                self.send({"m": "bind_email_ok", "email": mask_email(email)})
+                self.send({"m": "bind_email_ok", "email": mask_email(email)})
         elif t == "stats_add":
             DB.stats_add(self.name, msg.get("result"))
             self.send({"m": "stats", "stats": DB.stats(self.name)})
@@ -1136,6 +1227,145 @@ def norm_pw(pw):
     return ""
 
 
+# ----------------------------------------------------------------- 邮箱验证
+# QQ 邮箱 SMTP（465 SSL）发验证码。纯标准库 smtplib，零新增依赖。
+#
+# 配置：与数据库同目录放 kards_email.json（或设环境变量 KARDS_SMTP_USER /
+# KARDS_SMTP_AUTH）：
+#     {"user": "xxx@qq.com", "auth_code": "QQ邮箱SMTP授权码",
+#      "host": "smtp.qq.com", "port": 465, "sender_name": "KARDS 简化版"}
+# 没有配置时邮箱功能全部返回「服务器未配置邮箱」错误，其余功能不受影响。
+
+EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,255}\.[^@\s]{2,32}$")
+CODE_TTL = 600                 # 验证码有效期（秒）
+CODE_COOLDOWN = 60             # 同邮箱同用途的重发冷却（秒）
+CODE_MAX_TRIES = 5             # 错码超过该次数即作废（防穷举）
+_email_codes = {}              # (purpose, email) -> dict（见 issue_code）
+_EMAIL_LOCK = threading.Lock()
+
+
+def email_config():
+    """读取 SMTP 配置。返回 dict 或 None（未配置）。
+
+    优先级：数据库同目录的 kards_email.json > 环境变量。
+    """
+    path = None
+    db = globals().get("DB")
+    if db is not None and getattr(db, "path", None):
+        path = os.path.join(os.path.dirname(os.path.abspath(db.path)),
+                            "kards_email.json")
+    cfg = {}
+    if path and os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                cfg = json.load(fh)
+        except (OSError, ValueError):
+            cfg = {}
+    user = cfg.get("user") or os.environ.get("KARDS_SMTP_USER")
+    auth = cfg.get("auth_code") or os.environ.get("KARDS_SMTP_AUTH")
+    if not user or not auth:
+        return None
+    return {"user": user, "auth": auth,
+            "host": cfg.get("host") or os.environ.get("KARDS_SMTP_HOST")
+                    or "smtp.qq.com",
+            "port": int(cfg.get("port") or os.environ.get("KARDS_SMTP_PORT")
+                        or 465),
+            "sender_name": cfg.get("sender_name") or "KARDS 简化版"}
+
+
+def _smtp_send(cfg, to, code, purpose_txt):
+    """真正发信。独立成函数便于测试打桩。"""
+    import smtplib
+    from email.message import EmailMessage
+    msg = EmailMessage()
+    msg["Subject"] = f"【{cfg['sender_name']}】验证码：{code}"
+    msg["From"] = f"{cfg['sender_name']} <{cfg['user']}>"
+    msg["To"] = to
+    msg.set_content(
+        f"您的验证码是：{code}\n\n"
+        f"用途：{purpose_txt}\n"
+        f"有效期 {CODE_TTL // 60} 分钟。若非本人操作，请忽略本邮件。\n")
+    with smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=15) as s:
+        s.login(cfg["user"], cfg["auth"])
+        s.send_message(msg)
+
+
+def issue_email_code(purpose, email):
+    """生成并发送验证码。返回 (ok, err, cooldown_left)。
+
+    防滥用：同邮箱同用途 CODE_COOLDOWN 秒内只能发一次；
+    旧码未过期就重发会让旧码立即作废（新码覆盖）。
+    """
+    email = (email or "").strip()
+    if not EMAIL_RE.match(email) or len(email) > 200:
+        return False, "邮箱格式不正确", 0
+    cfg = email_config()
+    if not cfg:
+        return False, "服务器未配置邮箱发送（管理员需提供 kards_email.json）", 0
+    now = time.time()
+    key = (purpose, email.lower())
+    with _EMAIL_LOCK:
+        old = _email_codes.get(key)
+        if old and now - old["sent"] < CODE_COOLDOWN:
+            return False, "", int(CODE_COOLDOWN - (now - old["sent"])) + 1
+        code = f"{secrets.randbelow(10 ** 6):06d}"
+        _email_codes[key] = {"h": hashlib.sha256(
+            (code + email.lower()).encode("utf-8")).hexdigest(),
+            "exp": now + CODE_TTL, "tries": 0, "sent": now}
+    try:
+        purpose_txt = {"bind": "绑定邮箱", "reset": "找回密码"}.get(purpose, "验证")
+        _smtp_send(cfg, email, code, purpose_txt)
+    except Exception as e:                       # 网络失败不能留一个发不出去的死码
+        with _EMAIL_LOCK:
+            _email_codes.pop(key, None)
+        log(f"邮箱发送失败({email}): {e!r}")
+        return False, "验证码发送失败，请稍后再试", 0
+    log(f"验证码已发送: purpose={purpose} -> {mask_email(email)}")
+    return True, "", 0
+
+
+def verify_email_code(purpose, email, code):
+    """校验验证码。成功后立即作废（一次性）。"""
+    email = (email or "").strip().lower()
+    code = (code or "").strip()
+    key = (purpose, email)
+    with _EMAIL_LOCK:
+        item = _email_codes.get(key)
+        if not item:
+            return "验证码错误或已过期"
+        now = time.time()
+        if now > item["exp"]:
+            _email_codes.pop(key, None)
+            return "验证码已过期，请重新获取"
+        got = hashlib.sha256((code + email).encode("utf-8")).hexdigest()
+        if got != item["h"]:
+            item["tries"] += 1
+            if item["tries"] >= CODE_MAX_TRIES:
+                _email_codes.pop(key, None)
+                return "错误次数过多，验证码已作废，请重新获取"
+            return "验证码错误"
+        _email_codes.pop(key, None)
+        return ""
+
+
+def mask_email(email):
+    """脱敏展示：us***@qq.com（域名不打码，看得出来是哪个邮箱服务商）"""
+    if not email:
+        return None
+    name, _, dom = email.partition("@")
+    if len(name) <= 2:
+        return name[:1] + "***@" + dom
+    return name[:2] + "***@" + dom
+
+
+def cleanup_email_codes():
+    """周期清过期条目，防内存缓涨（被主循环定时调用）"""
+    now = time.time()
+    with _EMAIL_LOCK:
+        for k in [k for k, v in _email_codes.items() if now > v["exp"]]:
+            _email_codes.pop(k, None)
+
+
 # ----------------------------------------------------------------- 启动
 
 class Server(socketserver.ThreadingTCPServer):
@@ -1197,6 +1427,18 @@ def main():
     log("=" * 56)
 
     srv = Server((args.host, args.port), ClientHandler)
+
+    def _email_gc():
+        while True:                          # 验证码条目过期清理，量小 10 分钟一次足够
+            time.sleep(600)
+            cleanup_email_codes()
+
+    threading.Thread(target=_email_gc, daemon=True).start()
+    ecfg = email_config()
+    if ecfg is None:
+        log("  邮箱    : 未配置（放 kards_email.json 后重启即可启用绑定/找回）")
+    else:
+        log(f"  邮箱    : {ecfg['user']}（QQ SMTP 验证码）")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

@@ -2133,6 +2133,11 @@ class App(tk.Tk):
                       font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
                       command=lambda: self._confirm_delete_account(win)
                       ).pack(side="left", padx=6)
+            if account.backend() == "server" and account.online():
+                tk.Button(row, text=i18n.t("acct_bind_email"), bg=INFO, fg=TEXT,
+                          font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
+                          command=lambda: self._bind_email_dialog(win)
+                          ).pack(side="left", padx=6)
             return
 
         # 登录 / 注册表单
@@ -2188,6 +2193,207 @@ class App(tk.Tk):
         tk.Button(row, text=i18n.t("account_register"), bg=SUCCESS, fg=TEXT,
                   font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
                   command=try_register).pack(side="left", padx=8)
+        # 忘记密码：绑定过邮箱的玩家可用邮箱验证码重置（未登录一次性请求）
+        tk.Button(win, text=i18n.t("acct_forgot"), bg=BG, fg=MUTE,
+                  font=FONT_S, bd=0, cursor="hand2",
+                  activebackground=BG, activeforeground=ACCENT,
+                  command=lambda: self._forgot_password_dialog(win, e_user)
+                  ).pack(pady=(0, 10))
+
+    # ---------------- 邮箱验证（绑定 / 找回密码） ----------------
+
+    def _srv_addr_for_auth(self):
+        """邮箱流程用的服务器地址：当前连接优先，没连过退回默认云端服"""
+        return (self._srv_addr or account.server_addr()
+                or net.DEFAULT_SERVER)
+
+    def _make_code_button(self, parent, get_code_fn, info_set, row_bg=BG):
+        """「获取验证码」按钮 + 60s 冷却倒计时。get_code_fn() 返回 (ok, err)。"""
+        state = {"left": 0}
+
+        btn = tk.Button(parent, text=i18n.t("bind_get_code"), bg=ACCENT, fg=TEXT,
+                        font=FONT_S, bd=0, padx=12, pady=4, cursor="hand2")
+
+        def tick():
+            if not btn.winfo_exists():
+                return
+            if state["left"] > 0:
+                state["left"] -= 1
+                btn.configure(
+                    text=i18n.t("bind_cooldown", left=state["left"])
+                    if state["left"] else i18n.t("bind_get_code"),
+                    state="disabled" if state["left"] else "normal")
+                btn.after(1000, tick)
+
+        def fire():
+            ok, err = get_code_fn()
+            if ok:
+                info_set("")
+            else:
+                info_set(err)
+                return
+            state["left"] = 60
+            btn.configure(state="disabled")
+            tick()
+
+        btn.configure(command=fire)
+        return btn
+
+    def _bind_email_dialog(self, parent):
+        """绑定邮箱：登录态下向服务器发码 → 输码 → 绑定。"""
+        if account.backend() != "server" or not account.online():
+            messagebox.showerror(i18n.t("bind_title"),
+                                 i18n.t("bind_err_offline"), parent=parent)
+            return
+        # 单实例
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "bind_email":
+                try:
+                    w.deiconify(); w.lift(); w.focus_force()
+                    return
+                except tk.TclError:
+                    pass
+        win = tk.Toplevel(self)
+        win.role = "bind_email"
+        win.title(i18n.t("bind_title"))
+        win.configure(bg=BG)
+        win.geometry("420x330")
+        win.transient(self)
+
+        tk.Label(win, text=i18n.t("bind_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(pady=(16, 4))
+        cur = account.email_of()
+        tk.Label(win, text=i18n.t("bind_cur", email=cur) if cur
+                 else i18n.t("bind_none"), bg=BG, fg=GOLD if cur else DIM,
+                 font=FONT_S, wraplength=380, justify="left").pack(pady=(0, 10))
+        info = tk.Label(win, text="", bg=BG, fg=RED, font=FONT_S,
+                        wraplength=380, justify="left")
+        info.pack()
+
+        def info_set(txt):
+            info.configure(text=txt)
+
+        tk.Label(win, text=i18n.t("bind_addr_label"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(4, 2))
+        e_mail = tk.Entry(win, font=FONT, width=26, bg=PANEL, fg=TEXT,
+                          insertbackground=TEXT, relief="flat")
+        e_mail.pack(pady=2)
+        btn_code = self._make_code_button(win, lambda: account.request_email_code(
+            e_mail.get().strip()), info_set)
+        btn_code.pack(pady=4)
+        tk.Label(win, text=i18n.t("bind_code_label"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(6, 2))
+        e_code = tk.Entry(win, font=FONT, width=12, justify="center",
+                          bg=PANEL, fg=TEXT, insertbackground=TEXT,
+                          relief="flat")
+        e_code.pack(pady=2)
+
+        def do_bind():
+            ok, res = account.bind_email(e_mail.get().strip(), e_code.get().strip())
+            if ok:
+                messagebox.showinfo(i18n.t("bind_title"), i18n.t("bind_ok"),
+                                    parent=win)
+                win.destroy()
+            else:
+                info_set(res)
+
+        tk.Button(win, text=i18n.t("bind_confirm"), bg=PRIMARY, fg=TEXT,
+                  font=FONT_B, bd=0, padx=22, pady=7, cursor="hand2",
+                  command=do_bind).pack(pady=14)
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
+
+    def _forgot_password_dialog(self, parent, e_user=None):
+        """找回密码：未登录一次性连接——发码 → 验码重置。
+
+        走 net.one_shot（服务器握手通道处理完即断开），不占登录连接。
+        """
+        addr = self._srv_addr_for_auth()
+        win = tk.Toplevel(self)
+        win.role = "forgot_pw"
+        win.title(i18n.t("forgot_title"))
+        win.configure(bg=BG)
+        win.geometry("420x400")
+        win.transient(self)
+
+        tk.Label(win, text=i18n.t("forgot_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(pady=(16, 4))
+        tk.Label(win, text=i18n.t("forgot_hint"), bg=BG, fg=DIM,
+                 font=FONT_S, wraplength=380, justify="left").pack(pady=(0, 8))
+        info = tk.Label(win, text="" if addr else i18n.t("forgot_err_nosrv"),
+                        bg=BG, fg=RED, font=FONT_S, wraplength=380,
+                        justify="left")
+        info.pack()
+
+        def info_set(txt):
+            info.configure(text=txt)
+
+        tk.Label(win, text=i18n.t("forgot_email_label"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(4, 2))
+        e_mail = tk.Entry(win, font=FONT, width=26, bg=PANEL, fg=TEXT,
+                          insertbackground=TEXT, relief="flat")
+        e_mail.pack(pady=2)
+
+        def get_code():
+            if not addr:
+                return False, i18n.t("forgot_err_nosrv")
+            rep = net.one_shot(addr, {"m": "email_code", "purpose": "reset",
+                                      "email": e_mail.get().strip()},
+                               timeout=15.0)
+            if rep is None:
+                return False, i18n.t("err_email_send_fail")
+            if rep.get("m") == "email_code_ok":
+                info_set(i18n.t("bind_sent", email=e_mail.get().strip()))
+                return True, ""
+            return False, rep.get("err") or i18n.t("err_email_send_fail")
+
+        btn_code = self._make_code_button(win, get_code, info_set)
+        btn_code.pack(pady=4)
+
+        tk.Label(win, text=i18n.t("bind_code_label"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(6, 2))
+        e_code = tk.Entry(win, font=FONT, width=12, justify="center",
+                          bg=PANEL, fg=TEXT, insertbackground=TEXT,
+                          relief="flat")
+        e_code.pack(pady=2)
+        tk.Label(win, text=i18n.t("forgot_newpw"), bg=BG, fg=DIM,
+                 font=FONT_S).pack(pady=(6, 2))
+        e_pw = tk.Entry(win, font=FONT, width=22, show="*", bg=PANEL, fg=TEXT,
+                        insertbackground=TEXT, relief="flat")
+        e_pw.pack(pady=2)
+
+        def do_reset():
+            # 密码规则复用账号模块的本地校验（用户名段传一个合法占位名）
+            ok, err = account.validate_credentials("占位", e_pw.get())
+            if not ok:
+                info_set(err)
+                return
+            if not addr:
+                info_set(i18n.t("forgot_err_nosrv"))
+                return
+            rep = net.one_shot(addr, {"m": "reset_password",
+                                      "email": e_mail.get().strip(),
+                                      "code": e_code.get().strip(),
+                                      "new_pw": e_pw.get()}, timeout=15.0)
+            if rep is None:
+                info_set(i18n.t("err_email_send_fail"))
+                return
+            if rep.get("m") == "reset_ok":
+                messagebox.showinfo(i18n.t("forgot_title"), i18n.t("forgot_ok"),
+                                    parent=win)
+                if e_user is not None and rep.get("user"):
+                    try:
+                        e_user.delete(0, "end")
+                        e_user.insert(0, rep["user"])
+                    except tk.TclError:
+                        pass
+                win.destroy()
+            else:
+                info_set(rep.get("err") or "重置失败")
+
+        tk.Button(win, text=i18n.t("forgot_reset"), bg=PRIMARY, fg=TEXT,
+                  font=FONT_B, bd=0, padx=22, pady=7, cursor="hand2",
+                  command=do_reset).pack(pady=14)
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
 
     def _confirm_delete_account(self, parent=None):
         """删除账号确认框：红色警示 + 「同时删除服务器数据」复选框。

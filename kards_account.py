@@ -412,6 +412,41 @@ def online():
     return _REMOTE is not None and getattr(_REMOTE, "alive", False)
 
 
+def server_addr():
+    """当前（或最近一次）连接的服务器地址；从未连过返回 None"""
+    return _SERVER
+
+
+def email_of():
+    """当前账号绑定的邮箱（脱敏显示），未绑定/未联网返回 None"""
+    rep = _rpc({"m": "email_of"}, key="email_of")
+    if rep is None or not rep.get("bound"):
+        return None
+    return rep.get("email") or None
+
+
+def request_email_code(email, purpose="bind"):
+    """请求发验证码。返回 (ok, err)；err 为空且 cooldown>0 时是限频"""
+    rep = _rpc({"m": "email_code", "purpose": purpose, "email": email},
+               key="email_code", timeout=15.0)
+    if rep is None:
+        return False, "服务器无响应"
+    if rep.get("m") == "email_code_ok":
+        return True, ""
+    return False, rep.get("err") or "发送失败"
+
+
+def bind_email(email, code):
+    """绑定邮箱（需先 request_email_code 拿码）。返回 (ok, 脱敏邮箱或错误)"""
+    rep = _rpc({"m": "bind_email", "email": email, "code": code},
+               key="bind_email", timeout=15.0)
+    if rep is None:
+        return False, "服务器无响应"
+    if rep.get("m") == "bind_email_ok":
+        return True, rep.get("email") or ""
+    return False, rep.get("err") or "绑定失败"
+
+
 def connect(name_hint=None):
     """连上服务器后调用：先尝试令牌免密登录。
 
