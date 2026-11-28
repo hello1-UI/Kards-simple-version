@@ -23,8 +23,8 @@ def check(name, cond, detail=""):
 
 def make_game(n1="德国", n2="苏联"):
     db = core.card_database()
-    p1 = core.Player("甲", n1, [db["步兵班"]] * core.DECK_SIZE)
-    p2 = core.Player("乙", n2, [db["步兵班"]] * core.DECK_SIZE)
+    p1 = core.Player("甲", n1, [db["第一步兵团"]] * core.DECK_SIZE)
+    p2 = core.Player("乙", n2, [db["第一步兵团"]] * core.DECK_SIZE)
     g = core.Game(p1, p2, interactive=False)
     g.draw_cards(p1, 3)
     g.draw_cards(p2, 3)
@@ -59,7 +59,7 @@ def main():
 
     # ---------- 占线规则仍然生效 ----------
     g2, q1, q2, _ = make_game()
-    enemy_front = deploy(g2, q2, db["步兵班"], "前线")   # 敌方占线
+    enemy_front = deploy(g2, q2, db["第一步兵团"], "前线")   # 敌方占线
     adv = deploy(g2, q1, db["四号坦克"], "后方")
     ok = g2.keyword_move(adv, "前线", source="进军")
     check("敌方占线时[进军]被拒", (not ok) and adv.position == "后方")
@@ -83,8 +83,8 @@ def main():
 
     # ---------- 指令卡：总攻命令（进军）/ 战术撤退（召集） ----------
     g4, s1, s2, db4 = make_game("苏联", "英国")
-    back = deploy(g4, s1, db4["步兵班"], "后方")
-    front = deploy(g4, s1, db4["步兵班"], "前线")
+    back = deploy(g4, s1, db4["第一步兵团"], "后方")
+    front = deploy(g4, s1, db4["第一步兵团"], "前线")
     front.defense = 1                      # 最危急的前线单位
     front.moved = True
     order_adv = db4["总攻命令"]

@@ -284,10 +284,17 @@ def main():
         sys.executable = orig_exe
 
     # onefile 模拟
+    # ⚠ v1.6.3.9 起 has_meipass() 先查 sys.frozen（onedir 也设 _MEIPASS），
+    #   所以模拟 onefile 必须同时设 frozen=True，否则永远判 False。
+    frozen_set = False
     try:
+        if not getattr(sys, "frozen", False):
+            sys.frozen = True
+            frozen_set = True
         sys._MEIPASS = tempfile.gettempdir()
         check("onefile：can_self_update() 为 None（不能就地更新）",
-              upd.can_self_update() is None)
+              upd.can_self_update() is None,
+              str(upd.can_self_update()))
         t = upd.UpdateTask("1.0.0.0")
         started = t.start()
         check("onefile：UpdateTask.start() 拒绝启动并给出原因",
@@ -298,6 +305,11 @@ def main():
             del sys._MEIPASS
         except AttributeError:
             pass
+        if frozen_set:
+            try:
+                del sys.frozen
+            except AttributeError:
+                pass
 
     return finish()
 

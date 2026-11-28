@@ -114,6 +114,26 @@ def labels_of(w):
     return found
 
 
+def all_buttons(w):
+    """收集窗口内所有 Button 控件本体（递归，含嵌套 Frame 里的）"""
+    out = []
+
+    def rec(x):
+        try:
+            kids = x.winfo_children()
+        except tk.TclError:
+            return
+        for c in kids:
+            try:
+                if isinstance(c, tk.Button):
+                    out.append(c)
+            except tk.TclError:
+                pass
+            rec(c)
+    rec(w)
+    return out
+
+
 def buttons_of(w):
     """收集窗口内所有 Button 的文本（递归，含嵌套 Frame 里的）"""
     out = []
@@ -152,6 +172,8 @@ def main():
         print(f"  (启动时自动关闭了 {closed} 个初始弹窗)")
 
     # ---------------------------------------------------------- 1
+    # 2026-11 设置窗改三分页（外观/声音/其它）：两个按钮挪进「其它」页的
+    # 嵌套 row Frame —— 这里切到「其它」页并递归收集按钮文本。
     print("1. 主界面设置窗含两个按钮")
     close_all_tops(app)
     app.open_start_settings()
@@ -159,12 +181,15 @@ def main():
     tops = find_toplevels(app, role="start_settings")
     check("设置窗已打开", len(tops) == 1, len(tops))
     st = tops[0]
-    texts = []
-    for c in st.winfo_children():
-        if isinstance(c, tk.Button):
-            texts.append(c.cget("text"))
-    check("含「操作说明」按钮", any("操作说明" in t for t in texts), texts)
-    check("含「关键词说明」按钮", any("关键词" in t for t in texts), texts)
+    # 页签按钮在 bar Frame 里（win 的孙子），必须递归找
+    more_tab = next((b for b in all_buttons(st)
+                     if str(b.cget("text")) == i18n.t("settings_tab_more")), None)
+    if more_tab is not None:
+        more_tab.invoke()
+        pump(app)
+    texts = buttons_of(st)
+    check("含「操作说明」按钮", any("操作说明" in str(t) for t in texts), texts)
+    check("含「关键词说明」按钮", any("关键词" in str(t) for t in texts), texts)
     # 设置窗里的「关键词说明」按钮真的能开出说明窗
     st.destroy()
     pump(app)
@@ -176,11 +201,15 @@ def main():
     kw, tops = open_guide_and_get(app)
     check("说明窗已打开", len(tops) == 1, roles_of(app))
     if kw is None:
-        check("渲染出的 Label 数量合理（>=80）", False, "窗口未找到")
+        check("渲染出的 Label 数量合理", False, "窗口未找到")
     else:
-        # 4 个分组标题 + 38 条目×(名称+说明) + 标题/副标题 = 4+76+2 = 82
-        check("渲染出的 Label 数量合理（>=80）", count_labels(kw) >= 80,
-              count_labels(kw))
+        # 窗口渲染 = 标题+副标题(2) + 每组标题(1) + 每条目(名称+说明)(2)；
+        # 条目数随词条增删浮动（38→36：疲劳并入士气伤害），按引擎当前值断言
+        groups = gui.core.keyword_guide("zh")
+        total_rows = sum(len(rows) for _, rows in groups)
+        expect = 2 + len(groups) + total_rows * 2
+        check("渲染出的 Label 数量合理", count_labels(kw) == expect,
+              f"实际 {count_labels(kw)} / 期望 {expect}")
         found = labels_of(kw)
         check("含分组标题「单位关键词」", "单位关键词" in found)
         check("含分组标题「触发类关键词」", "触发类关键词" in found)

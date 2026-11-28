@@ -37,7 +37,9 @@ def check(name, cond, extra=""):
 
 def find_toplevel(app, role):
     for w in app.winfo_children():
-        if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == role:
+        # ⚠ destroy 后 winfo_children 可能留幽灵引用，必须过滤存活
+        if (isinstance(w, tk.Toplevel) and getattr(w, "role", "") == role
+                and w.winfo_exists()):
             return w
     return None
 
@@ -77,7 +79,29 @@ def make_app():
         json.dump({"language": "zh"}, fh)
     i18n._SETTINGS_PATH = tmp
     gui.App.open_update_dialog = lambda self, auto=False: None
-    app = gui.App()
+    # App.__init__ 在游客态会 after(300, _account_dialog) 自动弹账号窗；
+    # 测试跑得慢时它会在步骤中途触发，弹出的游客登录窗（无删除按钮）
+    # 与真实账号窗同为 role="account"，find_toplevel 会取到旧窗 → 偶发崩。
+    # 这里记录并取消该定时器。
+    pending = []
+    orig_after = tk.Misc.after
+
+    def rec_after(self, ms, fn=None, *a):
+        rid = orig_after(self, ms, fn, *a)
+        if fn is not None and getattr(fn, "__name__", "") == "_account_dialog":
+            pending.append(rid)
+        return rid
+
+    tk.Misc.after = rec_after
+    try:
+        app = gui.App()
+    finally:
+        tk.Misc.after = orig_after
+    for rid in pending:
+        try:
+            app.after_cancel(rid)
+        except Exception:                        # noqa: BLE001
+            pass
     app.geometry("1100x760+20+20")
     try:
         app.attributes("-fullscreen", False)
