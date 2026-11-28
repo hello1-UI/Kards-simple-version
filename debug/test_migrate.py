@@ -124,21 +124,21 @@ def main():
         # ---------- 3. 服务器已有同名账号、密码不同 ----------
         print("\n===== 3. 服务器同名账号密码冲突 =====")
         acc.logout()
-        r = raw_msg(PORT, {"m": "register", "user": "Clash", "pw": "srvpw"})
+        r = raw_msg(PORT, {"m": "register", "user": "Clash", "pw": "srvpw12"})
         check("服务器预注册 Clash", r and r.get("m") == "auth_ok", str(r))
         # 本地造一个同名但密码不同的账号（先摘掉 remote 回本地后端）
         acc.set_remote(None)
-        okr, err = acc.register("Clash", "locpw")
+        okr, err = acc.register("Clash", "locpw12")
         check("本地注册同名 Clash", okr, err)
         acc.logout()
         acc.set_remote(link(), f"127.0.0.1:{PORT}")
-        okr, err = acc.login("Clash", "locpw")
+        okr, err = acc.login("Clash", "locpw12")
         check("密码冲突被拒且提示清晰",
               not okr and "服务器" in err and "密码" in err, err)
 
         # ---------- 4. 服务器账号 + 纯错误密码（不该触发迁移） ----------
         print("\n===== 4. 错误密码不迁移 =====")
-        okr, err = acc.login("Clash", "srvpw")
+        okr, err = acc.login("Clash", "srvpw12")
         check("服务器密码可正常登录", okr, err)
         acc.logout()
         okr, err = acc.login("Clash", "totally-wrong")
@@ -147,7 +147,7 @@ def main():
 
         # ---------- 5. stats_seed 防灌水（只认全 0 账号） ----------
         print("\n===== 5. stats_seed 防灌水 =====")
-        r = raw_msg(PORT, {"m": "register", "user": "SeedT", "pw": "pw1234"})
+        r = raw_msg(PORT, {"m": "register", "user": "SeedT", "pw": "pw123456"})
         check("注册 SeedT", r and r.get("m") == "auth_ok", str(r))
         # 裸连接没握手成功前不能 dispatch；重新连并 resume
         s = socket.create_connection(("127.0.0.1", PORT), timeout=6)
@@ -167,7 +167,7 @@ def main():
         acc.set_remote(lk3, f"127.0.0.1:{PORT}")
         okr, _ = acc.connect()   # 会话是 MigUser 的；SeedT 用新连接查不了
         # 直接用裸连接 + 新 token 查：重新登录 SeedT
-        rep = lk3.request({"m": "login", "user": "SeedT", "pw": "pw1234"}, key="login")
+        rep = lk3.request({"m": "login", "user": "SeedT", "pw": "pw123456"}, key="login")
         check("SeedT 重新登录", rep and rep.get("m") == "auth_ok", str(rep))
         rep = lk3.request({"m": "stats"}, key="stats")
         st = (rep or {}).get("stats") or {}

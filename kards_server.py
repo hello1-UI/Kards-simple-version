@@ -46,6 +46,15 @@ PRINT_LOCK = threading.Lock()
 MAX_LINE = 256 * 1024             # 单条消息上限（字节）——防御内存 DoS：
                                   # 恶意客户端发超大行不换行，缓冲会无限涨
 
+# ---- 登录防爆破（防盗号核心闸门）----
+# 连续失败 AUTH_FAIL_LIMIT 次（窗口 AUTH_FAIL_WINDOW 秒内）即锁定
+# AUTH_LOCK_S 秒。按账号计 —— 桥接后面所有连接都来自 127.0.0.1，
+# 按 IP 计在云端形同虚设；按账号计攻击者无论换多少源都得啃同一把锁。
+# 锁定有过期时间，被恶意锁定的受害者最多等 10 分钟即可正常登录。
+AUTH_FAIL_LIMIT = 5
+AUTH_FAIL_WINDOW = 15 * 60        # 15 分钟内的失败才累计
+AUTH_LOCK_S = 10 * 60             # 触发后锁定 10 分钟
+
 
 def user_data_db():
     """打包运行时的数据库路径（%USERPROFILE%\\AppData\\Kards-Simple-Version）。
@@ -129,6 +138,12 @@ class Store:
                     updated INTEGER NOT NULL,
                     PRIMARY KEY (name, nation, title)
                 );
+                CREATE TABLE IF NOT EXISTS auth_fail (
+                    name        TEXT PRIMARY KEY,
+                    fails       INTEGER NOT NULL,
+                    last_fail   INTEGER NOT NULL,
+                    locked_until INTEGER NOT NULL DEFAULT 0
+                );
                 """
             )
             # ---- 老库迁移：rank 列是后加的段位/排行榜状态（JSON） ----
@@ -181,8 +196,58 @@ class Store:
             ok = stored == self.hash_pw(rows[0]["salt"], pw)
         if not ok:
             return None, "用户名或密码错误"
+        # 迁移账号的 sha256 无迭代、离线爆破极快 —— 第一次明文登录
+        # 验证通过就无缝升级成 PBKDF2，玩家无感，防盗能力对齐原生账号。
+        if stored.startswith("sha256:"):
+            salt = secrets.token_hex(16)
+            self.x("UPDATE users SET salt=?, pw=? WHERE name=?",
+                   (salt, self.hash_pw(salt, pw), name))
         self.x("UPDATE users SET last_seen=? WHERE name=?", (int(time.time()), name))
         return self.new_session(name), ""
+
+    # ---- 登录防爆破 ----
+
+    def lock_left(self, name):
+        """该账号剩余锁定秒数（0 = 未锁定；锁过期自动清除）。"""
+        rows = self.q("SELECT locked_until FROM auth_fail WHERE name=?", (name,))
+        if not rows:
+            return 0
+        left = rows[0]["locked_until"] - time.time()
+        if left <= 0:
+            return 0
+        return int(left) + 1
+
+    def auth_fail(self, name):
+        """记一次失败；触发锁定返回锁定秒数，否则返回 0。"""
+        now = time.time()
+        rows = self.q("SELECT fails,last_fail,locked_until FROM auth_fail WHERE name=?",
+                      (name,))
+        if rows and now - rows[0]["last_fail"] <= AUTH_FAIL_WINDOW:
+            fails = rows[0]["fails"] + 1
+        else:
+            fails = 1                     # 窗口外的老失败不再累计
+        locked = now + AUTH_LOCK_S if fails >= AUTH_FAIL_LIMIT else 0
+        self.x("INSERT INTO auth_fail(name,fails,last_fail,locked_until) "
+               "VALUES(?,?,?,?) ON CONFLICT(name) DO UPDATE SET "
+               "fails=excluded.fails, last_fail=excluded.last_fail, "
+               "locked_until=excluded.locked_until",
+               (name, fails, int(now), int(locked)))
+        return AUTH_LOCK_S if locked else 0
+
+    def auth_clear(self, name):
+        self.x("DELETE FROM auth_fail WHERE name=?", (name,))
+
+    def verify_pw(self, name, pw):
+        """明文密码校验（改密码时验证旧密码用）。"""
+        rows = self.q("SELECT salt,pw FROM users WHERE name=?", (name,))
+        if not rows:
+            return False
+        stored = rows[0]["pw"]
+        if stored.startswith("sha256:"):
+            import hashlib as _h
+            return stored[7:] == _h.sha256(
+                (rows[0]["salt"] + pw).encode("utf-8")).hexdigest()
+        return stored == self.hash_pw(rows[0]["salt"], pw)
 
     def new_session(self, name):
         tok = secrets.token_urlsafe(24)
@@ -251,12 +316,20 @@ class Store:
         rows = self.q("SELECT name FROM users WHERE email=?", (email,))
         return rows[0]["name"] if rows else None
 
-    def set_password(self, name, pw):
-        """重置密码并踢掉该账号所有会话（防旧 token 继续用）"""
+    def set_password(self, name, pw, keep_token=None):
+        """重置/修改密码并作废该账号所有会话（防旧 token 继续用）。
+
+        keep_token：改密码（change_pw）场景下保留发起方自己的会话 ——
+        改密码不该把正在改的人踢下线；找回密码（reset）场景不保留。
+        """
         salt = secrets.token_hex(16)
         self.x("UPDATE users SET salt=?, pw=? WHERE name=?",
                (salt, self.hash_pw(salt, pw), name))
-        self.x("DELETE FROM sessions WHERE name=?", (name,))
+        if keep_token:
+            self.x("DELETE FROM sessions WHERE name=? AND token<>?",
+                   (name, keep_token))
+        else:
+            self.x("DELETE FROM sessions WHERE name=?", (name,))
 
     def stats_add(self, name, result):
         if result not in ("win", "lose", "draw"):
@@ -680,20 +753,22 @@ class ClientHandler(socketserver.BaseRequestHandler):
             return "close"
         if t == "reset_password":
             email = (msg.get("email") or "").strip()
-            # 校验顺序：先做不消耗状态的检查（密码规则），最后才消费
-            # 验证码 —— 否则密码太短这种低级错误也会白白作废一个码
+            # 校验顺序：先做不消耗状态的检查（密码规则 / 账号存在 /
+            # 与用户名相同），最后才消费验证码 —— 否则密码太短这种
+            # 低级错误也会白白作废一个码
             err = norm_pw(msg.get("new_pw") or "")
+            name = DB.find_by_email(email) if not err else None
+            if not err and not name:
+                err = "该邮箱未绑定任何账号"
+            if not err:
+                err = norm_pw(msg["new_pw"], name)
             if not err:
                 err = verify_email_code("reset", email, msg.get("code"))
             if not err:
-                name = DB.find_by_email(email)
-                if not name:
-                    err = "该邮箱未绑定任何账号"
-                else:
-                    DB.set_password(name, msg["new_pw"])
-                    log(f"密码已重置: {name}（via {mask_email(email)}）")
-                    self.send({"m": "reset_ok", "user": name})
-                    return "close"
+                DB.set_password(name, msg["new_pw"])
+                log(f"密码已重置: {name}（via {mask_email(email)}）")
+                self.send({"m": "reset_ok", "user": name})
+                return "close"
             self.send({"m": "err", "err": err or "重置失败"})
             return "close"
 
@@ -702,7 +777,7 @@ class ClientHandler(socketserver.BaseRequestHandler):
             if err:
                 self.send({"m": "auth_err", "err": err})
                 return "retry"
-            err = norm_pw(msg.get("pw"))
+            err = norm_pw(msg.get("pw"), name)
             if err:
                 self.send({"m": "auth_err", "err": err})
                 return "retry"
@@ -717,13 +792,25 @@ class ClientHandler(socketserver.BaseRequestHandler):
                 self.send({"m": "auth_err", "err": err})
                 return "retry"
             with DB_LOCK:
-                tok, err = DB.login(name, msg.get("pw") or "")
+                left = DB.lock_left(name)
+                if left:
+                    tok, err = None, f"失败次数过多，账号已临时锁定，{left} 秒后可再试"
+                else:
+                    tok, err = DB.login(name, msg.get("pw") or "")
             if err:
                 # 拖慢在线爆破：PBKDF2 6 万轮已经不便宜，再垫 0.3s，
                 # 自动化脚本逐个试密码的成本显著上升（正常玩家无感）
                 time.sleep(0.3)
+                if not left:
+                    # 记失败次数，连错 AUTH_FAIL_LIMIT 次锁定 AUTH_LOCK_S 秒
+                    with DB_LOCK:
+                        lock = DB.auth_fail(name)
+                    if lock:
+                        err = f"失败次数过多，账号已临时锁定，{lock} 秒后可再试"
                 self.send({"m": "auth_err", "err": err})
                 return "retry"
+            with DB_LOCK:
+                DB.auth_clear(name)
         elif t == "adopt":
             # 本机免密恢复：自己开的服，账号本来就在这台机器上，
             # 不该因为"换了个服务器实例"就要求重新输密码。
@@ -815,6 +902,35 @@ class ClientHandler(socketserver.BaseRequestHandler):
         elif t == "email_of":
             self.send({"m": "email_of", "email": mask_email(DB.email_of(self.name)),
                        "bound": DB.email_of(self.name) is not None})
+        elif t == "change_pw":
+            # 修改密码：必须验证旧密码（防会话被窃后直接换锁）；
+            # 旧密码也走防爆破计数 —— 偷到会话的人同样啃不动这把锁。
+            # 成功后作废其它所有会话，但保留当前连接（别把自己踢下线）。
+            old, new = msg.get("old") or "", msg.get("new") or ""
+            with DB_LOCK:
+                left = DB.lock_left(self.name)
+            if left:
+                self.send({"m": "err",
+                           "err": f"失败次数过多，已临时锁定，{left} 秒后再试"})
+            elif not DB.verify_pw(self.name, old):
+                time.sleep(0.3)
+                with DB_LOCK:
+                    lock = DB.auth_fail(self.name)
+                err = "旧密码错误"
+                if lock:
+                    err += f"，失败次数过多，已临时锁定 {lock} 秒"
+                self.send({"m": "err", "err": err})
+            else:
+                with DB_LOCK:
+                    DB.auth_clear(self.name)
+                err = norm_pw(new, self.name)
+                if err:
+                    self.send({"m": "err", "err": err})
+                else:
+                    with DB_LOCK:
+                        DB.set_password(self.name, new, keep_token=self.token)
+                    log(f"密码已修改: {self.name}")
+                    self.send({"m": "change_ok"})
         elif t == "email_code":
             # 登录态发码（purpose=bind）；reset 走握手一次性通道，到不了这里
             ok, err, left = issue_email_code("bind", msg.get("email"))
@@ -1219,11 +1335,15 @@ def norm_name(name):
     return name, ""
 
 
-def norm_pw(pw):
-    if not pw or len(pw) < 4:
-        return "密码至少 4 位"
+def norm_pw(pw, name=None):
+    # 只约束「新设置的密码」（注册 / 改密 / 找回重置）；存量账号的旧密码
+    # 登录不受影响 —— 强制老用户改密只会把人挡在门外。
+    if not pw or len(pw) < 6:
+        return "密码至少 6 位（建议混合字母和数字）"
     if len(pw) > 64:
         return "密码过长（最多 64 位）"
+    if name and pw.strip().lower() == name.strip().lower():
+        return "密码不能与用户名相同"
     return ""
 
 
@@ -1432,6 +1552,12 @@ def main():
         while True:                          # 验证码条目过期清理，量小 10 分钟一次足够
             time.sleep(600)
             cleanup_email_codes()
+            # 过期会话一并清理（30 天没登录的 token 一直躺在库里没意义）
+            try:
+                DB.x("DELETE FROM sessions WHERE created < ?",
+                     (int(time.time()) - SESSION_TTL,))
+            except Exception:                # noqa: BLE001  清理失败不致命
+                pass
 
     threading.Thread(target=_email_gc, daemon=True).start()
     ecfg = email_config()

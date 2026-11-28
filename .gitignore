@@ -61,3 +61,7 @@ android/local.properties
 debug/java_cli/out/
 .wbapp_*.genie
 SHA256SUMS.music.txt
+
+# 桥接本地测试残留
+cloud/kards_relay/data/
+cloud/kards_relay/*.db*

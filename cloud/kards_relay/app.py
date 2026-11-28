@@ -18,6 +18,7 @@
 安全：所有内部连接源都是 127.0.0.1，必须关闭 is_local_peer（adopt
 免密接管），否则任何互联网用户都能免密接管任意账号。
 """
+import collections
 import json
 import os
 import secrets
@@ -42,6 +43,76 @@ ks.is_local_peer = lambda ip: False
 MAX_SESSIONS = 400
 SESSION_IDLE = 150          # HTTP 侧静默超过该秒数视为掉线
 BODY_LIMIT = 65536
+
+# ---- 按真实客户端 IP 限流（防盗号：内嵌服务器看到的源全是 127.0.0.1，
+# 按 IP 管在云端形同虚设；桥接层握着真实 IP，只能在 HTTP 侧管）----
+MAX_SESSIONS_PER_IP = 8     # 单 IP 并发会话上限
+SESSIONS_PER_MIN = 6        # 单 IP 每分钟最多建几个会话（/c）
+MSG_PER_10S = 60            # 单 IP 每 10 秒最多几条上行（/s）；
+                            # 正常客户端 25s 心跳 + 操作，远够不着
+_IP_LOCK = threading.Lock()
+_IP_SESSIONS = {}           # ip -> set(sid)
+_IP_SESSION_TS = {}         # ip -> deque[time]（/c 建会话时间戳）
+_IP_MSG_TS = {}             # ip -> deque[time]（/s 上行时间戳）
+_SID_IP = {}                # sid -> ip（会话结束后归还并发配额）
+
+
+def _prune_ip_state(now):
+    """顺手清掉 10 分钟没活动的 IP 记录，防内存缓涨。"""
+    for d in (_IP_SESSION_TS, _IP_MSG_TS):
+        for ip in [k for k, v in d.items()
+                   if not v or now - v[-1] > 600]:
+            d.pop(ip, None)
+
+
+def ip_session_gate(ip):
+    """/c 闸门：返回 None 表示放行，否则返回 429 原因。"""
+    now = time.time()
+    with _IP_LOCK:
+        _prune_ip_state(now)
+        ts = _IP_SESSION_TS.setdefault(ip, collections.deque())
+        while ts and now - ts[0] > 60:
+            ts.popleft()
+        if len(ts) >= SESSIONS_PER_MIN:
+            return "建会话太频繁，稍后再试"
+        sids = _IP_SESSIONS.get(ip) or set()
+        if len(sids) >= MAX_SESSIONS_PER_IP:
+            return "该网络的连接数已达上限"
+        ts.append(now)
+        return None
+
+
+def ip_session_open(ip, sid):
+    with _IP_LOCK:
+        _IP_SESSIONS.setdefault(ip, set()).add(sid)
+
+
+def ip_session_close(ip, sid):
+    with _IP_LOCK:
+        s = _IP_SESSIONS.get(ip)
+        if s is not None:
+            s.discard(sid)
+
+
+def _release_sid(sid):
+    """会话结束（客户端关闭 / GC 回收）后归还该 IP 的并发配额。"""
+    ip = _SID_IP.pop(sid, None)
+    if ip is not None:
+        ip_session_close(ip, sid)
+
+
+def ip_msg_gate(ip):
+    """/s 闸门：返回 None 放行，否则 429 原因。"""
+    now = time.time()
+    with _IP_LOCK:
+        _prune_ip_state(now)
+        ts = _IP_MSG_TS.setdefault(ip, collections.deque())
+        while ts and now - ts[0] > 10:
+            ts.popleft()
+        if len(ts) >= MSG_PER_10S:
+            return "发送太频繁，稍后再试"
+        ts.append(now)
+        return None
 
 
 def _pick_db_path():
@@ -163,6 +234,7 @@ def _gc_loop():
             s.kill()
             with _SESH_LOCK:
                 _SESSIONS.pop(s.sid, None)
+            _release_sid(s.sid)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -275,6 +347,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"err": "bad body"})
             return
         if u.path == "/c":
+            ip = self.client_address[0]
+            err = ip_session_gate(ip)
+            if err:
+                self._json(429, {"err": err})
+                return
             with _SESH_LOCK:
                 if len([s for s in _SESSIONS.values() if s.alive]) >= MAX_SESSIONS:
                     self._json(429, {"err": "服务器繁忙"})
@@ -286,6 +363,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with _SESH_LOCK:
                 _SESSIONS[s.sid] = s
+            ip_session_open(ip, s.sid)
+            _SID_IP[s.sid] = ip
             self._json(200, {"sid": s.sid})
             return
         try:
@@ -295,6 +374,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         sid = obj.get("sid")
         if u.path == "/s":
+            err = ip_msg_gate(self.client_address[0])
+            if err:
+                self._json(429, {"err": err})
+                return
             s = self._sess(sid)
             if s is None:
                 self._json(200, {"gone": True})
@@ -312,6 +395,7 @@ class Handler(BaseHTTPRequestHandler):
                 s.kill()
                 with _SESH_LOCK:
                     _SESSIONS.pop(s.sid, None)
+            _release_sid(sid)
             self._json(200, {"ok": True})
             return
         self._json(404, {"err": "not found"})

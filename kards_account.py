@@ -27,6 +27,7 @@ import os
 import re
 import secrets
 import shutil
+import sys
 import time
 
 from kards_engine import DATA_DIR
@@ -142,23 +143,77 @@ def _hash(salt, pw):
     return hashlib.sha256((salt + pw).encode("utf-8")).hexdigest()
 
 
-def _load_session():
+# ---- 本地凭据落盘加密（Windows DPAPI，纯标准库 ctypes）----
+# accounts.json / session.json 里存的是账号口令哈希与会话 token —— 明文
+# 落盘一旦文件被拷走（恶意软件 / 网盘同步 / 别人借用电脑），弱密码可被
+# 离线秒破、token 可直接顶号。DPAPI 把密文绑定到「当前 Windows 用户」，
+# 换个用户或换个机器都解不开，拷走文件也只是一串废字节。
+# 兼容：旧明文文件照常能读，下次保存时自动转为加密。
+_DPAPI_MAGIC = b"DPAPI1:"
+_ON_WINDOWS = sys.platform == "win32"
+
+
+def _dpapi_crypt(data, protect):
+    import ctypes
+    from ctypes import wintypes
+
+    class BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD),
+                    ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    src = ctypes.create_string_buffer(data, len(data))
+    bin_ = BLOB(len(data), ctypes.cast(src, ctypes.POINTER(ctypes.c_char)))
+    out = BLOB()
+    fn = (ctypes.windll.crypt32.CryptProtectData if protect
+          else ctypes.windll.crypt32.CryptUnprotectData)
+    if not fn(ctypes.byref(bin_), None, None, None, None, 0, ctypes.byref(out)):
+        raise OSError("DPAPI 失败")
     try:
-        with open(_SESSION, encoding="utf-8") as f:
-            d = json.load(f)
-        if not isinstance(d, dict):
-            raise ValueError
-        return d
-    except (OSError, ValueError):
+        return ctypes.string_at(out.pbData, out.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(out.pbData)
+
+
+def _read_creds(path):
+    """读凭据文件 → dict。旧明文 / 新加密都能读；损坏返回空。"""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return {}
+    if raw.startswith(_DPAPI_MAGIC):
+        try:
+            raw = _dpapi_crypt(raw[len(_DPAPI_MAGIC):], protect=False)
+        except OSError:
+            return {}                     # 换用户/换机器解不开 → 视作无凭据
+    try:
+        d = json.loads(raw.decode("utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (ValueError, UnicodeDecodeError):
         return {}
 
 
-def _save_session(d):
+def _write_creds(path, d):
+    """写凭据文件。Windows 下加密落盘；加密失败退回明文（宁明文不丢数据）。"""
+    raw = json.dumps(d, ensure_ascii=False, indent=2).encode("utf-8")
+    if _ON_WINDOWS:
+        try:
+            raw = _DPAPI_MAGIC + _dpapi_crypt(raw, protect=True)
+        except OSError:
+            pass                          # 退回明文
     try:
-        with open(_SESSION, "w", encoding="utf-8") as f:
-            json.dump(d, f, ensure_ascii=False, indent=2)
+        with open(path, "wb") as f:
+            f.write(raw)
     except OSError:
         pass
+
+
+def _load_session():
+    return _read_creds(_SESSION)
+
+
+def _save_session(d):
+    _write_creds(_SESSION, d)
 
 
 # ---------------------------------------------------------------- 服务器后端
@@ -445,6 +500,38 @@ def bind_email(email, code):
     if rep.get("m") == "bind_email_ok":
         return True, rep.get("email") or ""
     return False, rep.get("err") or "绑定失败"
+
+
+def change_password(old, new):
+    """修改密码（需验旧密码）。
+
+    服务器后端：change_pw 协议 —— 服务器作废其它会话（本机保留）；
+    本地后端：直接重哈希。两边的本地账号哈希都同步更新 —— 免密接管 /
+    本地校验用的就是这份哈希，不同步会出现「改了密码本地还认旧密码」
+    的裂缝。
+    """
+    if len(new or "") < 6:
+        return False, "新密码至少 6 位（建议混合字母和数字）"
+    name = current()
+    if _BACKEND == "server":
+        rep = _rpc({"m": "change_pw", "old": old, "new": new},
+                   key="change_pw", timeout=15.0)
+        if rep is None:
+            return False, "服务器无响应"
+        if rep.get("m") != "change_ok":
+            return False, rep.get("err") or "修改失败"
+    else:
+        u = _load()["users"].get(name)
+        if not u or u["pw"] != _hash(u["salt"], old or ""):
+            return False, "旧密码错误"
+    if name:
+        db = _load()
+        u = db["users"].get(name)
+        if u is not None:
+            u["salt"] = secrets.token_hex(8)
+            u["pw"] = _hash(u["salt"], new)
+            _save(db)
+    return True, ""
 
 
 def connect(name_hint=None):

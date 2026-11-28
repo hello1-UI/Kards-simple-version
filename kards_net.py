@@ -237,6 +237,7 @@ _REPLY_MAP = {
     # 邮箱验证码（绑定邮箱；找回密码的 reset 走 one_shot，不经这里）
     "email_code":   _m_is("email_code_ok", "err"),
     "bind_email":   _m_is("bind_email_ok", "err"),
+    "change_pw":    _m_is("change_ok", "err"),
     "email_of":     _m_is("email_of", "err"),
 }
 

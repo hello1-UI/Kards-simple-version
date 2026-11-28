@@ -125,7 +125,13 @@ def main():
     srv.email_config = saved_cfg
 
     # ---------- 1. 找回密码：发码 ----------
+    # 先注册玩家二并绑定邮箱 —— 新校验顺序下「邮箱未绑定」是零消耗
+    # 短路，不绑的话错码段根本轮不到验证码出场
     MAIL = "player1@qq.com"
+    c = Conn()
+    rep = c.handshake("玩家二", "pw2222")
+    c.close()
+    srv.DB.bind_email("玩家二", MAIL)
     rep = net_one_shot({"m": "email_code", "purpose": "reset", "email": MAIL})
     check("重置发码成功", rep and rep.get("m") == "email_code_ok", rep)
     code = last_code(MAIL)
@@ -167,11 +173,9 @@ def main():
     c.close()
 
     c = Conn()
-    rep = c.handshake("玩家二", "pw2222")
-    tok_old = rep.get("token")               # 玩家二的会话，重置后应被踢掉
+    rep = c.handshake("玩家二", "pw2222")   # 已注册 → 登录；新会话用于验证「重置踢会话」
+    tok_old = rep.get("token")
     c.close()
-    # 直接用 Store 绑定（模拟玩家二先前绑过邮箱）
-    srv.DB.bind_email("玩家二", MAIL)
 
     srv._email_codes.clear()
     rep = net_one_shot({"m": "email_code", "purpose": "reset", "email": MAIL})
@@ -183,7 +187,7 @@ def main():
     check("错码重置被拒", rep and rep.get("m") == "err", rep)
     rep = net_one_shot({"m": "reset_password", "email": MAIL, "code": code,
                         "new_pw": "ab1"})
-    check("新密码太短被拒", rep and "至少 4 位" in (rep.get("err") or ""), rep)
+    check("新密码太短被拒", rep and "至少 6 位" in (rep.get("err") or ""), rep)
     rep = net_one_shot({"m": "reset_password", "email": MAIL, "code": code,
                         "new_pw": "newpass1"})
     check("正确码重置成功且回显用户名",

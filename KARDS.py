@@ -2133,6 +2133,10 @@ class App(tk.Tk):
                       font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
                       command=lambda: self._confirm_delete_account(win)
                       ).pack(side="left", padx=6)
+            tk.Button(row, text=i18n.t("acct_chpw"), bg=BTN, fg=TEXT,
+                      font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
+                      command=lambda: self._change_pw_dialog(win)
+                      ).pack(side="left", padx=6)
             if account.backend() == "server" and account.online():
                 tk.Button(row, text=i18n.t("acct_bind_email"), bg=INFO, fg=TEXT,
                           font=FONT, bd=0, padx=14, pady=6, cursor="hand2",
@@ -2238,6 +2242,63 @@ class App(tk.Tk):
 
         btn.configure(command=fire)
         return btn
+
+    def _change_pw_dialog(self, parent=None):
+        """修改密码：验旧密码 → 设新密码。服务器/本地后端都支持。"""
+        for w in self.winfo_children():
+            if isinstance(w, tk.Toplevel) and getattr(w, "role", "") == "chpw":
+                try:
+                    w.deiconify(); w.lift(); w.focus_force()
+                    return
+                except tk.TclError:
+                    pass
+        win = tk.Toplevel(self)
+        win.role = "chpw"
+        win.title(i18n.t("chpw_title"))
+        win.configure(bg=BG)
+        win.geometry("420x330")
+        win.transient(self)
+
+        tk.Label(win, text=i18n.t("chpw_title"), bg=BG, fg=TEXT,
+                 font=FONT_XL).pack(pady=(16, 4))
+        tk.Label(win, text=i18n.t("chpw_hint"), bg=BG, fg=DIM,
+                 font=FONT_S, wraplength=380, justify="left").pack(pady=(0, 8))
+        info = tk.Label(win, text="", bg=BG, fg=RED, font=FONT_S,
+                        wraplength=380, justify="left")
+        info.pack()
+
+        def info_set(txt):
+            info.configure(text=txt)
+
+        def field(label, show=""):
+            tk.Label(win, text=label, bg=BG, fg=DIM,
+                     font=FONT_S).pack(pady=(4, 2))
+            e = tk.Entry(win, font=FONT, width=22, show=show, bg=PANEL,
+                         fg=TEXT, insertbackground=TEXT, relief="flat")
+            e.pack(pady=2)
+            return e
+
+        e_old = field(i18n.t("chpw_old"), show="•")
+        e_new = field(i18n.t("chpw_new"), show="•")
+        e_cfm = field(i18n.t("chpw_confirm"), show="•")
+
+        def do_change():
+            old, new, cfm = e_old.get(), e_new.get(), e_cfm.get()
+            if new != cfm:
+                info_set(i18n.t("chpw_mismatch"))
+                return
+            ok, res = account.change_password(old, new)
+            if ok:
+                messagebox.showinfo(i18n.t("chpw_title"),
+                                    i18n.t("chpw_ok"), parent=win)
+                win.destroy()
+            else:
+                info_set(res)
+
+        tk.Button(win, text=i18n.t("chpw_confirm_btn"), bg=PRIMARY, fg=TEXT,
+                  font=FONT_B, bd=0, padx=22, pady=7, cursor="hand2",
+                  command=do_change).pack(pady=14)
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
 
     def _bind_email_dialog(self, parent):
         """绑定邮箱：登录态下向服务器发码 → 输码 → 绑定。"""
