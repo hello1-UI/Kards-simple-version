@@ -60,3 +60,4 @@ android/local.properties
 # 本地编译产物与 WorkBuddy 会话文件
 debug/java_cli/out/
 .wbapp_*.genie
+SHA256SUMS.music.txt
